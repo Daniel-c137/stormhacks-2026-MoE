@@ -1,4 +1,5 @@
-"""`brain report`: a transcript in, a review file of the report and task drafts out."""
+"""`brain report` turns a transcript into a review file of the report and task drafts.
+`brain push` creates Jira issues for the drafts a named person approved."""
 
 import argparse
 import asyncio
@@ -6,8 +7,11 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from brain.config import Settings
+from brain.jira import ApprovalRequired, JiraPusher, JiraUnavailable, apply_results, jira_config
 from brain.llm import LLM, LLMError, MockLLM, make_llm
 from brain.report import ProcessedMeeting, ReportExtraction, build_report, load_transcript
+from contracts import TaskPushRequest
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -31,6 +35,14 @@ def main(argv: list[str] | None = None) -> int:
         help="use MockLLM with this scripted ReportExtraction instead of Gemini",
     )
     report.set_defaults(run=run_report)
+
+    push = commands.add_parser("push", help="create Jira issues for drafts a person approved")
+    push.add_argument("review", type=Path, help="review file written by 'brain report'")
+    which = push.add_mutually_exclusive_group(required=True)
+    which.add_argument("--task", action="append", dest="task_ids", metavar="TASK_ID")
+    which.add_argument("--all", action="store_true", help="every draft still marked include")
+    push.add_argument("--approved-by", required=True, metavar="NAME")
+    push.set_defaults(run=run_push)
 
     args = parser.parse_args(argv)
     return args.run(args)
@@ -67,3 +79,30 @@ def run_report(args: argparse.Namespace) -> int:
     print(f"{len(report.tasks)} task drafts, {len(report.decisions)} decisions from {source}")
     print(f"Review and edit {out} before pushing anything.")
     return 0
+
+
+def run_push(args: argparse.Namespace) -> int:
+    review = ProcessedMeeting.model_validate_json(args.review.read_text())
+    try:
+        config = jira_config(Settings())
+    except JiraUnavailable as e:
+        sys.exit(f"brain push: {e}")
+    request = TaskPushRequest(
+        task_ids=args.task_ids or [t.id for t in review.report.tasks if t.include],
+        destination="jira",
+        approved_by=args.approved_by,
+    )
+    try:
+        results = asyncio.run(JiraPusher(config).push(review, request))
+    except ApprovalRequired as e:
+        sys.exit(f"brain push: {e}")
+
+    review.report.tasks = apply_results(review.report.tasks, results)
+    args.review.write_text(review.model_dump_json(indent=2) + "\n")
+    for r in results:
+        print(
+            f"{r.task_id}: {r.key} {r.url or ''}".rstrip()
+            if r.key
+            else f"{r.task_id}: failed: {r.error}"
+        )
+    return 0 if all(r.key for r in results) else 1
