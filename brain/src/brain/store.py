@@ -60,6 +60,7 @@ class InMemoryStore:
         self._teams = {t.id: t for t in teams}
         self._people = {p.id: p for p in people}
         self._meetings: dict[str, Meeting] = {}
+        self._segments: dict[str, dict[str, TranscriptSegment]] = {}
 
     async def team_for_user(self, user_id: str) -> Team:
         for team in self._teams.values():
@@ -118,3 +119,13 @@ class InMemoryStore:
             )
             self._meetings[meeting_id] = meeting
         return meeting
+
+    async def add_segments(self, meeting_id: str, segments: list[TranscriptSegment]) -> None:
+        """Ignores a seg_id already saved: the worker may resend after a timeout."""
+        saved = self._segments.setdefault(meeting_id, {})
+        for segment in segments:
+            saved.setdefault(segment.seg_id, segment)
+
+    async def transcript(self, meeting_id: str) -> list[TranscriptSegment]:
+        saved = self._segments.get(meeting_id, {}).values()
+        return sorted(saved, key=lambda s: (s.t_start, s.t_end))

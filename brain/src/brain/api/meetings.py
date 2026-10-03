@@ -10,34 +10,21 @@ from contracts import (
     JoinMeetingResponse,
     Meeting,
     Person,
-    Team,
 )
 
 from ..config import Settings
 from ..livekit_tokens import participant_token
 from ..store import NotFound, Store
-from .deps import current_user, get_settings, get_store, not_implemented
+from .deps import (
+    current_user,
+    get_settings,
+    get_store,
+    not_implemented,
+    team_meeting,
+    user_team,
+)
 
 router = APIRouter(prefix="/meetings", tags=["meetings"])
-
-
-async def _team(store: Store, user: Person) -> Team:
-    try:
-        return await store.team_for_user(user.id)
-    except NotFound:
-        raise HTTPException(status_code=403, detail="You are not on a team") from None
-
-
-async def _team_meeting(store: Store, user: Person, meeting_id: str) -> Meeting:
-    """The meeting if it belongs to the user's team. Other teams' meetings are a plain 404."""
-    team = await _team(store, user)
-    try:
-        meeting = await store.meeting(meeting_id)
-    except NotFound:
-        meeting = None
-    if meeting is None or meeting.team_id != team.id:
-        raise HTTPException(status_code=404, detail="Meeting not found")
-    return meeting
 
 
 @router.post("")
@@ -49,7 +36,7 @@ async def create_meeting(
     title = body.title.strip()
     if not title:
         raise HTTPException(status_code=422, detail="Title is required")
-    team = await _team(store, user)
+    team = await user_team(store, user)
     return await store.create_meeting(team.id, title, host_id=user.id)
 
 
@@ -57,7 +44,7 @@ async def create_meeting(
 async def list_meetings(
     user: Person = Depends(current_user), store: Store = Depends(get_store)
 ) -> list[Meeting]:
-    team = await _team(store, user)
+    team = await user_team(store, user)
     return await store.meetings(team.id)
 
 
@@ -65,7 +52,7 @@ async def list_meetings(
 async def get_meeting(
     meeting_id: str, user: Person = Depends(current_user), store: Store = Depends(get_store)
 ) -> Meeting:
-    return await _team_meeting(store, user, meeting_id)
+    return await team_meeting(store, user, meeting_id)
 
 
 @router.post("/join/{code}")
@@ -80,7 +67,7 @@ async def join_meeting(
         meeting = await store.meeting_by_code(code)
     except NotFound:
         raise HTTPException(status_code=404, detail="Meeting not found") from None
-    team = await _team(store, user)
+    team = await user_team(store, user)
     if meeting.team_id != team.id:
         raise HTTPException(status_code=403, detail="Only team members can join this meeting")
     if meeting.status != "live":
@@ -104,7 +91,7 @@ async def end_meeting(
     meeting_id: str, user: Person = Depends(current_user), store: Store = Depends(get_store)
 ) -> Meeting:
     """Host only. Starts the post-meeting pipeline."""
-    meeting = await _team_meeting(store, user, meeting_id)
+    meeting = await team_meeting(store, user, meeting_id)
     if meeting.host_id != user.id:
         raise HTTPException(status_code=403, detail="Only the host can end the meeting")
     if meeting.status != "live":
