@@ -14,6 +14,9 @@ dependencies = [
     "mcp",
 ]
 
+[project.scripts]
+brain = "brain.cli:main"
+
 [tool.uv.sources]
 moe-contracts = { workspace = true }
 
