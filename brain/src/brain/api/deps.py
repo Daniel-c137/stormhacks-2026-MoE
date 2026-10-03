@@ -1,12 +1,26 @@
+from functools import cache
 from typing import NoReturn
 
 from fastapi import Header, HTTPException
 
 from contracts import Person
 
+from ..config import Settings
+from ..store import Store
+
 
 def not_implemented() -> NoReturn:
     raise HTTPException(status_code=501, detail="Not implemented")
+
+
+@cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+async def get_store() -> Store:
+    """The Supabase store. Until it exists, tests and local runs override this dependency."""
+    not_implemented()
 
 
 async def current_user(authorization: str = Header()) -> Person:

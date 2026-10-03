@@ -7,7 +7,12 @@ KEY = "test-key"
 SECRET = "test-secret-that-is-long-enough-for-hs256"
 
 MEETING = Meeting(
-    id="m-1", team_id="t-1", title="Standup", status="live", code="abc", host_id="u-alex",
+    id="m-1",
+    team_id="t-1",
+    title="Standup",
+    status="live",
+    code="abc",
+    host_id="u-alex",
     participant_ids=[],
 )
 ALEX = Person(id="u-alex", name="Alex Chen", short="Alex", initials="AC")
@@ -36,9 +41,7 @@ def test_token_joins_the_meeting_room_and_can_publish_and_subscribe():
 
 def test_only_the_host_gets_room_admin():
     host = claims(participant_token(MEETING, ALEX, is_host=True, api_key=KEY, api_secret=SECRET))
-    member = claims(
-        participant_token(MEETING, ALEX, is_host=False, api_key=KEY, api_secret=SECRET)
-    )
+    member = claims(participant_token(MEETING, ALEX, is_host=False, api_key=KEY, api_secret=SECRET))
 
     assert host.video.room_admin is True
     assert not member.video.room_admin
