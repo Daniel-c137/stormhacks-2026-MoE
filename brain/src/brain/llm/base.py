@@ -2,15 +2,17 @@ from typing import Protocol
 
 from pydantic import BaseModel
 
-from .agent.tools import ToolSpec
+
+class LLMError(RuntimeError):
+    """The model call failed or returned something unusable."""
+
+
+class LLMUnavailable(LLMError):
+    """The LLM is not configured. Never silently replaced by the mock."""
 
 
 class LLM(Protocol):
-    """Gemini behind a small interface; the model id comes from config."""
-
-    async def generate(
-        self, prompt: str, *, system: str | None = None, tools: list[ToolSpec] | None = None
-    ) -> str: ...
+    async def generate(self, prompt: str, *, system: str | None = None) -> str: ...
 
     async def generate_structured[T: BaseModel](
         self, prompt: str, schema: type[T], *, system: str | None = None
