@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     github_token: str | None = None
     github_repo: str | None = None
     jira_base_url: str | None = None
+    jira_cloud_id: str | None = None
     jira_email: str | None = None
     jira_api_token: str | None = None
     jira_project_key: str | None = None

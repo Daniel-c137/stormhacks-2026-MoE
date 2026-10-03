@@ -1,0 +1,169 @@
+"""Create Jira issues for task drafts a person approved, through the Jira MCP server.
+
+The same tool names work against the world's mock and the real server; JIRA_MCP_URL decides.
+"""
+
+import json
+
+from mcp import Client
+from mcp.server.mcpserver import MCPServer
+from mcp.types import CallToolResult, TextContent
+from pydantic import BaseModel
+
+from brain.config import Settings
+from brain.report import ProcessedMeeting
+from brain.report.extraction import clock
+from contracts import TaskDraft, TaskPushRequest, TaskPushResult
+
+
+class JiraUnavailable(RuntimeError):
+    """Jira is not configured."""
+
+
+class ApprovalRequired(PermissionError):
+    """A push without a named approver."""
+
+
+class JiraConfig(BaseModel):
+    mcp_url: str
+    cloud_id: str
+    project_key: str
+    base_url: str | None = None
+    issue_type: str = "Task"
+
+
+def jira_config(settings: Settings) -> JiraConfig:
+    cloud_id = settings.jira_cloud_id or settings.jira_base_url
+    required = {
+        "JIRA_MCP_URL": settings.jira_mcp_url,
+        "JIRA_PROJECT_KEY": settings.jira_project_key,
+        "JIRA_CLOUD_ID (or JIRA_BASE_URL)": cloud_id,
+    }
+    if missing := [name for name, value in required.items() if not value]:
+        raise JiraUnavailable(f"Jira is not configured: set {', '.join(missing)}")
+    return JiraConfig(
+        mcp_url=settings.jira_mcp_url,
+        cloud_id=cloud_id,
+        project_key=settings.jira_project_key,
+        base_url=settings.jira_base_url or None,
+    )
+
+
+class JiraPusher:
+    def __init__(self, config: JiraConfig, *, target: str | MCPServer | None = None):
+        self.config = config
+        self.target = target or config.mcp_url
+
+    async def push(
+        self, meeting: ProcessedMeeting, request: TaskPushRequest
+    ) -> list[TaskPushResult]:
+        """One result per requested draft, in request order. Never raises for one bad draft."""
+        if not request.approved_by.strip():
+            raise ApprovalRequired("Pushing to Jira needs the name of the person who approved it")
+        task_ids = list(dict.fromkeys(request.task_ids))
+        if request.destination != "jira":
+            error = f"Pushing to {request.destination} is not supported yet"
+            return [TaskPushResult(task_id=task_id, error=error) for task_id in task_ids]
+
+        drafts = {task.id: task for task in meeting.report.tasks}
+        results: dict[str, TaskPushResult] = {}
+        to_create: list[TaskDraft] = []
+        for task_id in task_ids:
+            draft = drafts.get(task_id)
+            if draft is None:
+                results[task_id] = TaskPushResult(task_id=task_id, error="No such task draft")
+            elif not draft.include:
+                results[task_id] = TaskPushResult(task_id=task_id, error="Draft is excluded")
+            elif draft.key:
+                results[task_id] = self.pushed(task_id, draft.key)
+            else:
+                to_create.append(draft)
+
+        if to_create:
+            try:
+                async with Client(self.target) as client:
+                    for draft in to_create:
+                        results[draft.id] = await self.create(client, draft, meeting, request)
+            except Exception as e:  # transport failure: report it per draft, keep what was created
+                error = f"Jira MCP call failed: {root_cause(e)}"
+                for draft in to_create:
+                    results.setdefault(draft.id, TaskPushResult(task_id=draft.id, error=error))
+        return [results[task_id] for task_id in task_ids]
+
+    async def create(
+        self,
+        client: Client,
+        draft: TaskDraft,
+        meeting: ProcessedMeeting,
+        request: TaskPushRequest,
+    ) -> TaskPushResult:
+        result = await client.call_tool(
+            "createJiraIssue",
+            {
+                "cloudId": self.config.cloud_id,
+                "projectKey": self.config.project_key,
+                "issueTypeName": self.config.issue_type,
+                "summary": draft.title,
+                "description": describe(draft, meeting, request.approved_by),
+                "additional_fields": {"duedate": draft.due.isoformat()} if draft.due else None,
+            },
+        )
+        if result.is_error:
+            return TaskPushResult(task_id=draft.id, error=text_of(result) or "Jira refused it")
+        if not (key := issue_key(result)):
+            return TaskPushResult(task_id=draft.id, error="Jira returned no issue key")
+        return self.pushed(draft.id, key)
+
+    def pushed(self, task_id: str, key: str) -> TaskPushResult:
+        url = f"{self.config.base_url.rstrip('/')}/browse/{key}" if self.config.base_url else None
+        return TaskPushResult(task_id=task_id, key=key, url=url)
+
+
+def apply_results(tasks: list[TaskDraft], results: list[TaskPushResult]) -> list[TaskDraft]:
+    """Record new keys on the drafts that were just created."""
+    created = {r.task_id: r.key for r in results if r.key}
+    return [
+        task.model_copy(update={"key": created[task.id], "jira_status": "todo"})
+        if task.id in created and not task.key
+        else task
+        for task in tasks
+    ]
+
+
+def describe(draft: TaskDraft, meeting: ProcessedMeeting, approved_by: str) -> str:
+    on = f" ({meeting.started_at:%Y-%m-%d})" if meeting.started_at else ""
+    at = f" at {clock(draft.t)}" if draft.t is not None else ""
+    names = {person.id: person.name for person in meeting.members}
+    parts = [draft.description] if draft.description else []
+    parts.append(f'From the meeting "{meeting.title}"{on}{at}' + (":" if draft.quote else "."))
+    if draft.quote:
+        parts.append(f"> {draft.quote}")
+    if draft.owner_id in names:
+        parts.append(f"Owner named in the meeting: {names[draft.owner_id]}")
+    parts.append(f"Approved for Jira by {approved_by.strip()}.")
+    return "\n\n".join(parts)
+
+
+def issue_key(result: CallToolResult) -> str | None:
+    data = result.structured_content
+    if not isinstance(data, dict):
+        try:
+            data = json.loads(text_of(result))
+        except ValueError:
+            return None
+    if not isinstance(data, dict):
+        return None
+    for candidate in (data, data.get("result"), data.get("issue")):
+        if isinstance(candidate, dict) and isinstance(candidate.get("key"), str):
+            return candidate["key"]
+    return None
+
+
+def text_of(result: CallToolResult) -> str:
+    return "\n".join(c.text for c in result.content if isinstance(c, TextContent))
+
+
+def root_cause(error: BaseException) -> str:
+    while isinstance(error, BaseExceptionGroup) and error.exceptions:
+        error = error.exceptions[0]
+    return str(error) or type(error).__name__
