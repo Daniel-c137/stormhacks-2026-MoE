@@ -1,0 +1,31 @@
+# Local agent instructions
+AGENTS.md
+CLAUDE.md
+.claude/settings.local.json
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.ruff_cache/
+.pytest_cache/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+
+# Demo world runtime state (write overlay and journal)
+world/.overlay/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/

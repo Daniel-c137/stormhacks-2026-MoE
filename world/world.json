@@ -1,0 +1,9 @@
+{
+  "company": "DropSubs",
+  "github_repo": "dropsubs/dropsubs",
+  "jira_project": "DS",
+  "snapshots": {
+    "dev": { "data_until": "2026-08-28", "today": "2026-08-31T10:00:00" },
+    "demo": { "data_until": "2026-10-02", "today": "2026-10-04T10:00:00" }
+  }
+}

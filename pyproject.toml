@@ -1,0 +1,16 @@
+[tool.uv.workspace]
+members = ["contracts", "brain", "realtime", "world"]
+
+[dependency-groups]
+dev = ["ruff", "pytest"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "RUF"]
+ignore = ["B008"]  # FastAPI's Depends() in defaults
+
+[tool.ruff.lint.isort]
+known-first-party = ["contracts", "brain", "realtime_worker", "world"]
