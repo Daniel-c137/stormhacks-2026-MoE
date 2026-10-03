@@ -1,0 +1,18 @@
+{
+  "summary": "Bob merged the double-charge fix and will refund the affected users. The email exploit fix is merged but production is still on v0.9.3, so the waitlist email waits for v0.9.4. The model retirement on November 15 has no owner yet.",
+  "topics": ["Double charge", "Email exploit", "Waitlist email", "Model retirement"],
+  "decisions": [
+    { "text": "Hold the waitlist email until v0.9.4 is released.", "made_by_id": "p-alice", "evidence": ["s4"] }
+  ],
+  "tasks": [
+    { "title": "Refund the 14 double-charged users", "description": null, "owner_id": "p-bob", "due": "2026-10-07", "evidence": ["s2"] },
+    { "title": "Find an owner for the model retirement", "description": "The model shuts off on November 15.", "owner_id": null, "due": "2026-11-15", "evidence": ["s6"] }
+  ],
+  "risks": [
+    { "text": "Production still runs v0.9.3, which has the email exploit.", "severity": "high", "evidence": ["s3"] }
+  ],
+  "open_questions": ["Who owns the model retirement?"],
+  "blockers": [],
+  "technical_context": ["The exploit fix is merged but not released; production is v0.9.3."],
+  "links": [{ "kind": "jira_issue", "label": "DS-104", "url": null }]
+}

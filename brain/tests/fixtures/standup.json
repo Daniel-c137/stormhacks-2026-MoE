@@ -1,0 +1,18 @@
+{
+  "meeting_id": "mtg-standup",
+  "title": "Friday standup",
+  "started_at": "2026-10-02T09:30:00",
+  "members": [
+    { "id": "p-alice", "name": "Alice Moreau", "short": "Alice", "initials": "AM" },
+    { "id": "p-bob", "name": "Bob Okafor", "short": "Bob", "initials": "BO" },
+    { "id": "p-carol", "name": "Carol Jensen", "short": "Carol", "initials": "CJ" }
+  ],
+  "segments": [
+    { "seg_id": "seg-1", "meeting_id": "mtg-standup", "speaker_id": "p-alice", "speaker_name": "Alice Moreau", "text": "Morning everyone, quick standup.", "is_final": true, "t_start": 0, "t_end": 5 },
+    { "seg_id": "seg-2", "meeting_id": "mtg-standup", "speaker_id": "p-bob", "speaker_name": "Bob Okafor", "text": "The double-charge fix is merged. I'll refund the 14 affected users by Wednesday.", "is_final": true, "t_start": 6, "t_end": 14 },
+    { "seg_id": "seg-3", "meeting_id": "mtg-standup", "speaker_id": "p-carol", "speaker_name": "Carol Jensen", "text": "The email exploit fix merged yesterday, but production is still on v0.9.3.", "is_final": true, "t_start": 15, "t_end": 23 },
+    { "seg_id": "seg-4", "meeting_id": "mtg-standup", "speaker_id": "p-alice", "speaker_name": "Alice Moreau", "text": "Then we hold the waitlist email until v0.9.4 is out. Agreed.", "is_final": true, "t_start": 24, "t_end": 31 },
+    { "seg_id": "seg-5", "meeting_id": "mtg-standup", "speaker_id": "agent", "speaker_name": "Agent", "text": "DS-104 is still In Progress in Jira, though the fix is merged.", "is_final": true, "t_start": 32, "t_end": 38 },
+    { "seg_id": "seg-6", "meeting_id": "mtg-standup", "speaker_id": "p-carol", "speaker_name": "Carol Jensen", "text": "Someone needs to own the model retirement. It shuts off November 15.", "is_final": true, "t_start": 39, "t_end": 47 }
+  ]
+}
