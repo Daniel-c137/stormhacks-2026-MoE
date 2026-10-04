@@ -51,6 +51,7 @@ class TaskDraft(BaseModel):
     quote: str | None = None
     include: bool = True
     key: str | None = None  # external key once pushed
+    url: str | None = None  # where the pushed issue opens, when the site's address was known
     jira_status: JiraStatus = "draft"
 
 

@@ -1,6 +1,7 @@
 """What only a meeting's host could do, an admin may do too, so a meeting whose host left can still
-be managed: ending it, its invitees, retrying its write-up and approving its Jira push. Sarah
-hosts these meetings; Alex is the team's admin; Priya is a member who is neither."""
+be managed: ending it, its invitees and retrying its write-up. Approving its Jira push, the only
+external write, is an admin's alone. Sarah hosts these meetings; Alex is the team's admin; Priya
+is a member who is neither."""
 
 import asyncio
 
@@ -13,6 +14,7 @@ from brain.jira import JiraPusher
 from contracts import Person
 
 HOST_OR_ADMIN = "Only the host or an admin can do this"
+ADMINS_ONLY = "Only an admin can do this"
 PRIYA = Person(id="u-priya", name="Priya Natarajan", short="Priya", initials="PN")
 
 
@@ -102,31 +104,29 @@ def test_an_admin_may_retry_the_write_up_and_a_member_may_not(client_as):
 # approving the Jira push, the only external write
 
 
-def test_a_member_who_is_not_the_host_cannot_approve_the_push(client_as, store, pushing):
+@pytest.mark.parametrize("member", [SARAH, PRIYA], ids=["host", "member"])
+def test_no_one_but_an_admin_approves_the_push(client_as, store, pushing, member):
     meeting = create(client_as(SARAH))
     draft = task(meeting["id"], 1)
     processed(store, meeting, draft)
 
-    response = push(client_as(PRIYA), meeting["id"], draft.id)
+    response = push(client_as(member), meeting["id"], draft.id)
 
     assert response.status_code == 403
-    assert response.json()["detail"] == HOST_OR_ADMIN
+    assert response.json()["detail"] == ADMINS_ONLY
     assert pushing.created == []
     assert asyncio.run(store.meeting(meeting["id"])).status == "needs_review"
 
 
-@pytest.mark.parametrize("approver", [SARAH, ALEX], ids=["host", "admin"])
-def test_the_host_or_an_admin_approves_and_is_recorded_as_the_approver(
-    client_as, store, pushing, approver
-):
+def test_an_admin_approves_and_is_recorded_as_the_approver(client_as, store, pushing):
     meeting = create(client_as(SARAH))
     draft = task(meeting["id"], 1)
     processed(store, meeting, draft)
 
-    response = push(client_as(approver), meeting["id"], draft.id, approved_by="Someone else")
+    response = push(client_as(ALEX), meeting["id"], draft.id, approved_by="Someone else")
 
     assert response.status_code == 200, response.text
-    assert pushing.created[0]["description"].endswith(f"Approved for Jira by {approver.name}.")
+    assert pushing.created[0]["description"].endswith(f"Approved for Jira by {ALEX.name}.")
 
 
 def test_any_teammate_still_edits_task_drafts(client_as, store):

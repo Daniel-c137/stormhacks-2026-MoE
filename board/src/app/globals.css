@@ -590,6 +590,7 @@
   .push-row .btn:disabled:not(.pushed) { opacity: .5; }
   .push-row select.field { width: auto; height: 50px; }
   .push-st { font-size: 14px; color: var(--ink-2); }
+  .push-note { margin-top: 16px; }
   .t-tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
   .t-search { position: relative; flex: 1 1 260px; max-width: 380px; }
   .t-search i { position: absolute; left: 14px; top: 15px; color: var(--muted); font-size: 16px; }
@@ -660,6 +661,12 @@
   .conn-edit { gap: 8px; }
   .conn-edit .field { height: 38px; border-radius: 10px; flex: 1 1 200px; font-size: 14px; }
   .conn-edit .conn-ref { flex: 0 1 170px; }
+  .conn-account { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 10px; padding: 12px 0 14px; }
+  .conn-account h3 { grid-column: 1 / -1; font-size: 15px; font-weight: 700; }
+  .conn-account .label { min-width: 0; }
+  .conn-account .field { height: 40px; border-radius: 10px; font-size: 14px; }
+  .conn-account .note, .conn-account .err, .conn-account-actions { grid-column: 1 / -1; }
+  .conn-account-actions { display: flex; gap: 8px; align-items: center; }
   .voices { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
   .voice { border: 1.5px solid var(--line); border-radius: 18px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; transition: border-color .15s; }
   .voice:has(input:checked) { border-color: var(--ink); background: var(--card-hover); }
@@ -693,9 +700,10 @@
   .member-name { font-size: 14px; font-weight: 700; }
   .member-email { min-width: 0; max-width: 100%; font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .member-role { font-size: 12px; font-weight: 600; color: var(--muted); padding: 0 9px; }
-  .member-add { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.3fr) 120px auto; gap: 8px; align-items: center; padding: 4px 0 12px; }
+  .member-add { display: grid; grid-template-columns: minmax(0,1fr) 120px auto; gap: 8px; align-items: center; padding: 4px 0 12px; }
   .member-add .field { height: 40px; border-radius: 12px; }
   .member-add-acts { display: flex; gap: 6px; justify-content: flex-end; }
+  .badge-invited { background: transparent; box-shadow: inset 0 0 0 1px var(--line-2); color: var(--muted); }
   .member-msg { padding: 0 0 10px; }
   .once { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; padding: 8px 8px 8px 14px; border-radius: 14px; background: var(--soft); font-size: 14px; }
   .once code { font-family: var(--font-mono); font-size: 14px; font-weight: 600; overflow-wrap: anywhere; user-select: all; }
@@ -741,6 +749,7 @@
     .conn-edit { flex-wrap: wrap; }
     .conn-edit .conn-icon { display: none; }
     .conn-edit .field, .conn-edit .conn-ref { flex: 1 1 100%; }
+    .conn-account { grid-template-columns: minmax(0,1fr); }
     .rcard { padding: 20px; }
     .line { grid-template-columns: 52px minmax(0,1fr); }
     .line .who { grid-column: 2; }

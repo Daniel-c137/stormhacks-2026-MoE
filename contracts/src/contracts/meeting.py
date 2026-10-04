@@ -18,6 +18,7 @@ class Person(BaseModel):
     email: str | None = None
     photo_url: str | None = None
     is_admin: bool = False  # changes team settings, creates accounts, manages any meeting
+    invited: bool = False  # GET /team/members only: invited and not signed up yet (no login)
 
 
 class Team(BaseModel):

@@ -2,6 +2,7 @@
 
 import re
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile
@@ -11,6 +12,7 @@ from contracts import (
     CodeRepoChoice,
     ConnectorStatus,
     ConnectorsUpdate,
+    JiraAccountConnect,
     Person,
     ProfileUpdate,
     Team,
@@ -18,11 +20,22 @@ from contracts import (
     Voice,
 )
 
+from ..accounts import signs_in
+from ..auth import NOT_CONFIGURED, signing_secret
 from ..config import Settings
 from ..connectors import connector_statuses
 from ..gitlab import valid_project
 from ..jira import site_host
-from ..store import NotFound, Store
+from ..jira_rest import (
+    NOT_A_SITE,
+    JiraAccess,
+    JiraCloud,
+    JiraRejected,
+    JiraUnreachable,
+    issue_type_for_tasks,
+)
+from ..sealing import seal
+from ..store import JiraAccount, NotFound, Store
 from ..voices import VoicesFailed, VoicesUnavailable, fetch_voices, with_default
 from ..zones import is_zone
 from .deps import (
@@ -136,11 +149,39 @@ async def get_team(user: Person = Depends(current_user), store: Store = Depends(
 async def list_members(
     user: Person = Depends(current_user), store: Store = Depends(get_store)
 ) -> list[Person]:
+    """The team's people; `invited` marks those an admin invited who haven't signed up yet (an
+    email and no login)."""
     team = await user_team(store, user)
-    return await store.members(team.id)
+    return [
+        p.model_copy(update={"invited": bool(p.email) and not await signs_in(store, p.id)})
+        for p in await store.members(team.id)
+    ]
 
 
 # workspace settings
+
+
+NO_JIRA_ACCOUNT = {
+    "connected": False,
+    "account_email": None,
+    "account_site": None,
+    "account_project": None,
+}
+
+
+async def shown(store: Store, settings: TeamSettings) -> TeamSettings:
+    """Settings as they are sent: what they say about the Jira account is read from the saved
+    account itself, the one a push uses, so the two can never disagree."""
+    account = await store.jira_account(settings.team_id)
+    about = NO_JIRA_ACCOUNT
+    if account is not None:
+        about = {
+            "connected": True,
+            "account_email": account.email,
+            "account_site": account.site,
+            "account_project": account.project,
+        }
+    return settings.model_copy(update={"jira": settings.jira.model_copy(update=about)})
 
 
 @router.get("/settings")
@@ -148,7 +189,7 @@ async def read_team_settings(
     user: Person = Depends(current_user), store: Store = Depends(get_store)
 ) -> TeamSettings:
     team = await user_team(store, user)
-    return await store.settings(team.id)
+    return await shown(store, await store.settings(team.id))
 
 
 @router.put("/settings")
@@ -170,7 +211,7 @@ async def write_team_settings(
         )
     team = await user_team(store, user)
     current = await store.settings(team.id)
-    return await store.save_settings(
+    saved = await store.save_settings(
         body.model_copy(
             update={
                 "team_id": team.id,
@@ -183,6 +224,7 @@ async def write_team_settings(
             }
         )
     )
+    return await shown(store, saved)
 
 
 @router.put("/settings/connectors")
@@ -191,15 +233,18 @@ async def write_connectors(
 ) -> TeamSettings:
     """The team's GitHub repositories, GitLab projects and Jira site and project, replacing
     the saved ones; admins only. A repository that stays keeps its connection and index state
-    (a new branch or tag drops its index). Paths are checked and repeats refused."""
+    (a new branch or tag drops its index). Paths are checked and repeats refused. The Jira site
+    and project here are what the agent reads; the account connected for pushing is separate
+    and stays as it is."""
     team = await user_team(store, user)
     current = await store.settings(team.id)
     github = repos(body.github, current.github.repos, "GitHub repository", github_path)
     gitlab = repos(body.gitlab, current.gitlab.projects, "GitLab project", gitlab_path)
     jira = current.jira.model_copy(
         update={"site": site_host(text(body.jira.site)), "project": jira_key(body.jira.project)}
+        | NO_JIRA_ACCOUNT  # the account is not kept here: `shown` reads it from where it is
     )
-    return await store.save_settings(
+    saved = await store.save_settings(
         current.model_copy(
             update={
                 "github": current.github.model_copy(update={"repos": github}),
@@ -208,6 +253,7 @@ async def write_connectors(
             }
         )
     )
+    return await shown(store, saved)
 
 
 def repos(
@@ -261,6 +307,106 @@ def jira_key(project: str | None) -> str | None:
     if not re.fullmatch(r"[A-Z][A-Z0-9_]{1,9}", key):
         raise HTTPException(status_code=422, detail=f"{key!r} is not a Jira project key")
     return key
+
+
+MAX_API_TOKEN = 2000
+
+
+@router.put("/settings/jira/account")
+async def connect_jira_account(
+    body: JiraAccountConnect,
+    user: Person = Depends(require_admin),
+    store: Store = Depends(get_store),
+    config: Settings = Depends(get_settings),
+    transport: httpx.AsyncBaseTransport | None = Depends(get_http_transport),
+) -> TeamSettings:
+    """Connects the team's Jira account; admins only. Before anything is saved, Jira is asked
+    whether it accepts the email and API token, whether that account sees the project and may
+    create issues in it, and which issue type tasks become there. The token is stored encrypted
+    and never returned; approved task drafts are then created as issues in that project as that
+    account. The Jira site and project the agent reads (PUT /settings/connectors) are not
+    changed."""
+    email, token = body.email.strip(), body.api_token.strip()
+    project = jira_key(body.project)
+    if not email or not token or project is None:
+        raise HTTPException(
+            status_code=422, detail="The account's email, its API token and a project are needed"
+        )
+    if len(email) > MAX_TEXT_SETTING or len(token) > MAX_API_TOKEN:
+        raise HTTPException(status_code=422, detail="That email or API token is too long")
+    try:
+        access = JiraAccess(site=body.site, email=email, api_token=token, project_key=project)
+    except ValueError:
+        raise HTTPException(status_code=422, detail=NOT_A_SITE) from None
+    if (secret := signing_secret(config)) is None:
+        raise HTTPException(status_code=503, detail=NOT_CONFIGURED)
+    issue_type = await checked_with_jira(JiraCloud(access, transport=transport))
+
+    team = await user_team(store, user)
+    await store.save_jira_account(
+        JiraAccount(
+            team_id=team.id,
+            site=access.site,
+            project=project,
+            issue_type_id=issue_type,
+            email=email,
+            sealed_token=seal(token, secret, team.id),
+            connected_by=user.id,
+            connected_at=datetime.now(UTC),
+        )
+    )
+    return await shown(store, await store.settings(team.id))
+
+
+async def checked_with_jira(cloud: JiraCloud) -> str | None:
+    """The id of the issue type tasks are created as in the project (None when Jira does not
+    list its types: the type named Task is then used). 422 when the account or the project
+    cannot be used as given, 502 when Jira cannot be asked."""
+    site, project = cloud.access.site, cloud.access.project_key
+
+    def refuse(detail: str) -> HTTPException:
+        return HTTPException(status_code=422, detail=detail)
+
+    try:
+        try:
+            await cloud.myself()
+        except JiraRejected as e:
+            if e.status == 404:
+                raise refuse(f"There is no Jira site at {site}") from None
+            if e.status in (401, 403):
+                raise refuse(f"{site} did not accept that email and API token") from None
+            raise
+        try:
+            found = await cloud.project(project)
+        except JiraRejected as e:
+            if e.status in (403, 404):
+                raise refuse(f"{site} has no project {project} that this account can see") from None
+            raise
+        issue_type = issue_type_for_tasks(found)
+        if issue_type is None and isinstance(found.get("issueTypes"), list):
+            raise refuse(f"{project} has no issue type that tasks can be created as")
+        try:
+            allowed = await cloud.can_create(project)
+        except JiraRejected:
+            allowed = True  # Jira would not say; a push reports its own refusal
+        if not allowed:
+            raise refuse(f"This account is not allowed to create issues in {project}")
+    except JiraUnreachable as e:
+        raise HTTPException(status_code=502, detail=str(e)) from None
+    except JiraRejected as e:
+        raise HTTPException(status_code=502, detail=f"{site} answered {e.status}: {e}") from None
+    return issue_type
+
+
+@router.delete("/settings/jira/account")
+async def disconnect_jira_account(
+    user: Person = Depends(require_admin), store: Store = Depends(get_store)
+) -> TeamSettings:
+    """Forgets the team's Jira account and its token; admins only. The Jira site and project
+    the agent reads stay."""
+    team = await user_team(store, user)
+    await store.delete_jira_account(team.id)
+    return await shown(store, await store.settings(team.id))
 
 
 @router.get("/settings/connectors")

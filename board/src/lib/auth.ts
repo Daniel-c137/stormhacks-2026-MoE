@@ -1,6 +1,7 @@
-// Sign-in against the brain (POST /auth/login). The session token and its expiry are kept in
-// localStorage; every brain call sends authHeaders().
-import type { LoginRequest, LoginResponse } from "@moe/contracts";
+// Sign-in against the brain: POST /auth/login, invite-only sign-up (POST /auth/signup) and Google
+// (GET /auth/google, then POST /auth/google/exchange with the callback's one-time code). The
+// session token and its expiry are kept in localStorage; every brain call sends authHeaders().
+import type { AuthOptions, GoogleExchangeRequest, LoginRequest, LoginResponse, SignupRequest } from "@moe/contracts";
 import { apiUrl } from "./apiUrl";
 
 const TOKEN_KEY = "session.token";
@@ -31,9 +32,9 @@ function storage(): Storage | null {
   }
 }
 
-export async function login(email: string, password: string): Promise<LoginResponse> {
-  const body: LoginRequest = { email, password };
-  const response = await fetch(apiUrl("/auth/login"), {
+/** POSTs `body` to a brain route that answers with a session, and keeps the session. */
+async function startSession(path: string, body: object, failure: string): Promise<LoginResponse> {
+  const response = await fetch(apiUrl(path), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -44,7 +45,7 @@ export async function login(email: string, password: string): Promise<LoginRespo
       .then((b: { detail?: unknown }) => (typeof b.detail === "string" ? b.detail : null))
       .catch(() => null);
     const retryAfter = Number(response.headers.get("Retry-After")) || null;
-    throw new LoginError(detail ?? `Sign-in failed (${response.status})`, response.status, retryAfter);
+    throw new LoginError(detail ?? `${failure} (${response.status})`, response.status, retryAfter);
   }
   const session = (await response.json()) as LoginResponse;
   const store = storage();
@@ -52,6 +53,39 @@ export async function login(email: string, password: string): Promise<LoginRespo
   store?.setItem(EXPIRES_KEY, session.expires_at);
   notify();
   return session;
+}
+
+export function login(email: string, password: string): Promise<LoginResponse> {
+  const body: LoginRequest = { email, password };
+  return startSession("/auth/login", body, "Sign-in failed");
+}
+
+/** Invite-only (#128): 403 for an email nobody invited, 409 when it already has an account. */
+export function signUp(name: string, email: string, password: string): Promise<LoginResponse> {
+  const body: SignupRequest = { name, email, password };
+  return startSession("/auth/signup", body, "Creating the account failed");
+}
+
+/** The one-time code the brain's Google callback put on /login?google=, for the session. */
+export function finishGoogleSignIn(code: string): Promise<LoginResponse> {
+  const body: GoogleExchangeRequest = { code };
+  return startSession("/auth/google/exchange", body, "Google sign-in failed");
+}
+
+/** Where the Google button goes: the brain starts the sign-in and sends the browser to Google. */
+export function googleSignInUrl(next: string): string {
+  return apiUrl(`/auth/google?${new URLSearchParams({ next })}`);
+}
+
+/** What the sign-in page can offer; nothing extra when the brain can't be asked. */
+export async function authOptions(): Promise<AuthOptions> {
+  try {
+    const response = await fetch(apiUrl("/auth/options"));
+    if (response.ok) return (await response.json()) as AuthOptions;
+  } catch {
+    // unreachable brain: the page still offers email sign-in, which reports the problem
+  }
+  return { signup: false, google: false };
 }
 
 /** The current session token, or null when there is none or it has expired (and is dropped). */

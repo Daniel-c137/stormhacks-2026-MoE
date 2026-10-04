@@ -1,11 +1,36 @@
-"""Email and password sign-in, checked by the brain (board -> brain). There is no public sign-up;
-accounts come from `brain add-user` or an admin (POST /team/accounts)."""
+"""Sign-in checked by the brain (board -> brain): email and password, Google, and creating an
+account. Accounts come from `brain add-user`, an admin (POST /team/accounts), or an invited email
+signing up (#128): a person an admin put on their team with that email and no login yet (#143).
+There is no open sign-up."""
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+import secrets
+from urllib.parse import urlencode, urlsplit
+
+import httpx
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import RedirectResponse
 
-from contracts import LoginRequest, LoginResponse, PasswordChange, Person
+from contracts import (
+    AuthOptions,
+    GoogleExchangeRequest,
+    LoginRequest,
+    LoginResponse,
+    PasswordChange,
+    Person,
+    SignupRequest,
+)
 
+from ..accounts import (
+    MAX_NAME_LENGTH,
+    InvalidAccount,
+    InvitedTwice,
+    accept_invite,
+    clean_email,
+    clean_name,
+    invited_person,
+    name_from_email,
+)
 from ..auth import (
     MAX_PASSWORD,
     MIN_PASSWORD,
@@ -18,13 +43,69 @@ from ..auth import (
     verify_password,
 )
 from ..config import Settings
-from ..store import Login, NotFound, Store
-from .deps import current_user, get_login_limiter, get_settings, get_store
+from ..google_auth import (
+    CODE_SECONDS,
+    FLOW_COOKIE,
+    FLOW_COOKIE_PATH,
+    FLOW_SECONDS,
+    HANDOFF_COOKIE,
+    GoogleKeys,
+    GoogleSignInFailed,
+    OneTimeCodes,
+    authorize_url,
+    new_flow,
+    seal,
+    unseal,
+    verify_callback,
+)
+from ..store import Conflict, Login, NotFound, Store
+from .deps import (
+    current_user,
+    get_google_keys,
+    get_http_transport,
+    get_login_limiter,
+    get_one_time_codes,
+    get_settings,
+    get_store,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 MAX_EMAIL = 320
 WRONG_LOGIN = "Wrong email or password"
+NOT_INVITED = "This email hasn't been invited. Ask your team's admin to add you."
+ALREADY_SIGNED_UP = "An account already uses this email. Sign in instead."
+INVITED_TWICE = "More than one team invited this email. Ask your team's admin."
+
+
+def google_configured(settings: Settings) -> bool:
+    """A Google OAuth client and the public callback URL registered with it. Behind the board's
+    /api rewrite or Caddy the brain sees only its internal address, so it can't build that URL
+    itself."""
+    return bool(
+        settings.google_client_id
+        and settings.google_client_secret
+        and public_url(settings.google_redirect_url)
+    )
+
+
+def public_url(url: str | None) -> bool:
+    parts = urlsplit(url or "")
+    return parts.scheme in ("http", "https") and bool(parts.netloc)
+
+
+def secure_site(settings: Settings) -> bool:
+    """Whether the public site is https, which decides the sign-in cookies' Secure flag: behind
+    the /api proxy the brain itself is reached over plain http."""
+    return urlsplit(settings.google_redirect_url or "").scheme == "https"
+
+
+def password_problem(password: str) -> str | None:
+    if len(password) < MIN_PASSWORD:
+        return f"The password must be at least {MIN_PASSWORD} characters"
+    if len(password) > MAX_PASSWORD:
+        return f"The password must be at most {MAX_PASSWORD} characters"
+    return None
 
 
 def too_many(retry_after: int) -> HTTPException:
@@ -77,6 +158,198 @@ async def login(
     return LoginResponse(token=token, expires_at=expires_at, person=person)
 
 
+@router.get("/options")
+async def options(settings: Settings = Depends(get_settings)) -> AuthOptions:
+    """What the sign-in page can offer, so it shows only what will work."""
+    ready = signing_secret(settings) is not None
+    return AuthOptions(signup=ready, google=ready and google_configured(settings))
+
+
+@router.post("/signup", status_code=201)
+async def sign_up(
+    body: SignupRequest,
+    settings: Settings = Depends(get_settings),
+    store: Store = Depends(get_store),
+    limiter: LoginLimiter = Depends(get_login_limiter),
+) -> LoginResponse:
+    """An invited email (a person on a team with that email and no login yet) sets a password
+    and is signed in, on the team that invited them. Anyone else gets 403, and repeated refusals
+    lock the email (429) like failed logins; an email that already has an account, or that two
+    teams invited, gets 409. The mailbox isn't verified: the invitation is what admits the email
+    (Google sign-in does verify it)."""
+    if signing_secret(settings) is None:
+        raise HTTPException(status_code=503, detail=NOT_CONFIGURED)
+    try:
+        name = clean_name(body.name)
+        email = clean_email(body.email)
+    except InvalidAccount as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
+    if problem := password_problem(body.password):
+        raise HTTPException(status_code=422, detail=problem)
+    if (wait := limiter.retry_after(email)) is not None:
+        raise too_many(wait)
+    try:
+        await store.login_by_email(email)
+        raise HTTPException(status_code=409, detail=ALREADY_SIGNED_UP)
+    except NotFound:
+        pass
+    try:
+        invited = await invited_person(store, email)
+    except InvitedTwice:
+        raise HTTPException(status_code=409, detail=INVITED_TWICE) from None
+    if invited is None:
+        limiter.fail(email)
+        raise HTTPException(status_code=403, detail=NOT_INVITED)
+    person, _ = invited
+    hashed = await run_in_threadpool(hash_password, body.password)
+    try:  # keeps the email as invited; only the first of racing sign-ups (or Google) gets it
+        person = await accept_invite(store, person, hashed, name=name)
+    except Conflict:
+        raise HTTPException(status_code=409, detail=ALREADY_SIGNED_UP) from None
+    limiter.clear(email)
+    token, expires_at = issue_token(person.id, settings)
+    return LoginResponse(token=token, expires_at=expires_at, person=person)
+
+
+# Google (#128)
+
+
+@router.get("/google")
+async def google_sign_in(
+    next: str | None = None,
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
+    """Sends the browser to Google, with this sign-in's state, nonce and PKCE verifier sealed in
+    a short-lived cookie that only this browser carries back."""
+    secret = signing_secret(settings)
+    if secret is None or not google_configured(settings):
+        raise HTTPException(status_code=503, detail="Google sign-in isn't configured")
+    flow = new_flow(next)
+    redirect_uri = settings.google_redirect_url or ""
+    response = RedirectResponse(
+        authorize_url(settings.google_client_id or "", redirect_uri, flow), status_code=302
+    )
+    response.set_cookie(
+        FLOW_COOKIE,
+        seal(flow, secret),
+        max_age=FLOW_SECONDS,
+        path=FLOW_COOKIE_PATH,
+        httponly=True,
+        samesite="lax",
+        secure=secure_site(settings),
+    )
+    return response
+
+
+@router.get("/google/callback", name="google_callback")
+async def google_callback(
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    google_signin: str | None = Cookie(default=None),
+    settings: Settings = Depends(get_settings),
+    store: Store = Depends(get_store),
+    keys: GoogleKeys = Depends(get_google_keys),
+    codes: OneTimeCodes = Depends(get_one_time_codes),
+    transport: httpx.AsyncBaseTransport | None = Depends(get_http_transport),
+) -> RedirectResponse:
+    """Where Google sends the browser back. Signs in the account with Google's verified email,
+    or an invited email (whose login is then reserved for Google), and sends the browser to the
+    board's /login with a one-time code (`google`) or why it failed (`google_error`). The code's
+    other half goes in an HttpOnly cookie, so only this browser can swap it for the session."""
+
+    def back(**query: str) -> RedirectResponse:
+        board = (settings.board_url or "").rstrip("/")  # "": this site's /login
+        response = RedirectResponse(f"{board}/login?{urlencode(query)}", status_code=302)
+        response.delete_cookie(FLOW_COOKIE, path=FLOW_COOKIE_PATH)
+        return response
+
+    secret = signing_secret(settings)
+    if secret is None or not google_configured(settings):
+        return back(google_error="failed")
+    try:
+        flow = unseal(google_signin, state, secret)
+        if error:
+            raise GoogleSignInFailed("cancelled", error)
+        if not code:
+            raise GoogleSignInFailed("failed", "Google sent no code")
+        async with httpx.AsyncClient(transport=transport, timeout=10) as http:
+            identity = await verify_callback(
+                code,
+                flow,
+                client_id=settings.google_client_id or "",
+                client_secret=settings.google_client_secret or "",
+                redirect_uri=settings.google_redirect_url or "",
+                keys=keys,
+                http=http,
+            )
+        person = await google_person(store, identity.email, identity.name)
+        if person is None:
+            raise GoogleSignInFailed("not_invited", identity.email)
+    except GoogleSignInFailed as e:
+        return back(google_error=e.reason)
+    token, expires_at = issue_token(person.id, settings)
+    code, binding = codes.issue(LoginResponse(token=token, expires_at=expires_at, person=person))
+    response = back(google=code, next=flow.next)
+    response.set_cookie(
+        HANDOFF_COOKIE,
+        binding,
+        max_age=CODE_SECONDS,
+        path=FLOW_COOKIE_PATH,  # the exchange is under the brain's prefix, which it can't see
+        httponly=True,
+        samesite="lax",
+        secure=secure_site(settings),
+    )
+    return response
+
+
+async def google_person(store: Store, email: str, google_name: str | None = None) -> Person | None:
+    """Whoever signs in with this email, else the person invited with it, whose login is then
+    reserved with a password nobody knows: the account is theirs through Google, and nobody can
+    sign up for that email with a password. None for anyone else. Raises GoogleSignInFailed
+    ("ambiguous") when two teams invited the email."""
+    try:
+        return await store.person((await store.login_by_email(email)).person_id)
+    except NotFound:
+        pass
+    try:
+        invited = await invited_person(store, email)
+    except InvitedTwice:
+        raise GoogleSignInFailed("ambiguous", email) from None
+    if invited is None:
+        return None
+    person, _ = invited
+    unusable = await run_in_threadpool(hash_password, secrets.token_urlsafe(32))
+    try:
+        # Someone invited by email only takes Google's name; a name the admin gave is kept.
+        stand_in = person.name == name_from_email(person.email or email)
+        name = " ".join((google_name or "").split())[:MAX_NAME_LENGTH] if stand_in else None
+        return await accept_invite(store, person, unusable, name=name or None)
+    except Conflict:  # someone signed up for the email meanwhile: that account is the email's
+        pass
+    try:
+        return await store.person((await store.login_by_email(email)).person_id)
+    except NotFound:
+        return None
+
+
+@router.post("/google/exchange")
+async def google_exchange(
+    body: GoogleExchangeRequest,
+    response: Response,
+    google_handoff: str | None = Cookie(default=None),
+    codes: OneTimeCodes = Depends(get_one_time_codes),
+) -> LoginResponse:
+    """The board swaps the one-time code from the callback for the session. Works once, within
+    a minute, and only in the browser the callback sent it to (its google_handoff cookie): a
+    code in a link someone else sent signs nobody in."""
+    session = codes.redeem(body.code, google_handoff)
+    if session is None:
+        raise HTTPException(status_code=401, detail="This sign-in has expired. Try again.")
+    response.delete_cookie(HANDOFF_COOKIE, path=FLOW_COOKIE_PATH)
+    return session
+
+
 @router.post("/password", status_code=204)
 async def change_password(
     body: PasswordChange,
@@ -85,13 +358,9 @@ async def change_password(
     limiter: LoginLimiter = Depends(get_login_limiter),
 ) -> Response:
     """Sessions already issued stay valid until they expire."""
-    if len(body.new_password) < MIN_PASSWORD:
+    if problem := password_problem(body.new_password):
         raise HTTPException(
-            status_code=422, detail=f"The new password must be at least {MIN_PASSWORD} characters"
-        )
-    if len(body.new_password) > MAX_PASSWORD:
-        raise HTTPException(
-            status_code=422, detail=f"The new password must be at most {MAX_PASSWORD} characters"
+            status_code=422, detail=problem.replace("The password", "The new password")
         )
     try:
         saved: Login | None = await store.login(user.id)

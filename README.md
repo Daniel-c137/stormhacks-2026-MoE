@@ -72,7 +72,7 @@ uv run pytest brain realtime world                  # unit and API tests; live t
 BRAIN_TEST_STORE=postgres uv run pytest brain       # the API tests on embedded Postgres instead of memory
 uv run ruff check . && uv run ruff format --check .
 pnpm --filter board typecheck
-pnpm --filter board test                            # the board's link helpers, with Node's test runner
+pnpm --filter board test                            # the board's link and next-path helpers, with Node's test runner
 ```
 
 Live tests call real services and spend quota. They skip unless `.env` has what they need: `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_EMBEDDING_MODEL` and `GEMINI_EMBEDDING_DIM` for most; `OPENROUTER_API_KEY` and `OPENROUTER_MODELS` for the fallback (`OPENROUTER_EMBEDDING_MODEL` for the embeddings fallback); `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` and `ELEVENLABS_TTS_MODEL` for speech. Run only the ones you need:
@@ -90,19 +90,21 @@ ELEVENLABS_STT_MODEL=scribe_v2_realtime uv run pytest realtime -m live -k join -
 
 ## Teams, accounts and demo data
 
-There is no public sign-up. Create a team and its first admin with the brain's CLI; `add-user` prints a one-time password unless you pipe one in with `--password-stdin`:
+There is no open sign-up: only someone an admin invited can create an account. Create a team and its first admin with the brain's CLI; `add-user` prints a one-time password unless you pipe one in with `--password-stdin`:
 
 ```sh
 uv run brain add-team --id <team-id> --name "<team name>"
 uv run brain add-user --team <team-id> --name "<full name>" --email <email> --admin
 ```
 
-Only an admin changes the team's settings (connectors, the agent's voice and fact-checking, who may allow answers, time zone) and creates the other accounts, in Settings → Members, which shows the generated password once (`POST /team/accounts`). What a meeting's host does (ending it, changing its invitees, retrying its write-up, approving its push to Jira) an admin may do too, so a meeting whose host left can still be managed. Everyone keeps their own profile, photo and password. `add-user` without `--admin` adds someone who is not an admin, and leaves an existing admin one. To grant or revoke admin later (the brain checks on every request, so it takes effect at once; a team's last admin can't be revoked):
+Only an admin changes the team's settings (connectors, the agent's voice and fact-checking, who may allow answers, time zone) and invites the other people, in Settings → Members → Invite (`POST /team/accounts` with `invite`). The admin enters only the email (and the role); the person shows under a name made from it until they open the copied link (`/login?mode=signup`) and create their account with that email, choosing their name and password, or with Google (which gives their name), and join the team. They show as Invited until then, and can already be picked as a meeting invitee or a task owner. The sign-up page doesn't check the mailbox (the brain sends no email), so whoever first creates the account for an invited email gets it: invite people shortly before you send them the link. An email another team has already invited can't be invited or given a password (409); removing a member isn't built yet. The API can still create a login with a generated password (`POST /team/accounts` without `invite`, with a name), as `brain add-user` does; the board only invites. What a meeting's host does (ending it, changing its invitees, retrying its write-up) an admin may do too, so a meeting whose host left can still be managed. Approving a meeting's push to Jira is an admin's alone. Everyone keeps their own profile, photo and password. `add-user` without `--admin` adds someone who is not an admin, and leaves an existing admin one. To grant or revoke admin later (the brain checks on every request, so it takes effect at once; a team's last admin can't be revoked):
 
 ```sh
 uv run brain set-admin --email <email>
 uv run brain set-admin --email <email> --revoke
 ```
+
+Google sign-in is on when `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `GOOGLE_REDIRECT_URL` are all set. It signs in the account with the Google account's email, or takes that email's invite, but only for a Gmail address or a Google Workspace account: Google can't vouch for any other address on a Google account, so those people use a password. In production `GOOGLE_REDIRECT_URL` is `https://<domain>/api/auth/google/callback`, and it must match the redirect URI registered for the OAuth client in Google Cloud; locally it's `http://localhost:3000/api/auth/google/callback`, through the board's `/api` rewrite. The brain can't work this URL out itself behind the proxy, and an `https` URL makes the sign-in cookie Secure. The brain hands a Google sign-in to the board with a one-time code that works once, within a minute, and only in the browser that signed in (an HttpOnly cookie holds its other half). The codes are kept in the brain's memory, so run a single brain process.
 
 The demo seed loads the DropSubs team, its settings and its past meetings (written up by the real models) and gives each person a login with their seeded email; `danial@dropsubs.example` is the team's admin. `WORLD_SEED_PASSWORD` sets one demo password for everyone; otherwise each person gets a generated one, printed once. Running it again skips what's already there.
 
@@ -118,6 +120,14 @@ On Gemini's free tier, set `WORLD_SEED_EMBEDS_PER_MINUTE=90`. The free tier also
 ## Connectors
 
 A team admin connects GitHub repositories and GitLab projects (up to 10 of each, each at an optional branch or tag) and the Jira site and project in Settings, under Connectors (`PUT /settings/connectors`). Polaris reads every connected repository when it answers, searches code and checks facts, unless a question names one; sources name their repository (`dropsubs/website#7`, `dropsubs/infra!4` for a GitLab merge request). Each connector shows Connected, Not set up or Not reachable, checked live against its MCP server (`GET /settings/connectors`).
+
+### Pushing tasks to Jira
+
+To have approved task drafts created as real Jira issues, an admin connects the team's Jira Cloud account: in Settings, under Connectors, choose Add connector, then "Jira account, to push tasks", and enter the site (`your-team.atlassian.net`), the project key, an Atlassian account's email and an [API token](https://id.atlassian.com/manage-profile/security/api-tokens) for it (a plain token, not one "with scopes") (`PUT /settings/jira/account`). The brain checks the account and the project with Jira before saving, calls only `https://<name>.atlassian.net`, stores the token encrypted with a key derived from `AUTH_SECRET` and never sends it to a browser. Disconnect forgets it.
+
+The account has its own site and project, shown as its own row. Jira is asked about it when it is connected and at every push, not while Settings is open, so a token that has since expired shows there as connected until the next push says otherwise. The Jira project row above it is what Polaris reads (answers, agenda suggestions, fact checks) through `JIRA_MCP_URL`, the mock in the demo; connecting or disconnecting the account does not change it, so the demo's Jira answers and its earlier tasks stay as they are.
+
+On a meeting's report, an admin then presses Push: each included draft becomes a Task in the account's project, as the connected account, with the meeting, the quoted moment and the approver in its description. The owner is assigned when Jira has exactly one assignable account with that person's email (or name); otherwise the issue is created unassigned and the page says so. A due date the project's create screen does not take is left out the same way. Each pushed task keeps the link to its issue. One push of a meeting runs at a time and each key is saved as soon as Jira has made the issue, so a retry after a failure creates only what is still missing. If the account's project has the same key as the project Polaris reads, the same key (say `DS-12`) can name two different issues: the real one a task links to, and the mock's that Polaris answers about. Without a connected account the board does not offer the push; the API then falls back to the Jira MCP server (`JIRA_MCP_URL`), as the `brain push` CLI does.
 
 ## Deploying to a server
 

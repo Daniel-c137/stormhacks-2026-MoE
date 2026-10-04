@@ -17,6 +17,18 @@ class Settings(BaseSettings):
     # HS256 key for the session tokens the brain issues at login; under 32 characters is unset
     auth_secret: str | None = None
     session_hours: int = Field(default=12, ge=1)
+    # Google sign-in needs all three: an OAuth client from Google Cloud ("Web application"), and
+    # the public callback URL Google sends the browser to, exactly as registered with Google:
+    # https://<domain>/api/auth/google/callback in production. The brain can't build it itself
+    # (behind the /api proxy it sees its internal address); its scheme also decides whether the
+    # sign-in cookie is Secure.
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    google_redirect_url: str | None = None
+    # Where the board is served, for the Google callback to send the browser back to its /login.
+    # Unset, it's /login on GOOGLE_REDIRECT_URL's site: right when one origin serves both (Caddy
+    # at /api in production, the board's /api rewrite locally). Set it only when they differ.
+    board_url: str | None = None
 
     gemini_api_key: str | None = None
     gemini_model: str | None = None
@@ -55,8 +67,6 @@ class Settings(BaseSettings):
     github_repo: str | None = None
     jira_base_url: str | None = None
     jira_cloud_id: str | None = None
-    jira_email: str | None = None
-    jira_api_token: str | None = None
     jira_project_key: str | None = None
     connector_timeout: float = 5.0  # seconds to reach an MCP server and list its tools
 

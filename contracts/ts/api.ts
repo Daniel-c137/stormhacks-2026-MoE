@@ -6,10 +6,32 @@ import type { TranscriptSegment } from "./transcript";
 
 export type AskTurnRole = "user" | "agent";
 
-/** POST /auth/login. There is no public sign-up; accounts come from `brain add-user` or an admin (POST /team/accounts). */
+/** POST /auth/login. Accounts come from `brain add-user`, an admin (POST /team/accounts), or an invited email signing up (SignupRequest). */
 export interface LoginRequest {
   email: string;
   password: string;
+}
+
+/**
+ * POST /auth/signup (#128): only an email an admin invited (a person on a team with that email
+ * and no login yet) creates an account, on that team. Answered with a LoginResponse: signed in
+ * at once.
+ */
+export interface SignupRequest {
+  name: string;
+  email: string;
+  password: string;
+}
+
+/** GET /auth/options: what the sign-in page can offer (invite-only sign-up; Google configured). */
+export interface AuthOptions {
+  signup: boolean;
+  google: boolean;
+}
+
+/** POST /auth/google/exchange: the one-time code from the brain's Google callback, for a session. It only works with the HttpOnly google_handoff cookie the callback set in the same browser. */
+export interface GoogleExchangeRequest {
+  code: string;
 }
 
 /** The board sends `token` as `Authorization: Bearer <token>` until `expires_at`. */
@@ -27,16 +49,17 @@ export interface PasswordChange {
 
 /** POST /team/accounts, admin only: a person on the admin's own team with an email login. */
 export interface CreateAccountRequest {
-  name: string;
+  name?: string | null; // optional for an invite: they choose their own name when signing up
   email: string;
   title?: string | null;
   is_admin?: boolean;
+  invite?: boolean; // no login: the person creates it on the sign-in page (SignupRequest)
 }
 
-/** The generated password is returned only this once; nothing is emailed. */
+/** The generated password is returned only this once; nothing is emailed. Null for an invite. */
 export interface CreateAccountResponse {
   person: Person;
-  password: string;
+  password: string | null;
 }
 
 /** Without scheduled_start the meeting starts now; with it, the meeting waits as scheduled. */

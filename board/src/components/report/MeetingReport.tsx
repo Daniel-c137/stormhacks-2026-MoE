@@ -559,7 +559,8 @@ function ReportView({ meeting, onPushed }: { meeting: Meeting; onPushed: () => v
   );
 }
 
-/** The drafts as the reviewer is editing them, and the one approved push to Jira or GitHub. */
+/** The drafts as the reviewer is editing them, and the one push an admin approves: to the Jira
+ * account connected in Settings. */
 function Tasks({
   meeting,
   report,
@@ -580,13 +581,20 @@ function Tasks({
   const [justPushed, setJustPushed] = useState(false);
   const [urls, setUrls] = useState<Record<string, string>>({});
   const [problem, setProblem] = useState("");
+  const [warnings, setWarnings] = useState<string[]>([]);
 
   const pushed = meeting.status === "pushed" || justPushed;
-  const included = tasks.filter((t) => t.include);
+  // What a push would create: ticked drafts that are not issues yet.
+  const included = tasks.filter((t) => t.include && !t.key);
   const jira = settings?.jira;
   const github = settings?.github;
-  const destinationLabel = destination === "jira" ? (jira?.project ?? "Jira") : (github?.repos[0]?.path ?? "GitHub");
+  // Tasks go to the connected Jira account's own project, which may not be the one the agent reads.
+  const destinationLabel =
+    destination === "jira" ? (jira?.account_project ?? jira?.project ?? "Jira") : (github?.repos[0]?.path ?? "GitHub");
   const keys = tasks.flatMap((t) => (t.key ? [t.key] : []));
+  // Where the pushed issues are: their keys' own project, which for a meeting pushed earlier is
+  // not always the one a push would go to now.
+  const pushedLabel = keys[0]?.replace(/-\d+$/, "") ?? destinationLabel;
 
   const commit = (task: TaskDraft) => {
     updateTask(meeting.id, task).then(
@@ -599,10 +607,13 @@ function Tasks({
     setPushing(true);
     setProblem("");
     try {
-      // Save the drafts as they stand, then send exactly the ones that were ticked.
-      await Promise.all(tasks.map((t) => updateTask(meeting.id, t)));
+      // Save the drafts as they stand, then send exactly the ones that were ticked. One that is
+      // already an issue (an earlier push got that far) is final: it is neither saved nor sent.
+      await Promise.all(tasks.filter((t) => !t.key).map((t) => updateTask(meeting.id, t)));
       const results = await pushTasks(meeting.id, { task_ids: included.map((t) => t.id), destination, approved_by: me.id });
       const failed = results.filter((x) => x.error);
+      // An issue created without its owner or due date says so; it is still created.
+      setWarnings(results.flatMap((x) => (x.key && x.warning ? [`${x.key} was ${x.warning}.`] : [])));
       setTasks((list) => list.map((t) => ({ ...t, key: results.find((x) => x.task_id === t.id)?.key ?? t.key })));
       setUrls((prev) => ({ ...prev, ...Object.fromEntries(results.flatMap((x) => (x.url ? [[x.task_id, x.url]] : []))) }));
       if (failed.length) {
@@ -618,15 +629,16 @@ function Tasks({
     }
   };
 
+  const waiting = tasks.filter((t) => !t.key).length;
   const status = problem
-    ? problem
+    ? [problem, ...warnings].join(" ")
     : pushed
       ? keys.length
-        ? `${keys.join(", ")} in ${destinationLabel}.`
+        ? [`${keys.join(", ")} in ${pushedLabel}.`, ...warnings].join(" ")
         : ""
       : included.length === 0
         ? "Select at least one task."
-        : `${included.length} of ${tasks.length} selected. Nothing is sent until you press Push.`;
+        : `${included.length} of ${waiting} selected. Nothing is sent until you press Push.`;
 
   return (
     <TaskReview
@@ -636,15 +648,26 @@ function Tasks({
       pushing={pushing}
       pushed={pushed}
       destination={destination}
-      destinationLabel={destinationLabel}
-      keyUrl={(task) => urls[task.id] ?? (destination === "jira" ? jiraIssueUrl(jira?.site, task.key) : null)}
+      destinationLabel={pushed ? pushedLabel : destinationLabel}
+      keyUrl={(task) => urls[task.id] ?? task.url ?? (destination === "jira" ? jiraIssueUrl(jira?.site, task.key) : null)}
       status={status}
       onChange={(task) => setTasks((list) => list.map((t) => (t.id === task.id ? task : t)))}
       onCommit={commit}
       onDestination={setDestination}
       onPush={() => void push()}
       onJump={onJump}
-      canPush={hostOrAdmin(meeting, me)}
+      canPush={me.is_admin === true}
+      blocked={
+        destination === "jira" && settings && !settings.jira.connected ? (
+          <>
+            No Jira account is connected. Connect one in{" "}
+            <Link className="link" href="/settings">
+              Settings
+            </Link>
+            , under Connectors, to push these tasks.
+          </>
+        ) : null
+      }
     />
   );
 }

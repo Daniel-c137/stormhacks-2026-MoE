@@ -98,6 +98,19 @@ def test_creating_an_account_names_the_person_and_returns_the_password_once():
     }
 
 
+def test_an_invite_is_an_account_without_a_password_and_only_listings_mark_people_invited():
+    body = CreateAccountRequest(name="Priya Natarajan", email="priya@example.com")
+    assert body.invite is False
+    assert CreateAccountRequest.model_validate(body.model_dump() | {"invite": True}).invite
+
+    person = Person(id="u2", name="Priya Natarajan", short="Priya", initials="PN")
+    assert person.invited is False
+    invited = CreateAccountResponse(person=person, password=None)
+    assert invited.model_dump()["password"] is None
+    with pytest.raises(ValidationError):
+        CreateAccountResponse.model_validate({"person": person.model_dump()})
+
+
 def test_requests_from_before_the_v0_design_still_validate():
     assert CreateMeetingRequest(title="Standup").invitee_ids == []
     assert AskRequest(question="Is DS-117 done?", visibility="public").history == []

@@ -11,6 +11,7 @@ export interface Person {
   email?: string | null;
   photo_url?: string | null;
   is_admin?: boolean; // changes team settings, creates accounts, manages any meeting
+  invited?: boolean; // GET /team/members only: invited and not signed up yet (no login)
 }
 
 export interface Team {

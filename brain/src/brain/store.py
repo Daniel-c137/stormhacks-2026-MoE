@@ -43,6 +43,21 @@ class ReportAudio(NamedTuple):
     data: bytes
 
 
+class JiraAccount(BaseModel):
+    """The Atlassian account an admin connected for a team's pushes, and the project its issues
+    are created in. The API token is kept only sealed (brain.sealing); it never leaves the
+    brain."""
+
+    team_id: str
+    site: str  # name.atlassian.net
+    project: str
+    issue_type_id: str | None = None  # the project's type tasks are created as; None: "Task"
+    email: str
+    sealed_token: str
+    connected_by: str  # the admin's person id
+    connected_at: datetime
+
+
 class Login(BaseModel):
     """A person's email and password sign-in. Only the argon2 hash is kept; it never leaves the
     brain."""
@@ -112,11 +127,29 @@ class Store(Protocol):
 
     async def save_settings(self, settings: TeamSettings) -> TeamSettings: ...
 
+    async def jira_account(self, team_id: str) -> JiraAccount | None:
+        """The team's connected Jira account, or None."""
+        ...
+
+    async def save_jira_account(self, account: JiraAccount) -> JiraAccount:
+        """Inserts or replaces the team's account. NotFound when the team is missing."""
+        ...
+
+    async def delete_jira_account(self, team_id: str) -> None:
+        """Removing none is not an error."""
+        ...
+
     # logins
 
     async def set_login(self, person_id: str, email: str, password_hash: str) -> Login:
         """Inserts or replaces the person's login. Conflict when another person's login has the
         email (ignoring case); NotFound when the person is missing."""
+        ...
+
+    async def add_login(self, person_id: str, email: str, password_hash: str) -> Login:
+        """Inserts the person's first login and never replaces one: Conflict when the person
+        already has a login or another login has the email (ignoring case); NotFound when the
+        person is missing. Sign-up and Google claim an invited person's login with it."""
         ...
 
     async def login_by_email(self, email: str) -> Login:
@@ -125,6 +158,11 @@ class Store(Protocol):
 
     async def login(self, person_id: str) -> Login:
         """NotFound when the person has no login."""
+        ...
+
+    async def invited_people(self, email: str) -> list[Person]:
+        """People an admin invited with this email (ignoring case): on a team, with that email,
+        and no login yet. Several when several teams invited it; the API refuses those."""
         ...
 
     # meetings
@@ -347,6 +385,7 @@ class InMemoryStore:
         self._people = {p.id: _copy(p) for p in people}
         self._photos: dict[str, tuple[str, bytes]] = {}
         self._settings: dict[str, TeamSettings] = {}
+        self._jira_accounts: dict[str, JiraAccount] = {}
         self._logins: dict[str, Login] = {}
         self._meetings: dict[str, Meeting] = {}
         self._segments: dict[str, dict[str, TranscriptSegment]] = {}
@@ -389,6 +428,7 @@ class InMemoryStore:
             for row_id in [i for i, row in rows.items() if row.meeting_id in gone]:
                 del rows[row_id]
         self._settings.pop(team_id, None)
+        self._jira_accounts.pop(team_id, None)
         del self._teams[team_id]
 
     async def team_for_user(self, user_id: str) -> Team:
@@ -454,6 +494,18 @@ class InMemoryStore:
         self._settings[settings.team_id] = _copy(settings)
         return _copy(settings)
 
+    async def jira_account(self, team_id: str) -> JiraAccount | None:
+        saved = self._jira_accounts.get(team_id)
+        return _copy(saved) if saved else None
+
+    async def save_jira_account(self, account: JiraAccount) -> JiraAccount:
+        self._team(account.team_id)
+        self._jira_accounts[account.team_id] = _copy(account)
+        return _copy(account)
+
+    async def delete_jira_account(self, team_id: str) -> None:
+        self._jira_accounts.pop(team_id, None)
+
     # logins
 
     async def set_login(self, person_id: str, email: str, password_hash: str) -> Login:
@@ -473,6 +525,12 @@ class InMemoryStore:
         self._logins[person_id] = login
         return _copy(login)
 
+    async def add_login(self, person_id: str, email: str, password_hash: str) -> Login:
+        self._person(person_id)
+        if person_id in self._logins:
+            raise Conflict("the person has a login already")
+        return await self.set_login(person_id, email, password_hash)
+
     async def login_by_email(self, email: str) -> Login:
         for login in self._logins.values():
             if login.email.lower() == email.lower():
@@ -484,6 +542,17 @@ class InMemoryStore:
         if saved is None:
             raise NotFound(f"login for person {person_id}")
         return _copy(saved)
+
+    async def invited_people(self, email: str) -> list[Person]:
+        wanted = email.strip().lower()
+        on_a_team = {i for team in self._teams.values() for i in team.member_ids}
+        return [
+            _copy(p)
+            for p in self._people.values()
+            if p.id in on_a_team
+            and p.id not in self._logins
+            and (p.email or "").strip().lower() == wanted
+        ]
 
     # meetings
 
