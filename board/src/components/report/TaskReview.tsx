@@ -21,6 +21,8 @@ export interface TaskReviewProps {
   onDestination: (destination: TaskDestination) => void;
   /** Explicit human approval of the chosen drafts and destination. */
   onPush: () => void;
+  /** Show the moment a task came from in the transcript; null when there is no transcript. */
+  onJump: ((t: number) => void) | null;
 }
 
 /** Edit title, owner, due and description; include or exclude; then push. */
@@ -51,14 +53,28 @@ export function TaskReview(props: TaskReviewProps) {
                 aria-label={`Include “${task.title}”`}
               />
               <div className="task-fields">
-                <input
-                  className="field t-title full"
-                  value={task.title}
-                  onChange={(e) => edit({ title: e.target.value })}
-                  onBlur={() => props.onCommit(task)}
-                  disabled={locked}
-                  aria-label="Task title"
-                />
+                <div className="task-head full">
+                  <input
+                    className="field t-title"
+                    value={task.title}
+                    onChange={(e) => edit({ title: e.target.value })}
+                    onBlur={() => props.onCommit(task)}
+                    disabled={locked}
+                    aria-label="Task title"
+                  />
+                  {task.t != null && (
+                    <button
+                      type="button"
+                      className="jump"
+                      onClick={() => task.t != null && props.onJump?.(task.t)}
+                      disabled={!props.onJump}
+                      aria-label={`Jump to ${fmtT(task.t)} in the transcript`}
+                    >
+                      <Icon name="scroll-text" />
+                      {fmtT(task.t)}
+                    </button>
+                  )}
+                </div>
                 <label className="label">
                   Description
                   <textarea
@@ -67,7 +83,7 @@ export function TaskReview(props: TaskReviewProps) {
                     onChange={(e) => edit({ description: e.target.value || null })}
                     onBlur={() => props.onCommit(task)}
                     disabled={locked}
-                    rows={2}
+                    rows={1}
                   />
                 </label>
                 <label className="label">
@@ -113,11 +129,6 @@ export function TaskReview(props: TaskReviewProps) {
                         {task.key}
                       </span>
                     ))}
-                  {task.quote && (
-                    <span className="quote">
-                      “{task.quote}”{task.t != null ? ` · ${fmtT(task.t)}` : ""}
-                    </span>
-                  )}
                 </div>
               </div>
             </div>

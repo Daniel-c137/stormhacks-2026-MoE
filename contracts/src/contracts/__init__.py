@@ -45,6 +45,7 @@ from .meeting import Meeting, Participant, Person, Team
 from .report import (
     Decision,
     DecisionRelation,
+    DecisionStep,
     Report,
     ReportProgress,
     Risk,
@@ -81,6 +82,7 @@ __all__ = [
     "CreateMeetingRequest",
     "Decision",
     "DecisionRelation",
+    "DecisionStep",
     "FactCheck",
     "FactCheckRequest",
     "FactCheckResponse",

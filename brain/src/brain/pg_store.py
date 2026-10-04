@@ -58,7 +58,9 @@ select t.id, t.name, t.github_repo, t.jira_project,
 from teams t
 """
 TASK = "id, meeting_id, title, description, owner_id, due, t, quote, include, key, jira_status"
-DECISION = "id, meeting_id, text, made_by, t, quote, status, relation_type, relation_decision_id"
+DECISION = (
+    "id, meeting_id, text, made_by, t, quote, chain, status, relation_type, relation_decision_id"
+)
 AGENDA = "generated_at, updated_at, current_item_id, tracked_until, revision"
 SEGMENT = "seg_id, meeting_id, speaker_id, speaker_name, text, is_final, t_start, t_end"
 FACT_CHECK = (
@@ -746,7 +748,7 @@ class PostgresStore:
             await cur.executemany(
                 f"insert into decisions ({DECISION}, ord)"
                 " values (%(id)s, %(meeting_id)s, %(text)s, %(made_by)s, %(t)s, %(quote)s,"
-                " %(status)s, %(relation_type)s, %(relation_decision_id)s, %(ord)s)"
+                " %(chain)s, %(status)s, %(relation_type)s, %(relation_decision_id)s, %(ord)s)"
                 f" on conflict (id) do update set {_from_excluded(DECISION, 'ord')}",
                 [self._decision_values(d) | {"ord": i} for i, d in enumerate(report.decisions)],
             )
@@ -889,7 +891,8 @@ class PostgresStore:
             row = await self._one(
                 cur,
                 "update decisions set meeting_id = %(meeting_id)s, text = %(text)s,"
-                " made_by = %(made_by)s, t = %(t)s, quote = %(quote)s, status = %(status)s,"
+                " made_by = %(made_by)s, t = %(t)s, quote = %(quote)s, chain = %(chain)s,"
+                " status = %(status)s,"
                 " relation_type = %(relation_type)s,"
                 " relation_decision_id = %(relation_decision_id)s"
                 f" where id = %(id)s returning {DECISION}",
@@ -967,6 +970,7 @@ class PostgresStore:
         values = decision.model_dump(exclude={"relation"})
         relation = decision.relation
         return values | {
+            "chain": Jsonb(values["chain"]),
             "relation_type": relation.type if relation else None,
             "relation_decision_id": relation.decision_id if relation else None,
         }

@@ -16,6 +16,14 @@ class DecisionRelation(BaseModel):
     decision_id: str
 
 
+class DecisionStep(BaseModel):
+    """One thing said on the way to a decision: a few words on what, and where it was said."""
+
+    text: str
+    t: float  # seconds from the meeting start, where this part of the conversation begins
+    seg_ids: list[str] = []  # the transcript segments it describes, in time order
+
+
 class Decision(BaseModel):
     id: str
     meeting_id: str
@@ -23,6 +31,9 @@ class Decision(BaseModel):
     made_by: str
     t: float
     quote: str
+    # What was said that led to it, oldest first. Empty when none was recorded: the decision
+    # then has only its quote.
+    chain: list[DecisionStep] = []
     status: DecisionStatus = "active"
     relation: DecisionRelation | None = None
 
