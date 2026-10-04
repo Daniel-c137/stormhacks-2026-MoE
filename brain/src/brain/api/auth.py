@@ -2,11 +2,17 @@
 Accounts come from `brain add-user`, an admin (POST /team/accounts), or an invited email signing
 up (#128): a member of SIGNUP_TEAM_ID with no login yet. There is no open sign-up."""
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+import secrets
+from urllib.parse import urlencode
+
+import httpx
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import RedirectResponse
 
 from contracts import (
     AuthOptions,
+    GoogleExchangeRequest,
     LoginRequest,
     LoginResponse,
     PasswordChange,
@@ -27,8 +33,29 @@ from ..auth import (
     verify_password,
 )
 from ..config import Settings
+from ..google_auth import (
+    FLOW_COOKIE,
+    FLOW_COOKIE_PATH,
+    FLOW_SECONDS,
+    GoogleKeys,
+    GoogleSignInFailed,
+    OneTimeCodes,
+    authorize_url,
+    new_flow,
+    seal,
+    unseal,
+    verify_callback,
+)
 from ..store import Conflict, Login, NotFound, Store
-from .deps import current_user, get_login_limiter, get_settings, get_store
+from .deps import (
+    current_user,
+    get_google_keys,
+    get_http_transport,
+    get_login_limiter,
+    get_one_time_codes,
+    get_settings,
+    get_store,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -158,6 +185,127 @@ async def sign_up(
     limiter.clear(email)
     token, expires_at = issue_token(person.id, settings)
     return LoginResponse(token=token, expires_at=expires_at, person=person)
+
+
+# Google (#128)
+
+
+@router.get("/google")
+async def google_sign_in(
+    request: Request,
+    next: str | None = None,
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
+    """Sends the browser to Google, with this sign-in's state, nonce and PKCE verifier sealed in
+    a short-lived cookie that only this browser carries back."""
+    secret = signing_secret(settings)
+    if secret is None or not google_configured(settings):
+        raise HTTPException(status_code=503, detail="Google sign-in isn't configured")
+    flow = new_flow(next)
+    redirect_uri = str(request.url_for("google_callback"))
+    response = RedirectResponse(
+        authorize_url(settings.google_client_id or "", redirect_uri, flow), status_code=302
+    )
+    response.set_cookie(
+        FLOW_COOKIE,
+        seal(flow, secret),
+        max_age=FLOW_SECONDS,
+        path=FLOW_COOKIE_PATH,
+        httponly=True,
+        samesite="lax",
+        secure=request.url.scheme == "https",
+    )
+    return response
+
+
+@router.get("/google/callback", name="google_callback")
+async def google_callback(
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    google_signin: str | None = Cookie(default=None),
+    settings: Settings = Depends(get_settings),
+    store: Store = Depends(get_store),
+    keys: GoogleKeys = Depends(get_google_keys),
+    codes: OneTimeCodes = Depends(get_one_time_codes),
+    transport: httpx.AsyncBaseTransport | None = Depends(get_http_transport),
+) -> RedirectResponse:
+    """Where Google sends the browser back. Signs in the account with Google's verified email,
+    or an invited email (whose login is then reserved for Google), and sends the browser to the
+    board's /login with a one-time code (`google`) or why it failed (`google_error`)."""
+
+    def back(**query: str) -> RedirectResponse:
+        response = RedirectResponse(
+            f"{settings.board_url.rstrip('/')}/login?{urlencode(query)}", status_code=302
+        )
+        response.delete_cookie(FLOW_COOKIE, path=FLOW_COOKIE_PATH)
+        return response
+
+    secret = signing_secret(settings)
+    if secret is None or not google_configured(settings):
+        return back(google_error="failed")
+    try:
+        flow = unseal(google_signin, state, secret)
+        if error:
+            raise GoogleSignInFailed("cancelled", error)
+        if not code:
+            raise GoogleSignInFailed("failed", "Google sent no code")
+        async with httpx.AsyncClient(transport=transport, timeout=10) as http:
+            identity = await verify_callback(
+                code,
+                flow,
+                client_id=settings.google_client_id or "",
+                client_secret=settings.google_client_secret or "",
+                redirect_uri=str(request.url_for("google_callback")),
+                keys=keys,
+                http=http,
+            )
+        person = await google_person(store, settings, identity.email)
+        if person is None:
+            raise GoogleSignInFailed("not_invited", identity.email)
+    except GoogleSignInFailed as e:
+        return back(google_error=e.reason)
+    token, expires_at = issue_token(person.id, settings)
+    session = LoginResponse(token=token, expires_at=expires_at, person=person)
+    return back(google=codes.issue(session), next=flow.next)
+
+
+async def google_person(store: Store, settings: Settings, email: str) -> Person | None:
+    """Whoever signs in with this email, else the sign-up team's invited member with it, whose
+    login is then reserved with a password nobody knows: the account is theirs through Google,
+    and nobody can sign up for that email with a password. None for anyone else."""
+    try:
+        return await store.person((await store.login_by_email(email)).person_id)
+    except NotFound:
+        pass
+    if not settings.signup_team_id:
+        return None
+    try:
+        team = await store.team(settings.signup_team_id)
+    except NotFound:
+        return None
+    invited = await invited_person(store, team, email)
+    if invited is None:
+        return None
+    unusable = await run_in_threadpool(hash_password, secrets.token_urlsafe(32))
+    try:
+        await store.set_login(invited.id, invited.email or email, unusable)
+    except Conflict:  # someone signed up for the email meanwhile
+        return None
+    return invited
+
+
+@router.post("/google/exchange")
+async def google_exchange(
+    body: GoogleExchangeRequest, codes: OneTimeCodes = Depends(get_one_time_codes)
+) -> LoginResponse:
+    """The board swaps the one-time code from the callback for the session. Works once, within
+    a minute."""
+    session = codes.redeem(body.code)
+    if session is None:
+        raise HTTPException(status_code=401, detail="This sign-in has expired. Try again.")
+    return session
 
 
 @router.post("/password", status_code=204)

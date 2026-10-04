@@ -1,0 +1,207 @@
+"""Google sign-in for the brain's own sessions (#128): OpenID Connect's authorization code flow
+with PKCE, done server-side so no third-party auth service holds our users.
+
+The flow's state, PKCE verifier, nonce and where to go next live in a short-lived cookie signed
+with AUTH_SECRET, so only the browser that started a sign-in can finish it. Google's ID token is
+verified against its published keys (signature, issuer, audience, expiry, nonce) and must carry a
+verified email. The board gets a one-time code, never the session token in a URL.
+"""
+
+import base64
+import hashlib
+import secrets
+import time
+from dataclasses import dataclass, field
+from urllib.parse import urlencode
+
+import httpx
+import jwt
+
+from contracts import LoginResponse
+
+from .auth import ALGORITHM
+
+AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+TOKEN_URL = "https://oauth2.googleapis.com/token"
+KEYS_URL = "https://www.googleapis.com/oauth2/v3/certs"
+ISSUERS = ("https://accounts.google.com", "accounts.google.com")
+SCOPE = "openid email profile"
+
+FLOW_COOKIE = "google_signin"
+FLOW_COOKIE_PATH = "/auth/google"
+FLOW_SECONDS = 10 * 60  # time allowed at Google
+FLOW_AUDIENCE = "google-signin"
+CODE_SECONDS = 60  # the board swaps its one-time code at once
+KEYS_SECONDS = 60 * 60  # Google rotates its keys rarely and publishes the new one early
+
+
+class GoogleSignInFailed(Exception):
+    """The callback can't be trusted or Google's answer doesn't check out. `reason` goes back to
+    the sign-in page: state, cancelled, failed, unverified or not_invited."""
+
+    def __init__(self, reason: str, detail: str = ""):
+        super().__init__(detail or reason)
+        self.reason = reason
+
+
+@dataclass(frozen=True)
+class Flow:
+    state: str
+    verifier: str
+    nonce: str
+    next: str
+
+    @property
+    def challenge(self) -> str:
+        digest = hashlib.sha256(self.verifier.encode()).digest()
+        return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+
+
+def safe_next(path: str | None) -> str:
+    """A same-site path to land on after signing in; anything else is home."""
+    return path if path and path.startswith("/") and not path.startswith("//") else "/"
+
+
+def new_flow(next_path: str | None) -> Flow:
+    return Flow(
+        state=secrets.token_urlsafe(32),
+        verifier=secrets.token_urlsafe(64),
+        nonce=secrets.token_urlsafe(32),
+        next=safe_next(next_path),
+    )
+
+
+def authorize_url(client_id: str, redirect_uri: str, flow: Flow) -> str:
+    query = {
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": SCOPE,
+        "state": flow.state,
+        "nonce": flow.nonce,
+        "code_challenge": flow.challenge,
+        "code_challenge_method": "S256",
+        "prompt": "select_account",
+    }
+    return f"{AUTHORIZE_URL}?{urlencode(query)}"
+
+
+def seal(flow: Flow, secret: str) -> str:
+    now = int(time.time())
+    claims = {
+        "aud": FLOW_AUDIENCE,
+        "iat": now,
+        "exp": now + FLOW_SECONDS,
+        "state": flow.state,
+        "verifier": flow.verifier,
+        "nonce": flow.nonce,
+        "next": flow.next,
+    }
+    return jwt.encode(claims, secret, algorithm=ALGORITHM)
+
+
+def unseal(cookie: str | None, state: str | None, secret: str) -> Flow:
+    """The flow this browser started, if `state` is its state. Raises GoogleSignInFailed."""
+    if not cookie or not state:
+        raise GoogleSignInFailed("state", "no sign-in was started in this browser")
+    try:
+        claims = jwt.decode(cookie, secret, algorithms=[ALGORITHM], audience=FLOW_AUDIENCE)
+    except jwt.PyJWTError as e:
+        raise GoogleSignInFailed("state", f"the sign-in cookie is invalid: {e}") from None
+    if not secrets.compare_digest(str(claims.get("state", "")), state):
+        raise GoogleSignInFailed("state", "the state doesn't match this browser's sign-in")
+    return Flow(claims["state"], claims["verifier"], claims["nonce"], safe_next(claims["next"]))
+
+
+@dataclass
+class GoogleKeys:
+    """Google's published signing keys, fetched when a kid is new and at most hourly otherwise."""
+
+    keys: dict[str, jwt.PyJWK] = field(default_factory=dict)
+    fetched_at: float = 0.0
+
+    async def key(self, kid: str, http: httpx.AsyncClient) -> jwt.PyJWK:
+        stale = time.monotonic() - self.fetched_at > KEYS_SECONDS
+        if kid not in self.keys or stale:
+            response = await http.get(KEYS_URL)
+            response.raise_for_status()
+            self.keys = {k["kid"]: jwt.PyJWK(k) for k in response.json().get("keys", [])}
+            self.fetched_at = time.monotonic()
+        if kid not in self.keys:
+            raise GoogleSignInFailed("failed", "the ID token is signed by an unpublished key")
+        return self.keys[kid]
+
+
+@dataclass
+class GoogleIdentity:
+    email: str
+    name: str | None
+
+
+async def verify_callback(
+    code: str,
+    flow: Flow,
+    *,
+    client_id: str,
+    client_secret: str,
+    redirect_uri: str,
+    keys: GoogleKeys,
+    http: httpx.AsyncClient,
+) -> GoogleIdentity:
+    """Swaps the code (with the PKCE verifier) for an ID token and verifies it. Raises
+    GoogleSignInFailed."""
+    try:
+        response = await http.post(
+            TOKEN_URL,
+            data={
+                "code": code,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uri": redirect_uri,
+                "grant_type": "authorization_code",
+                "code_verifier": flow.verifier,
+            },
+        )
+        response.raise_for_status()
+        id_token = response.json()["id_token"]
+        kid = jwt.get_unverified_header(id_token).get("kid", "")
+        key = await keys.key(kid, http)
+        claims = jwt.decode(
+            id_token,
+            key,
+            algorithms=["RS256"],
+            audience=client_id,
+            issuer=ISSUERS,
+            options={"require": ["exp", "iat", "iss", "aud", "sub"]},
+        )
+    except GoogleSignInFailed:
+        raise
+    except (httpx.HTTPError, KeyError, ValueError, jwt.PyJWTError) as e:
+        raise GoogleSignInFailed("failed", f"Google's answer doesn't check out: {e}") from None
+    if not secrets.compare_digest(str(claims.get("nonce", "")), flow.nonce):
+        raise GoogleSignInFailed("failed", "the ID token's nonce isn't this sign-in's")
+    email = str(claims.get("email") or "").strip()
+    if not email or claims.get("email_verified") is not True:
+        raise GoogleSignInFailed("unverified", "Google hasn't verified this email")
+    return GoogleIdentity(email=email, name=claims.get("name"))
+
+
+@dataclass
+class OneTimeCodes:
+    """Sessions waiting for the board to collect them, each by a code that works once and
+    briefly. In process: a sign-in has to finish on the brain that started it."""
+
+    pending: dict[str, tuple[LoginResponse, float]] = field(default_factory=dict)
+
+    def issue(self, session: LoginResponse) -> str:
+        now = time.monotonic()
+        self.pending = {c: v for c, v in self.pending.items() if v[1] > now}
+        code = secrets.token_urlsafe(32)
+        self.pending[code] = (session, now + CODE_SECONDS)
+        return code
+
+    def redeem(self, code: str) -> LoginResponse | None:
+        found = self.pending.pop(code, None)
+        if found is None or found[1] <= time.monotonic():
+            return None
+        return found[0]
