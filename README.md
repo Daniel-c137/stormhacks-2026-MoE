@@ -72,7 +72,7 @@ uv run pytest brain realtime world                  # unit and API tests; live t
 BRAIN_TEST_STORE=postgres uv run pytest brain       # the API tests on embedded Postgres instead of memory
 uv run ruff check . && uv run ruff format --check .
 pnpm --filter board typecheck
-pnpm --filter board test                            # the board's link helpers, with Node's test runner
+pnpm --filter board test                            # the board's link and next-path helpers, with Node's test runner
 ```
 
 Live tests call real services and spend quota. They skip unless `.env` has what they need: `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_EMBEDDING_MODEL` and `GEMINI_EMBEDDING_DIM` for most; `OPENROUTER_API_KEY` and `OPENROUTER_MODELS` for the fallback (`OPENROUTER_EMBEDDING_MODEL` for the embeddings fallback); `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` and `ELEVENLABS_TTS_MODEL` for speech. Run only the ones you need:
@@ -90,14 +90,14 @@ ELEVENLABS_STT_MODEL=scribe_v2_realtime uv run pytest realtime -m live -k join -
 
 ## Teams, accounts and demo data
 
-There is no public sign-up. Create a team and its first admin with the brain's CLI; `add-user` prints a one-time password unless you pipe one in with `--password-stdin`:
+There is no open sign-up: only someone an admin invited can create an account. Create a team and its first admin with the brain's CLI; `add-user` prints a one-time password unless you pipe one in with `--password-stdin`:
 
 ```sh
 uv run brain add-team --id <team-id> --name "<team name>"
 uv run brain add-user --team <team-id> --name "<full name>" --email <email> --admin
 ```
 
-Only an admin changes the team's settings (connectors, the agent's voice and fact-checking, who may allow answers, time zone) and creates the other accounts, in Settings → Members, which shows the generated password once (`POST /team/accounts`). What a meeting's host does (ending it, changing its invitees, retrying its write-up, approving its push to Jira) an admin may do too, so a meeting whose host left can still be managed. Everyone keeps their own profile, photo and password. `add-user` without `--admin` adds someone who is not an admin, and leaves an existing admin one. To grant or revoke admin later (the brain checks on every request, so it takes effect at once; a team's last admin can't be revoked):
+Only an admin changes the team's settings (connectors, the agent's voice and fact-checking, who may allow answers, time zone) and adds the other people, in Settings → Members (`POST /team/accounts`). **Invite** (the default) adds the person with no login; send them the copied link (`/login?mode=signup`), where they create their account with that email and a password, or with Google, and join the team. They show as Invited until then. An email that two teams invited is refused (409, "Ask your team's admin"); removing a member isn't built yet, so invite each email on one team only. **Generate password** creates the login at once and shows the password once. What a meeting's host does (ending it, changing its invitees, retrying its write-up, approving its push to Jira) an admin may do too, so a meeting whose host left can still be managed. Everyone keeps their own profile, photo and password. `add-user` without `--admin` adds someone who is not an admin, and leaves an existing admin one. To grant or revoke admin later (the brain checks on every request, so it takes effect at once; a team's last admin can't be revoked):
 
 ```sh
 uv run brain set-admin --email <email>
