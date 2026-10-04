@@ -515,6 +515,35 @@ async def test_a_question_that_trails_off_is_sent_when_nothing_follows(
     assert [i.question for i in invocations] == ["what's the status of..."]
 
 
+async def test_a_fragment_after_the_name_alone_is_dropped_when_its_wait_runs_out(
+    make_manager, brain, stt, clock, invocations
+):
+    detector = WakeDetector(["OmniMan"], trailing_seconds=0.05)
+    manager = make_manager(brain, detector)
+    start(manager, "u-alex")
+    await until(lambda: stt.started)
+    clock.now = 11.0  # past the name's window: segments below end 2 s and 3 s in
+    stt.say("u-alex", "OmniMan.")
+    stt.say("u-alex", "Oh, I need-")
+    await until(lambda: len(brain.saved) == 2)
+
+    await until(lambda: detector.next_due() is None, timeout=2.0)
+    assert invocations == []
+
+
+async def test_the_name_alone_then_a_question_in_two_parts_is_one_question(
+    manager, stt, invocations
+):
+    start(manager, "u-alex")
+    stt.say("u-alex", "OmniMan.")
+    stt.say("u-alex", "What's the status of...")
+    stt.say("u-alex", "DS-104 in Jira.")
+    stt.end("u-alex")
+    await manager.join()
+
+    assert [i.question for i in invocations] == ["What's the status of DS-104 in Jira."]
+
+
 async def test_a_held_question_is_not_lost_when_the_meeting_closes(
     make_manager, brain, stt, invocations
 ):
