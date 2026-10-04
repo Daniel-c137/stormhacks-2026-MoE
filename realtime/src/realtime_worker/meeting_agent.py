@@ -56,6 +56,7 @@ AGENDA_GATHER_S = 0.5
 # What a refused sender is told, privately. {agent} is the agent's name.
 REFUSED: dict[str, str] = {
     "speak": "Only the host or an admin can let {agent} speak in this meeting.",
+    "stop": "Only the host or an admin can stop {agent} in this meeting.",
     "send_to_chat": "Only the host or an admin can post {agent}'s answers in chat in this meeting.",
 }
 REFUSED_UNCHECKED = "I couldn't check who may do that just now, so I didn't. Try again in a moment."
@@ -138,6 +139,8 @@ class MeetingAgent:
         self._listening: dict[str, str] = {}  # who is calling the agent by voice: id -> name
         self._working = 0
         self._speaking = asyncio.Lock()
+        self._playback: asyncio.Task[None] | None = None  # the answer being spoken
+        self._stop_requested = False
         self._last_agenda: str | None = None
         self._agenda_lock = asyncio.Lock()  # one agenda check at a time: a tick or a caption's
         self._agenda_due: list[float] = []  # when saved captions settle, on the meeting clock
@@ -259,6 +262,9 @@ class MeetingAgent:
             return
         if action.action == "show_on_stage":
             return  # the board publishes Topic.STAGE itself
+        if action.action == "stop":
+            await self._stop(action, sender)
+            return
         if self._pending(action) is None or not await self._may_act(action, sender):
             return
         card = self._pending(action)  # it may have changed while the brain was asked
@@ -318,10 +324,14 @@ class MeetingAgent:
             log.warning("Could not tell %s their %s was refused: %s", sender, action.action, e)
 
     async def _speak(self, card: ResponseCard) -> None:
+        """Plays the answer as its own task, so a Stop can cut it off (_stop). The card is
+        `speaking` meanwhile, so the board shows Stop instead of Speak; it ends `spoken`, or back
+        to `pending` when stopped or when the speech failed."""
         if self._speaking.locked():
             log.info("Already speaking; ignored Speak on card %s", card.id)
             return
         failure = ""
+        stopped = False
         async with self._speaking:
             if card.status != "pending" or not self.state.can_move("speaking"):
                 log.info("Not speaking card %s from %s", card.id, self.state.current.state)
@@ -330,14 +340,40 @@ class MeetingAgent:
             voice = await self._voice()
             log.info("Speaking card %s: %d characters", card.id, len(text))
             await self._move("speaking", clip(f"Answering {card.invocation.asked_by_name}"))
+            await self._set_status(card, "speaking")
+            self._playback = asyncio.create_task(
+                self._speaker.play(self._tts.synthesize(text, voice or ""))
+            )
+            self._stop_requested = False
             try:
-                await self._speaker.play(self._tts.synthesize(text, voice or ""))
+                await self._playback
+            except asyncio.CancelledError:
+                current = asyncio.current_task()
+                if not self._stop_requested or (current and current.cancelling()):
+                    raise  # the agent itself is closing, not a Stop
+                stopped = True
+                log.info("Stopped speaking card %s", card.id)
             except Exception as e:
                 log.warning("Could not speak card %s: %s", card.id, e)
                 failure = clip(f"Couldn't speak the answer: {e}")
-        if not failure:
-            await self._set_status(card, "spoken")
+            finally:
+                self._playback = None
+        latest = self._cards.get(card.id, card)
+        await self._set_status(latest, "pending" if stopped or failure else "spoken")
         await self._rest(failure)
+
+    async def _stop(self, action: ResponseAction, sender: str) -> None:
+        """Stop pressed on the card being spoken: the audio stops at once (TrackSpeaker clears
+        what was queued). Anyone the team's who_can_allow lets act on cards may stop it."""
+        card = self._cards.get(action.card_id)
+        if card is None or card.status != "speaking" or self._playback is None:
+            log.info("Ignored stop on card %s: it isn't being spoken", action.card_id)
+            return
+        if not await self._may_act(action, sender):
+            return
+        if self._playback is not None and not self._playback.done():
+            self._stop_requested = True
+            self._playback.cancel()
 
     async def _voice(self) -> str | None:
         """The team's chosen voice, else the default."""

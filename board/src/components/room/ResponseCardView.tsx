@@ -15,7 +15,8 @@ export interface ResponseCardViewProps {
   onAction: (action: ResponseActionName) => void;
 }
 
-/** Shared answer with sources. Silent until Speak; also Send to public chat, Dismiss, Show on stage. */
+/** Shared answer with sources. Silent until Speak, which turns into Stop while the answer plays;
+ * also Send to public chat, Dismiss, Show on stage. */
 export function ResponseCardView({ card, canAct, busy, onAction }: ResponseCardViewProps) {
   const agent = identity.agent_name;
   const [open, setOpen] = useState(false);
@@ -25,7 +26,13 @@ export function ResponseCardView({ card, canAct, busy, onAction }: ResponseCardV
     open,
     useCallback(() => setOpen(false), []),
   );
-  const sayLabel = canAct ? "Say it out loud" : `Only the host can let ${agent} speak`;
+  // Pressing the speaker again while the answer plays stops it.
+  const speaking = card.status === "speaking";
+  const sayLabel = !canAct
+    ? `Only the host can ${speaking ? "stop" : "let"} ${agent}${speaking ? "" : " speak"}`
+    : speaking
+      ? `Stop ${agent}`
+      : "Say it out loud";
   const { invocation, answer } = card;
 
   return (
@@ -33,7 +40,7 @@ export function ResponseCardView({ card, canAct, busy, onAction }: ResponseCardV
       <div className="ready" role="group" aria-label={`${agent} has an answer ready`}>
         <Icon name="square-check" className="lead" />
         <button type="button" className="ready-label" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-haspopup="dialog">
-          Answer ready
+          {speaking ? "Speaking…" : "Answer ready"}
           <Icon name={open ? "chevron-up" : "chevron-down"} />
         </button>
         <span className="sep" aria-hidden="true" />
@@ -46,8 +53,14 @@ export function ResponseCardView({ card, canAct, busy, onAction }: ResponseCardV
           </span>
         </div>
         <div className="ready-act has-tip">
-          <button type="button" disabled={!canAct || busy} onClick={() => onAction("speak")} aria-label={sayLabel}>
-            <Icon name="volume-2" />
+          <button
+            type="button"
+            disabled={!canAct || busy}
+            onClick={() => onAction(speaking ? "stop" : "speak")}
+            aria-label={sayLabel}
+            aria-pressed={speaking}
+          >
+            <Icon name={speaking ? "volume-x" : "volume-2"} />
           </button>
           <span role="tooltip" className="tip">
             {sayLabel}

@@ -67,8 +67,9 @@ export interface Answer {
   unavailable: string[]; // sources that were missing or failed; never papered over
 }
 
-export type ResponseCardStatus = "pending" | "spoken" | "sent_to_chat" | "dismissed";
-export type ResponseActionName = "speak" | "send_to_chat" | "dismiss" | "show_on_stage";
+export type ResponseCardStatus = "pending" | "speaking" | "spoken" | "sent_to_chat" | "dismissed";
+// stop: cut the answer being spoken off; the card goes back to pending.
+export type ResponseActionName = "speak" | "stop" | "send_to_chat" | "dismiss" | "show_on_stage";
 
 /** Shared answer to a voice question. Silent until a participant chooses Speak. */
 export interface ResponseCard {

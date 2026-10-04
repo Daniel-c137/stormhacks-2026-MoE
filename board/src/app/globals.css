@@ -140,15 +140,20 @@
   .auth-switch .link { font-size: 14px; font-weight: 700; }
 
   /* ---------- home ---------- */
-  .topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 16px; height: 68px; padding: 0 28px; background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(10px); }
+  .topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 16px; height: 80px; padding: 0 28px; background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(10px); }
   .brand { display: flex; align-items: center; gap: 10px; border: 0; background: none; padding: 0; color: var(--ink); text-decoration: none; }
   .brand .mark-slot { width: 30px; height: 30px; }
   .wordmark { font-family: var(--font-display); font-size: 24px; font-weight: 800; letter-spacing: -.035em; }
-  /* Login logo: the star spins, then a hop passes left to right through the letters. Repeats every 9s.
+  /* The app's own header carries the brand larger than the sign-in card does. */
+  .topbar .brand { gap: 12px; }
+  .topbar .brand .mark-slot { width: 40px; height: 40px; }
+  .topbar .wordmark { font-size: 32px; }
+  /* Login logo (Reyhaneh's): the star spins, then a hop passes left to right through the letters.
+     Repeats every 9s. On the sign-in page (.login-brand) and the sign-in loading card (.auth-card).
      The global prefers-reduced-motion rule above turns this off. */
-  .auth-card .mark-slot { transform-origin: center; animation: markSpin 9s cubic-bezier(.3,.7,.2,1) infinite; }
-  .auth-card .wordmark { display: inline-flex; }
-  .auth-card .wordmark-ch { display: inline-block; white-space: pre; animation: letterHop 9s ease-out infinite; animation-delay: calc(600ms + var(--i) * 180ms); }
+  .auth-card .mark-slot, .login-brand .mark-slot { transform-origin: center; animation: markSpin 9s cubic-bezier(.3,.7,.2,1) infinite; }
+  .auth-card .wordmark, .login-brand .wordmark { display: inline-flex; }
+  .auth-card .wordmark-ch, .login-brand .wordmark-ch { display: inline-block; white-space: pre; animation: letterHop 9s ease-out infinite; animation-delay: calc(600ms + var(--i) * 180ms); }
   @keyframes markSpin { 0% { transform: rotate(0) scale(1) } 6% { transform: rotate(180deg) scale(1.15) } 12%, 100% { transform: rotate(360deg) scale(1) } }
   @keyframes letterHop { 0% { transform: none } 2.5% { transform: translateY(-10px) scale(1.12) } 5.5%, 100% { transform: none } }
   .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 6px; }
@@ -158,11 +163,13 @@
   .account-who b { display: block; font-size: 14px; }
   .account-who span { display: block; font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
   .home-main { padding: 8px 28px 28px; display: grid; grid-template-columns: minmax(0,1fr) 420px; gap: 28px; align-items: start; }
-  .home-hero { min-height: calc(100vh - 104px); display: flex; flex-direction: column; justify-content: center; padding: 40px 8px 80px; }
+  .home-hero { min-height: calc(100vh - 116px); display: flex; flex-direction: column; justify-content: center; padding: 40px 8px 80px; }
+  /* Today's date over the greeting: about a third of its size, and darker than an eyebrow. */
+  .hero-date { font-size: clamp(18px, 1.7vw, 22px); font-weight: 600; letter-spacing: -.01em; color: var(--ink-2); }
   .hero-title { font-family: var(--font-display); font-size: clamp(44px, 6vw, 76px); line-height: .98; font-weight: 800; letter-spacing: -.035em; margin-top: 12px; text-wrap: balance; }
   .home-actions { margin-top: 32px; display: flex; gap: 12px; flex-wrap: wrap; }
 
-  .rail { position: sticky; top: 76px; height: calc(100vh - 104px); min-height: 540px; background: var(--card); border-radius: 22px; box-shadow: var(--shadow-md); display: flex; flex-direction: column; overflow: hidden; }
+  .rail { position: sticky; top: 88px; height: calc(100vh - 116px); min-height: 540px; background: var(--card); border-radius: 22px; box-shadow: var(--shadow-md); display: flex; flex-direction: column; overflow: hidden; }
   .rail-scroll { flex: 1; min-height: 0; overflow: auto; padding: 18px 16px 104px; display: flex; flex-direction: column; gap: 20px; }
   .rail-group { display: flex; flex-direction: column; gap: 8px; }
   .rail-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 4px; min-height: 36px; }
@@ -714,6 +721,10 @@
   }
   @media (max-width: 760px) {
     .topbar, .home-main { padding-left: 16px; padding-right: 16px; }
+    .topbar { height: 68px; }
+    .topbar .brand .mark-slot { width: 34px; height: 34px; }
+    .topbar .brand .mark-slot svg { width: 34px; height: 34px; }
+    .topbar .wordmark { font-size: 27px; }
     .lobby { padding: 12px; }
     .preview { min-height: 600px; }
     .name-tag { bottom: auto; top: 18px; left: 18px; max-width: calc(100% - 140px); overflow: hidden; text-overflow: ellipsis; }

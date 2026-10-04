@@ -182,16 +182,23 @@ class FakeTTS:
 
 
 class FakeSpeaker:
+    """`played` gets an answer only once it finished; `cut_off` counts answers stopped midway."""
+
     def __init__(self):
         self.played: list[list] = []
         self.hold: asyncio.Event | None = None
         self.started = asyncio.Event()
+        self.cut_off = 0
 
     async def play(self, frames) -> None:
         self.started.set()
         got = [f async for f in frames]
-        if self.hold:
-            await self.hold.wait()
+        try:
+            if self.hold:
+                await self.hold.wait()
+        except asyncio.CancelledError:
+            self.cut_off += 1
+            raise
         self.played.append(got)
 
 
@@ -757,6 +764,79 @@ async def test_two_speak_clicks_speak_once(agent, bus, tts, speaker):
     assert len(tts.calls) == 1
 
 
+async def test_the_card_says_it_is_being_spoken_while_the_audio_plays(agent, bus, speaker):
+    card = await card_for(agent, bus)
+    speaker.hold = asyncio.Event()
+
+    task = asyncio.create_task(bus.deliver(Topic.RESPONSE_ACTION, act(card, "speak"), "u-sarah"))
+    await speaker.started.wait()
+    assert bus.cards()[-1].status == "speaking"  # the board shows Stop
+    speaker.hold.set()
+    await task
+
+    assert [c.status for c in bus.cards()] == ["pending", "speaking", "spoken"]
+
+
+# stopping Polaris mid-answer
+
+
+async def start_speaking(agent, bus, speaker) -> tuple[ResponseCard, asyncio.Task]:
+    card = await card_for(agent, bus)
+    speaker.hold = asyncio.Event()  # the answer is long: it plays until stopped
+    task = asyncio.create_task(bus.deliver(Topic.RESPONSE_ACTION, act(card, "speak"), "u-sarah"))
+    await speaker.started.wait()
+    await asyncio.sleep(0)
+    return card, task
+
+
+async def test_pressing_stop_cuts_polaris_off_mid_answer(agent, bus, speaker):
+    card, speaking = await start_speaking(agent, bus, speaker)
+
+    await bus.deliver(Topic.RESPONSE_ACTION, act(card, "stop", by="u-alex"), "u-alex")
+    await asyncio.wait_for(speaking, 1)
+
+    assert speaker.cut_off == 1
+    assert speaker.played == []  # it never got to the end of the answer
+    assert bus.cards()[-1].status == "pending"  # back to an answer waiting
+    assert bus.states()[-1] == "hand_raised"
+
+
+async def test_a_stopped_answer_can_be_spoken_again(agent, bus, speaker, tts):
+    card, speaking = await start_speaking(agent, bus, speaker)
+    await bus.deliver(Topic.RESPONSE_ACTION, act(card, "stop"), "u-sarah")
+    await asyncio.wait_for(speaking, 1)
+
+    speaker.hold = None
+    await bus.deliver(Topic.RESPONSE_ACTION, act(card, "speak"), "u-sarah")
+
+    assert len(tts.calls) == 2
+    assert speaker.played == [["frame-0", "frame-1", "frame-2"]]
+    assert bus.cards()[-1].status == "spoken"
+
+
+async def test_stop_on_an_answer_that_is_not_being_spoken_does_nothing(agent, bus, speaker):
+    card = await card_for(agent, bus)
+    states = bus.states()
+
+    await bus.deliver(Topic.RESPONSE_ACTION, act(card, "stop"), "u-sarah")
+
+    assert [c.status for c in bus.cards()] == ["pending"]
+    assert bus.states() == states
+    assert speaker.cut_off == 0
+
+
+async def test_stop_follows_who_may_act_on_the_card(agent, bus, brain, speaker):
+    card, speaking = await start_speaking(agent, bus, speaker)
+    brain.allowed = {"u-alex"}  # the host
+
+    await bus.deliver(Topic.RESPONSE_ACTION, act(card, "stop"), "u-sarah")
+    assert bus.cards()[-1].status == "speaking"  # refused: still speaking
+
+    await bus.deliver(Topic.RESPONSE_ACTION, act(card, "stop", by="u-alex"), "u-alex")
+    await asyncio.wait_for(speaking, 1)
+    assert speaker.cut_off == 1
+
+
 async def test_a_failed_speech_leaves_the_card_pending_and_says_so(agent, bus, tts, speaker):
     tts.error = SpeechFailed("ElevenLabs refused the speech request (401)")
     card = await card_for(agent, bus)
@@ -764,7 +844,7 @@ async def test_a_failed_speech_leaves_the_card_pending_and_says_so(agent, bus, t
     await bus.deliver(Topic.RESPONSE_ACTION, act(card, "speak"), "u-sarah")
 
     assert speaker.played == []
-    assert [c.status for c in bus.cards()] == ["pending"]
+    assert [c.status for c in bus.cards()] == ["pending", "speaking", "pending"]
     assert bus.states() == ["working", "hand_raised", "speaking", "hand_raised"]
     assert "couldn't speak" in bus.on(Topic.AGENT_STATE)[-1][0].detail.lower()
 
