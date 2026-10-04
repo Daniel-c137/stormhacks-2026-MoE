@@ -1,7 +1,8 @@
 """A two-team world and an app wired to it, for HTTP tests of the brain's API.
 
 Auth is overridden: each client_as client sends X-Test-User, so several clients can act as
-different people at once; test_auth.py covers real Supabase sessions. The store is the real
+different people at once; test_auth.py and test_auth_api.py cover the brain's real sessions,
+signed with AUTH_SECRET. The store is the real
 in-memory store, or with BRAIN_TEST_STORE=postgres a PostgresStore on a fresh pgserver database
 with the migrations applied. LiveKit tokens are really signed.
 """
@@ -23,6 +24,7 @@ KEY = "test-key"
 SECRET = "test-secret-that-is-long-enough-for-hs256"
 LIVEKIT_URL = "wss://omniroom-test.livekit.cloud"
 WORKER_TOKEN = "worker-shared-secret-0123456789abcdef"
+AUTH_SECRET = "a-session-signing-secret-of-at-least-32-characters"
 
 ALEX = Person(id="u-alex", name="Alex Chen", short="Alex", initials="AC")
 SARAH = Person(id="u-sarah", name="Sarah Kim", short="Sarah", initials="SK")
@@ -63,6 +65,7 @@ def settings() -> Settings:
         livekit_api_key=KEY,
         livekit_api_secret=SECRET,
         brain_internal_token=WORKER_TOKEN,
+        auth_secret=AUTH_SECRET,
         gemini_api_key=None,  # never real Gemini; tests that need a model override get_llm*
         openrouter_api_key=None,  # nor real OpenRouter
         # A sync TestClient closes its event loop after each request, so a write-up it starts

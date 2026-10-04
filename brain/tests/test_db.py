@@ -6,6 +6,7 @@ import anyio
 import psycopg
 import pytest
 
+from brain.config import REPO_ROOT
 from brain.db import MIGRATIONS, migrate, open_pool
 
 pytestmark = pytest.mark.anyio
@@ -82,6 +83,7 @@ async def test_migrate_also_takes_an_open_pool(pg_dsn, tmp_path):
 
 
 async def test_the_repos_migrations_build_the_core_schema_and_memory(pg_dsn):
+    assert MIGRATIONS == REPO_ROOT / "db" / "migrations"
     names = await migrate(pg_dsn)
 
     assert names == sorted(p.stem for p in MIGRATIONS.glob("*.sql"))
@@ -105,13 +107,15 @@ async def test_the_repos_migrations_build_the_core_schema_and_memory(pg_dsn):
         "decisions",
         "report_audio",
         "memory_chunks",
+        "logins",
         "schema_migrations",
     } <= tables
     assert not [t for t in tables if "private" in t]
 
 
-async def test_no_core_table_is_readable_through_supabases_client_keys(pg_dsn):
-    """Row level security with no policies: only the brain's own connection sees rows."""
+async def test_every_table_has_row_level_security_on(pg_dsn):
+    """Row level security with no policies: only the role that owns the tables, the brain's own,
+    sees rows; any other role on the server reads nothing."""
     await migrate(pg_dsn)
 
     exposed = query(
@@ -139,3 +143,22 @@ async def test_a_meetings_report_audio_goes_with_the_meeting(pg_dsn):
         conn.execute("delete from meetings where id = 'm'")
 
     assert query(pg_dsn, "select meeting_id from report_audio") == []
+
+
+async def test_a_persons_login_goes_with_them_and_emails_are_unique_ignoring_case(pg_dsn):
+    await migrate(pg_dsn)
+    with psycopg.connect(pg_dsn) as conn:
+        for pid in ("a", "b"):
+            conn.execute(
+                "insert into people (id, name, short, initials) values (%s, 'N', 'N', 'N')", [pid]
+            )
+        conn.execute(
+            "insert into logins (person_id, email, password_hash) values ('a', 'A@x.dev', 'h')"
+        )
+        with pytest.raises(psycopg.errors.UniqueViolation), conn.transaction():
+            conn.execute(
+                "insert into logins (person_id, email, password_hash) values ('b', 'a@X.dev', 'h')"
+            )
+        conn.execute("delete from people where id = 'a'")
+
+    assert query(pg_dsn, "select person_id from logins") == []
