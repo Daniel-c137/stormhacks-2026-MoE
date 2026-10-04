@@ -33,6 +33,7 @@ from contracts import (
     TranslateRequest,
     TranslateResponse,
 )
+from contracts.language import is_english, normalise_language
 
 TS_DIR = Path(contracts.__file__).resolve().parents[2] / "ts"
 
@@ -273,6 +274,16 @@ def test_a_translate_request_may_hint_the_language_and_the_answer_names_it():
     assert (answer.language, answer.text) == ("es", "Hello everyone")
     with pytest.raises(ValidationError):
         TranslateResponse(text="Hello everyone")  # the language is always reported
+
+
+@pytest.mark.parametrize(
+    ("given", "code"),
+    [("es", "es"), ("ES", "es"), (" fr ", "fr"), ("zh-CN", "zh"), ("spa", "es"), ("eng", "en"),
+     ("Spanish", None), ("", None), (None, None)],
+)  # fmt: skip
+def test_language_codes_are_normalised_to_iso_639_1(given, code):
+    assert normalise_language(given) == code
+    assert is_english(given) == (code == "en")
 
 
 def test_every_exported_model_has_a_typescript_interface_with_the_same_fields():

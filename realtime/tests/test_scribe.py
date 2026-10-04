@@ -157,10 +157,24 @@ async def test_opens_one_realtime_session_with_the_model_format_vad_and_keyterms
     assert query["commit_strategy"] == ["vad"]
     assert query["include_timestamps"] == ["true"]
     assert query["keyterms"] == ["Polaris", "DS-104", "refund window"]
-    assert query["language_code"] == ["en"]
+    # Not pinned to English: Scribe detects each utterance's language (#106).
+    assert "language_code" not in query
+    assert query["include_language_detection"] == ["true"]
     assert scribe.headers == {"xi-api-key": KEY}
     assert KEY not in scribe.url
     assert scribe.closed
+
+
+async def test_a_configured_language_is_pinned_instead_of_detected():
+    scribe = FakeScribe()
+    mic = Mic()
+    mic.end()
+
+    await collect(stt(Connector(scribe), language="en").stream(mic), [])
+
+    query = parse_qs(urlsplit(scribe.url).query)
+    assert query["language_code"] == ["en"]
+    assert "include_language_detection" not in query
 
 
 async def test_a_custom_api_url_becomes_its_websocket_url():
@@ -247,9 +261,9 @@ async def test_partials_and_a_committed_final_become_speech_pieces():
     await task
 
     partial, final = pieces
-    assert (partial.text, partial.is_final) == ("Polaris, what is", False)
+    assert (partial.text, partial.is_final, partial.language) == ("Polaris, what is", False, None)
     assert partial.end == pytest.approx(1.5)
-    assert final == SpeechPiece("Polaris, what is the refund window?", True, 0.2, 1.4)
+    assert final == SpeechPiece("Polaris, what is the refund window?", True, 0.2, 1.4, "en")
 
 
 async def test_the_next_utterance_starts_where_the_last_final_ended():
@@ -437,6 +451,19 @@ def test_events_are_parsed_by_message_type():
     )
     assert parse_event(json.dumps({"message_type": "auth_error", "error": "bad"})).kind == "error"
     assert parse_event("not json").kind == "ignore"
+
+
+@pytest.mark.parametrize(
+    ("given", "language"), [("es", "es"), ("spa", "es"), ("EN", "en"), (None, None)]
+)
+def test_a_final_carries_scribes_detected_language_as_an_iso_code(given, language):
+    message = {
+        "message_type": "committed_transcript_with_timestamps",
+        "text": "Por ahora nos quedamos con Postgres.",
+        "words": words(("Por", 0.1, 0.3)),
+    } | ({"language_code": given} if given else {})
+
+    assert parse_event(json.dumps(message)).language == language
 
 
 # reconnecting through the manager
