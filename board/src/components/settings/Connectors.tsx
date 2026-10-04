@@ -354,8 +354,10 @@ export function Connectors({
               @{settings.github.account_login}
               <span className="conn-ref-text">
                 {" "}
-                · GitHub is read with this account&apos;s token
-                {githubStatus?.state === "failing" && githubStatus.detail ? ` · ${githubStatus.detail}` : ""}
+                ·{" "}
+                {githubStatus?.state === "failing" && githubStatus.detail
+                  ? githubStatus.detail
+                  : "GitHub is read with this account's token"}
               </span>
             </span>
             <State name="github" statuses={statuses} />

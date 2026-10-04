@@ -40,7 +40,7 @@ async def connector_statuses(
     async def check(name: McpServerName) -> None:
         url, missing, scope, scope_name = targets[name]
         if name == "github" and isinstance(github, str):
-            found[name] = failing(name, f"GitHub is not reachable: {github}")
+            found[name] = failing(name, github[:1].upper() + github[1:])
         elif not url:
             found[name] = not_configured(name, f"{missing} on the server")
         elif not scope:
@@ -63,9 +63,7 @@ async def connector_status(
             async with mcp_client(target) as client:
                 tools = {tool.name for tool in (await client.list_tools()).tools}
     except McpRejected as e:
-        return failing(
-            name, f"GitHub did not accept the connected token ({e.status}): connect GitHub again"
-        )
+        return failing(name, f"GitHub did not accept the token ({e.status})")
     except TimeoutError:
         return failing(name, f"No answer from the MCP server: timed out after {timeout:g}s")
     except Exception as e:
