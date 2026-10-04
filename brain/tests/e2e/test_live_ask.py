@@ -2,6 +2,7 @@
 real Gemini. Needs GEMINI_API_KEY, GEMINI_MODEL, GEMINI_EMBEDDING_MODEL and GEMINI_EMBEDDING_DIM.
 Deselected unless pytest runs with `-m live`."""
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -12,7 +13,7 @@ from brain.llm import GeminiEmbedder, GeminiLLM, make_embedder, make_llm
 from brain.memory import InMemoryMemoryStore, MeetingMemory
 from brain.report import TranscriptInput
 from brain.store import InMemoryStore
-from contracts import AskTurn, Team, get_identity
+from contracts import Agenda, AgendaItem, AskTurn, Source, Team, get_identity
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 settings = Settings(openrouter_models=None)  # Gemini alone, never the fallback
@@ -134,3 +135,54 @@ async def test_gemini_answers_a_home_follow_up_without_meta_phrases():
     alice = next(s for s in segments if "waitlist email" in s.text)
     cited = any(s.meeting_id == meeting.id and s.t == alice.t_start for s in answer.sources)
     assert cited or answer.text.endswith(FROM_CONVERSATION)
+
+
+@pytest.mark.anyio
+async def test_gemini_says_whats_left_on_the_agenda():
+    """#93: asked in a meeting with a three-item agenda, one item covered, the answer names the
+    two items left and cites the agenda."""
+    standup = TranscriptInput.model_validate_json((FIXTURES / "standup.json").read_text())
+    people = standup.members
+    team = Team(id="t-live", name="Dropsubs", member_ids=[p.id for p in people])
+    store = InMemoryStore(teams=[team], people=people)
+    meeting = await store.create_meeting(team.id, "Sprint review", people[0].id)
+    await store.save_agenda(
+        Agenda(
+            meeting_id=meeting.id,
+            items=[
+                AgendaItem(
+                    id="i-1",
+                    title="Release checklist",
+                    status="covered",
+                    minutes=10,
+                    discussed_s=540,
+                ),
+                AgendaItem(id="i-2", title="Billing bug triage", minutes=5, discussed_s=130),
+                AgendaItem(id="i-3", title="Hiring plan", minutes=15),
+            ],
+            generated_at=datetime.now(UTC),
+            current_item_id="i-2",
+            tracked_until=700.0,
+        )
+    )
+    llm = make_llm(settings)
+    assert isinstance(llm, GeminiLLM)
+    bob = people[1]
+
+    answer = await ToolOrchestrator(llm, store, settings=settings).ask(
+        Question(
+            id="q-live-agenda",
+            team_id=team.id,
+            text="What's left on the agenda?",
+            asker_id=bob.id,
+            asker_name=bob.name,
+            visibility="public",
+            meeting_id=meeting.id,
+        )
+    )
+
+    print(f"answered by {llm.last_model}: {answer.text}")
+    print(f"sources: {answer.sources}; unavailable: {answer.unavailable}")
+    assert Source(kind="meeting", label="Agenda", meeting_id=meeting.id) in answer.sources
+    assert "Billing bug triage" in answer.text
+    assert "Hiring plan" in answer.text
