@@ -1,5 +1,5 @@
 import secrets
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable, Sequence
 from datetime import UTC, datetime
 from typing import Protocol
 from uuid import uuid4
@@ -28,9 +28,14 @@ class NotFound(LookupError):
     """No such row, or not one the caller's team can see."""
 
 
+class Conflict(Exception):
+    """The row is not in the state the write expected, e.g. another call already ended it."""
+
+
 class Store(Protocol):
-    """Supabase Postgres. Every team-scoped read takes the team id and returns only that team's
-    rows; reads by id return any row, so the API checks the meeting's team before using it.
+    """Supabase Postgres. Reads keyed by team take the team id and return only that team's rows.
+    Reads keyed by meeting (meeting, transcript, report, agenda, ...) return any meeting's rows;
+    the API checks the meeting's team first (deps.team_meeting).
 
     Missing rows raise NotFound, including the meeting a write hangs off. Writes return what
     was saved. The contract is pinned down by brain/tests/test_store_contract.py, which every
@@ -80,12 +85,31 @@ class Store(Protocol):
         """Newest first by started_at, or scheduled_start for a meeting not started yet."""
         ...
 
-    async def set_status(self, meeting_id: str, status: MeetingStatus) -> Meeting: ...
-    async def start_meeting(self, meeting_id: str, at: datetime) -> Meeting:
-        """scheduled -> live, started at `at`. A meeting in any other status is unchanged."""
+    async def set_status(self, meeting_id: str, status: MeetingStatus) -> Meeting:
+        """Unconditional. Kept for existing callers; new code uses transition_status."""
         ...
 
-    async def add_participant(self, meeting_id: str, person_id: str) -> Meeting: ...
+    async def transition_status(
+        self,
+        meeting_id: str,
+        expected: Collection[MeetingStatus],
+        to: MeetingStatus,
+        *,
+        at: datetime | None = None,
+    ) -> Meeting:
+        """Atomic compare-and-set: Conflict unless the status is one of `expected`, so of
+        overlapping calls only one gets through. Moving to live records started_at; moving off
+        live records ended_at; both at `at`, or now."""
+        ...
+
+    async def start_meeting(self, meeting_id: str, at: datetime) -> Meeting:
+        """scheduled -> live at `at`, through transition_status. Any other status is unchanged."""
+        ...
+
+    async def add_participant(self, meeting_id: str, person_id: str) -> Meeting:
+        """Atomic set-union: overlapping joins never lose each other."""
+        ...
+
     async def set_invitees(self, meeting_id: str, invitee_ids: Sequence[str]) -> Meeting:
         """Replaces the invitees, in order, without duplicates."""
         ...
@@ -97,11 +121,11 @@ class Store(Protocol):
     # transcript and public chat
 
     async def add_segments(self, meeting_id: str, segments: list[TranscriptSegment]) -> None:
-        """Final segments; a seg_id already saved is ignored."""
+        """Final segments, idempotent by (meeting_id, seg_id): one already saved is ignored."""
         ...
 
     async def transcript(self, meeting_id: str) -> list[TranscriptSegment]:
-        """In time order; empty when there is none."""
+        """Ordered by (t_start, t_end, seg_id); empty when there is none."""
         ...
 
     async def delete_transcript(self, meeting_id: str, at: datetime) -> Meeting:
@@ -139,8 +163,11 @@ class Store(Protocol):
 
     async def save_report_progress(self, progress: ReportProgress) -> ReportProgress: ...
     async def report_progress(self, meeting_id: str) -> ReportProgress | None: ...
-    async def task(self, task_id: str) -> TaskDraft: ...
-    async def update_task(self, task: TaskDraft) -> TaskDraft: ...
+    async def task(self, team_id: str, task_id: str) -> TaskDraft: ...
+    async def update_task(self, task: TaskDraft) -> TaskDraft:
+        """Saves an existing task. No team check: read it with task(team_id, ...) first."""
+        ...
+
     async def tasks(self, team_id: str, owner_id: str | None = None) -> list[TaskDraft]:
         """Newest meeting first, each meeting's tasks in report order."""
         ...
@@ -149,7 +176,9 @@ class Store(Protocol):
         """Newest first; a query matches the decision text, ignoring case."""
         ...
 
-    async def update_decision(self, decision: Decision) -> Decision: ...
+    async def update_decision(self, decision: Decision) -> Decision:
+        """Saves an existing decision. No team check: the API checks the meeting's team."""
+        ...
 
 
 def new_join_code() -> str:
@@ -289,11 +318,31 @@ class InMemoryStore:
     async def set_status(self, meeting_id: str, status: MeetingStatus) -> Meeting:
         return self._save_meeting(self._meeting(meeting_id), status=status)
 
-    async def start_meeting(self, meeting_id: str, at: datetime) -> Meeting:
+    async def transition_status(
+        self,
+        meeting_id: str,
+        expected: Collection[MeetingStatus],
+        to: MeetingStatus,
+        *,
+        at: datetime | None = None,
+    ) -> Meeting:
+        # No await between the check and the write, so this is atomic on the event loop.
         meeting = self._meeting(meeting_id)
-        if meeting.status != "scheduled":
-            return _copy(meeting)
-        return self._save_meeting(meeting, status="live", started_at=at)
+        if meeting.status not in expected:
+            raise Conflict(f"meeting {meeting_id} is {meeting.status}")
+        when = at or datetime.now(UTC)
+        changes: dict = {"status": to}
+        if to == "live" and meeting.status != "live":
+            changes["started_at"] = when
+        elif meeting.status == "live" and to != "live":
+            changes["ended_at"] = when
+        return self._save_meeting(meeting, **changes)
+
+    async def start_meeting(self, meeting_id: str, at: datetime) -> Meeting:
+        try:
+            return await self.transition_status(meeting_id, {"scheduled"}, "live", at=at)
+        except Conflict:
+            return await self.meeting(meeting_id)
 
     async def add_participant(self, meeting_id: str, person_id: str) -> Meeting:
         meeting = self._meeting(meeting_id)
@@ -321,7 +370,7 @@ class InMemoryStore:
 
     async def transcript(self, meeting_id: str) -> list[TranscriptSegment]:
         saved = self._segments.get(meeting_id, {}).values()
-        return [_copy(s) for s in sorted(saved, key=lambda s: (s.t_start, s.t_end))]
+        return [_copy(s) for s in sorted(saved, key=lambda s: (s.t_start, s.t_end, s.seg_id))]
 
     async def delete_transcript(self, meeting_id: str, at: datetime) -> Meeting:
         meeting = self._meeting(meeting_id)
@@ -393,14 +442,15 @@ class InMemoryStore:
         saved = self._progress.get(meeting_id)
         return _copy(saved) if saved else None
 
-    async def task(self, task_id: str) -> TaskDraft:
+    async def task(self, team_id: str, task_id: str) -> TaskDraft:
         task = self._tasks.get(task_id)
-        if task is None:
+        if task is None or self._meeting(task.meeting_id).team_id != team_id:
             raise NotFound(f"task {task_id}")
         return _copy(task)
 
     async def update_task(self, task: TaskDraft) -> TaskDraft:
-        await self.task(task.id)
+        if task.id not in self._tasks:
+            raise NotFound(f"task {task.id}")
         self._tasks[task.id] = _copy(task)
         return _copy(task)
 
