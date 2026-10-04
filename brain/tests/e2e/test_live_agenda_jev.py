@@ -50,6 +50,7 @@ async def test_live_jev_ticks_an_item_off_at_the_check_after_its_closing_line():
     await store.save_agenda(
         Agenda(
             meeting_id=meeting.id,
+            person_id=ALEX.id,
             items=[AgendaItem(id=f"i{n}", title=t) for n, t in enumerate(titles)],
             generated_at=datetime.now(UTC),
         )
@@ -76,8 +77,8 @@ async def test_live_jev_ticks_an_item_off_at_the_check_after_its_closing_line():
         result = await track_agenda(store, no_gemini, meeting, end + JEV_SETTLE_S, jev=jev)
         seconds.append(time.perf_counter() - began)
         cost += jev.last_cost or 0
-        items = {i.id: i for i in result.agenda.items}
-        states.append((items["i0"].status, items["i1"].status, result.agenda.current_item_id))
+        items = {i.id: i for i in result.agendas[0].items}
+        states.append((items["i0"].status, items["i1"].status, result.agendas[0].current_item_id))
         print(f"after line {n + 1}: {states[-1]} in {seconds[-1] * 1000:.0f} ms")
     print(f"{len(seconds)} checks, ${cost:.6f}")
 

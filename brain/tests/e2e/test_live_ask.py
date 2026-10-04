@@ -147,9 +147,11 @@ async def test_gemini_says_whats_left_on_the_agenda():
     team = Team(id="t-live", name="Dropsubs", member_ids=[p.id for p in people])
     store = InMemoryStore(teams=[team], people=people)
     meeting = await store.create_meeting(team.id, "Sprint review", people[0].id)
+    bob = people[1]  # asks about their own agenda
     await store.save_agenda(
         Agenda(
             meeting_id=meeting.id,
+            person_id=bob.id,
             items=[
                 AgendaItem(
                     id="i-1",
@@ -168,7 +170,6 @@ async def test_gemini_says_whats_left_on_the_agenda():
     )
     llm = make_llm(settings)
     assert isinstance(llm, GeminiLLM)
-    bob = people[1]
 
     answer = await ToolOrchestrator(llm, store, settings=settings).ask(
         Question(
