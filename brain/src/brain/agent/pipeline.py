@@ -142,17 +142,20 @@ class ReportPipeline:
             meeting, transcript, agenda = await self._read(meeting_id)
             zone = await zone_of(self.store, meeting.team_id)
             superseded: list[Decision] = []
+            # The public fact-checks from the live meeting; private ones were never stored.
+            fact_checks = await self.store.fact_checks(meeting_id)
             if transcript.final_segments():
                 progress = await self._at(progress, WRITE)
                 llm = self.llm()
-                report = await build_report(llm, transcript, agenda=agenda, zone=zone)
+                report = await build_report(
+                    llm, transcript, agenda=agenda, zone=zone, fact_checks=fact_checks
+                )
                 progress = await self._at(progress, LINK)
                 report, superseded = await self._links(llm, meeting.team_id, report, zone)
             else:
                 report = Report(meeting_id=meeting_id, summary=NO_TRANSCRIPT)
             progress = await self._at(progress, SAVE)
-            # The public fact-checks from the live meeting; private ones were never stored.
-            report.fact_checks = await self.store.fact_checks(meeting_id)
+            report.fact_checks = fact_checks
             await self.store.complete_report(report, superseded)
         except asyncio.CancelledError:
             await self._failed(progress, INTERRUPTED)

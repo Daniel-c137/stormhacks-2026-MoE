@@ -7,8 +7,18 @@ from pydantic import BaseModel, Field
 
 from brain.speakers import by_agent
 from brain.text import one_line
-from contracts import AGENT_PARTICIPANT_ID, AgendaItem, Person, TranscriptSegment, get_identity
+from contracts import (
+    AGENT_PARTICIPANT_ID,
+    AgendaItem,
+    FactCheck,
+    Person,
+    TranscriptSegment,
+    get_identity,
+)
 from contracts.agent import SourceKind
+
+CONTRADICTED_CONFIDENCE = 0.7
+"""A live fact-check contradicting a claim at least this confidently reaches the write-up."""
 
 EVIDENCE = "Ids of the transcript segments that support this, e.g. ['s4']."
 
@@ -78,7 +88,11 @@ Rules:
 - Links are issue keys, pull request numbers or URLs mentioned in the transcript, as said.
 - Leave a list empty when nothing applies. Never fill a section just to have something.
 - An agenda, when given, is the plan for the meeting, not evidence. Use it only to order and
-  name topics the transcript discusses; nothing in it counts as said or decided."""
+  name topics the transcript discusses; nothing in it counts as said or decided.
+- Contradicted claims, when given, were checked during the meeting against the team's records,
+  which showed them wrong. Never state such a claim as fact, in the summary or anywhere else.
+  If you mention it, say who made it and that the records contradict it, e.g. "Sam said the
+  fix is in the latest release; GitHub shows it merged after that release"."""
 
 
 def render_prompt(
@@ -88,6 +102,7 @@ def render_prompt(
     people: list[Person],
     labelled: dict[str, TranscriptSegment],
     agenda: Sequence[AgendaItem] = (),
+    fact_checks: Sequence[FactCheck] = (),
 ) -> str:
     agent = get_identity().agent_name
     participants = [f"- {p.id}: {p.name}" for p in people]
@@ -107,8 +122,29 @@ def render_prompt(
             *agenda_lines(agenda),
             "Transcript ([segment time] speaker: text):",
             *lines,
+            *contradiction_lines(fact_checks),
         ]
     )
+
+
+def contradicted(fact_checks: Sequence[FactCheck]) -> list[FactCheck]:
+    return [
+        c
+        for c in fact_checks
+        if c.verdict == "contradicted" and c.confidence >= CONTRADICTED_CONFIDENCE
+    ]
+
+
+def contradiction_lines(fact_checks: Sequence[FactCheck]) -> list[str]:
+    """The claims the team's records confidently contradicted, or nothing."""
+    if not (checks := contradicted(fact_checks)):
+        return []
+    lines = ["", "Contradicted claims (checked against the team's records during the meeting):"]
+    for c in checks:
+        records = "; ".join(one_line(s.label) for s in c.sources) or "the team's records"
+        claim = " ".join(c.claim.split())
+        lines.append(f'- {one_line(c.speaker_name)} said: "{claim}" Contradicted by: {records}')
+    return lines
 
 
 def agenda_lines(agenda: Sequence[AgendaItem]) -> list[str]:

@@ -7,6 +7,7 @@ from contracts import (
     AGENT_PARTICIPANT_ID,
     AgendaItem,
     Decision,
+    FactCheck,
     Report,
     Risk,
     Source,
@@ -20,11 +21,17 @@ from .models import TranscriptInput
 
 
 async def build_report(
-    llm: LLM, meeting: TranscriptInput, *, agenda: Sequence[AgendaItem] = (), zone: tzinfo = UTC
+    llm: LLM,
+    meeting: TranscriptInput,
+    *,
+    agenda: Sequence[AgendaItem] = (),
+    zone: tzinfo = UTC,
+    fact_checks: Sequence[FactCheck] = (),
 ) -> Report:
     """Ask the LLM for the meeting record, then keep only what the transcript supports. With an
     agenda, the topics follow its items in order. The meeting's date, which relative due dates
-    resolve against, is its day in the team's `zone`."""
+    resolve against, is its day in the team's `zone`. The meeting's fact-checks that confidently
+    contradicted a claim go to the model, so the record never states that claim as fact."""
     segments = meeting.final_segments()
     if not segments:
         raise ValueError(f"Meeting {meeting.meeting_id} has no final segments to report on")
@@ -40,6 +47,7 @@ async def build_report(
             people=people,
             labelled=labelled,
             agenda=agenda,
+            fact_checks=fact_checks,
         ),
         ReportExtraction,
         system=system_prompt(),
