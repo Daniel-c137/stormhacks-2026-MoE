@@ -16,8 +16,9 @@ from brain.memory import MeetingMemory
 from brain.report.decisions import terms
 from brain.report.extraction import clock
 from brain.store import NotFound, Store
-from contracts import Meeting, Person, Source, TeamSettings
+from contracts import CodeSnippet, Meeting, Person, Source, TeamSettings
 
+from .code import code_evidence
 from .tools import ToolResult, ToolSpec
 
 TaskStatus = Literal["open", "overdue", "all"]
@@ -32,6 +33,7 @@ class Finding(BaseModel):
     text: str
     source: Source
     when: date | None = None
+    snippet: CodeSnippet | None = None  # code: the lines `text` shows, copied from the file
 
 
 QUERY = {"query": {"type": "string", "description": "Short search text: the topic's key words."}}
@@ -139,6 +141,15 @@ SPECS: list[tuple[ToolSpec, str]] = [
         ),
         "GitHub",
     ),
+    (
+        ToolSpec(
+            name="github_code",
+            description="Search the code of the team's GitHub repository; returns the matching "
+            "lines of the top files, numbered, with links.",
+            parameters={"type": "object", "properties": QUERY, "required": ["query"]},
+        ),
+        "GitHub code",
+    ),
 ]
 
 RELEASE_LIMIT = 5
@@ -174,15 +185,16 @@ def jira_reader(settings: Settings, team: TeamSettings, target: Any = None) -> J
 
 
 def github_reader(settings: Settings, team: TeamSettings, target: Any = None) -> GitHubReader | str:
-    """A reader for the team's repository, or why there is none. Like Jira's project, a team
-    without its own repository uses the deployment's GITHUB_REPO (one team per deployment)."""
+    """A reader for the team's repository at the team's ref (default branch when unset), or why
+    there is none. Like Jira's project, a team without its own repository uses the deployment's
+    GITHUB_REPO (one team per deployment)."""
     repo = team.github.repo or settings.github_repo
     if not settings.github_mcp_url:
         return "GitHub is not configured: set GITHUB_MCP_URL"
     if not repo:
         return "GitHub is not configured: no repository is set in workspace settings or GITHUB_REPO"
     try:
-        return GitHubReader(repo, target or settings.github_mcp_url)
+        return GitHubReader(repo, target or settings.github_mcp_url, ref=team.github.ref)
     except ValueError as e:
         return f"GitHub is not configured: {e}"
 
@@ -224,6 +236,7 @@ class TeamToolbox:
             "github_search": self.github_search,
             "github_read": self.github_read,
             "github_releases": self.github_releases,
+            "github_code": self.github_code,
         }
 
     def specs(self) -> list[ToolSpec]:
@@ -367,6 +380,12 @@ class TeamToolbox:
             release_finding(self.github.full_name, r, latest=i == 0) for i, r in enumerate(releases)
         ]
 
+    async def github_code(self, query: str | None = None, **_: Any) -> list[Finding]:
+        assert isinstance(self.github, GitHubReader)
+        if not (query or "").strip():
+            return []
+        return [code_finding(s) for s in await code_evidence(self.github, query or "")]
+
     # helpers
 
     async def meeting(self, meeting_id: str) -> Meeting | None:
@@ -439,3 +458,12 @@ def release_finding(repo: str, release: GitHubRelease, *, latest: bool) -> Findi
         text += f". {release.body}"
     source = Source(kind="github_release", label=f"{repo}@{release.tag}", url=release.url)
     return Finding(text=text, source=source, when=published)
+
+
+def code_finding(snippet: CodeSnippet) -> Finding:
+    label = f"{snippet.path} L{snippet.start_line}-L{snippet.end_line}"
+    return Finding(
+        text=f"{label}:\n{snippet.code}",
+        source=Source(kind="github_code", label=label, url=snippet.github_url),
+        snippet=snippet,
+    )
