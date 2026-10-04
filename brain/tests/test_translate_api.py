@@ -1,11 +1,12 @@
 """POST /internal/meetings/{id}/translate: the worker's live translation of non-English speech
 into English (#106), on the brain's LLM so the worker holds no model key."""
 
+import anyio
 import pytest
 from api_support import ALEX, WORKER_TOKEN, create
 from fastapi.testclient import TestClient
 
-from brain.api.deps import get_llm_factory
+from brain.api.deps import get_settings, get_translation_llm_factory
 from brain.llm import LLMUnavailable, MockLLM
 from brain.translation import Translation
 
@@ -29,7 +30,7 @@ class Translator:
 @pytest.fixture
 def translator(app) -> Translator:
     t = Translator()
-    app.dependency_overrides[get_llm_factory] = lambda: lambda: t.llm
+    app.dependency_overrides[get_translation_llm_factory] = lambda: lambda: t.llm
     return t
 
 
@@ -58,7 +59,9 @@ def test_the_prompt_keeps_names_numbers_and_identifiers_as_said(worker, client_a
     assert "identifiers" in system
 
 
-def test_scribes_detected_language_is_trusted_and_given_to_the_model(worker, client_as, translator):
+def test_scribes_detected_language_wins_over_another_non_english_guess(
+    worker, client_as, translator
+):
     translator.answer = Translation(language="pt", english="We keep Postgres for now.")
     meeting = create(client_as(ALEX))
 
@@ -66,6 +69,60 @@ def test_scribes_detected_language_is_trusted_and_given_to_the_model(worker, cli
 
     assert response.json()["language"] == "es"
     assert "es" in translator.prompts[0]
+
+
+def test_speech_the_model_finds_english_stays_english_whatever_the_hint(
+    worker, client_as, translator
+):
+    """Code-switching: a Persian speaker who says something in English gets English back,
+    word for word, not "translated from Persian"."""
+    translator.answer = Translation(language="en", english="did you merge the PR")
+    meeting = create(client_as(ALEX))
+
+    response = translate(worker, meeting["id"], "did you merge the PR?", "fa")
+
+    assert response.json() == {"language": "en", "text": "did you merge the PR?"}
+
+
+def test_an_english_hint_never_reaches_the_model(worker, client_as, translator):
+    meeting = create(client_as(ALEX))
+
+    response = translate(worker, meeting["id"], "Let's ship it.", "en")
+
+    assert response.json() == {"language": "en", "text": "Let's ship it."}
+    assert translator.prompts == []
+
+
+def test_the_prompt_writes_the_assistants_name_in_latin_letters_and_keeps_cut_offs(
+    worker, client_as, translator
+):
+    meeting = create(client_as(ALEX))
+
+    translate(worker, meeting["id"], "پولاریس، وضعیت DS-104 چیه؟", "fa")
+
+    system = translator.systems[0] or ""
+    assert '"Polaris" in Latin letters' in system  # so the wake detector matches the English
+    assert "Persian" in system
+    assert 'trailing "-" or "..."' in system
+
+
+def test_a_translation_slower_than_the_workers_wait_times_out_on_the_brain(
+    app, worker, client_as, settings
+):
+    class Slow(MockLLM):
+        async def generate_structured(self, prompt, schema, *, system=None):
+            await anyio.sleep(1)
+            return Translation(language="es", english="late")
+
+    app.dependency_overrides[get_translation_llm_factory] = lambda: lambda: Slow()
+    app.dependency_overrides[get_settings] = lambda: settings.model_copy(
+        update={"translation_timeout_seconds": 0.05}
+    )
+    meeting = create(client_as(ALEX))
+
+    response = translate(worker, meeting["id"], "Hola")
+
+    assert response.status_code == 504
 
 
 def test_english_comes_back_word_for_word(worker, client_as, translator):
@@ -98,7 +155,7 @@ def test_no_model_configured_is_unavailable(app, worker, client_as):
     def unavailable():
         raise LLMUnavailable("Gemini is not configured: set GEMINI_API_KEY")
 
-    app.dependency_overrides[get_llm_factory] = lambda: unavailable
+    app.dependency_overrides[get_translation_llm_factory] = lambda: unavailable
     meeting = create(client_as(ALEX))
 
     response = translate(worker, meeting["id"], "Hola")
@@ -108,7 +165,9 @@ def test_no_model_configured_is_unavailable(app, worker, client_as):
 
 
 def test_a_failing_model_is_a_bad_gateway(app, worker, client_as):
-    app.dependency_overrides[get_llm_factory] = lambda: lambda: MockLLM()  # nothing scripted
+    app.dependency_overrides[get_translation_llm_factory] = lambda: (
+        lambda: MockLLM()
+    )  # nothing scripted
     meeting = create(client_as(ALEX))
 
     response = translate(worker, meeting["id"], "Hola")
