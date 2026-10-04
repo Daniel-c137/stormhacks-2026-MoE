@@ -12,6 +12,14 @@ sentence finish, and whatever could not be saved is counted.
 
 A spoken question that trails off is held by the detector for the rest of the sentence; the
 manager owns the clock, so it runs the timer that sends a held question when nothing follows.
+
+With a translator (#106) the room reads only English. A finished sentence in another language is
+translated before it is published, saved or checked for the wake word. A sentence still going
+after provisional_seconds is translated so far and published as a partial, again each period
+while it grows; its final replaces it in place (same seg_id). Once a speaker is known to speak
+another language their original partials are hidden. A provisional answer arriving after a newer
+one, or after the sentence finished, is dropped. If translation fails, the original is shown and
+saved with its language and no original_text: untranslated, never invented.
 """
 
 import asyncio
@@ -24,7 +32,14 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
 
-from contracts import AGENT_PARTICIPANT_ID, Invocation, Topic, TranscriptSegment
+from contracts import (
+    AGENT_PARTICIPANT_ID,
+    Invocation,
+    Topic,
+    TranscriptSegment,
+    TranslateResponse,
+)
+from contracts.language import normalise_language
 
 from .brain_client import BrainClient, BrainRejected
 from .invocation import WakeDetector
@@ -35,6 +50,9 @@ log = logging.getLogger(__name__)
 
 # Final segments kept as context for an invocation; the brain takes at most this many.
 RECENT_FINALS = 20
+
+# translate(text, language) -> the language and the English; language is a hint or None.
+Translate = Callable[[str, str | None], Awaitable[TranslateResponse]]
 
 
 @dataclass
@@ -60,10 +78,13 @@ class TranscriptionManager:
         restart_backoff: float = 1.0,
         drain_seconds: float = 2.0,
         backlog_limit: int = 1000,
+        translate: Translate | None = None,
+        provisional_seconds: float = 1.5,
     ):
         """clock() returns seconds since the meeting started (Meeting.started_at); every
         segment time and the Ask window are on it. on_unavailable(participant_id, name) is
-        called when a participant's captions stop for good."""
+        called when a participant's captions stop for good. translate turns non-English speech
+        into English (#106); without it every utterance is shown and saved as heard."""
         self.meeting_id = meeting_id
         self._stt = stt
         self._bus = bus
@@ -79,6 +100,9 @@ class TranscriptionManager:
         self._restart_backoff = restart_backoff
         self._drain_seconds = drain_seconds
         self._backlog_limit = backlog_limit
+        self._translate = translate
+        self._provisional_seconds = provisional_seconds
+        self._languages: dict[str, str] = {}  # participant -> the language they speak, once known
 
         self._sessions: dict[str, Session] = {}
         self._background: set[asyncio.Task[None]] = set()
@@ -182,6 +206,7 @@ class TranscriptionManager:
         while not stopped.is_set():
             origin = self._clock()
             utterance: str | None = None
+            live: OpenSentence | None = None
             try:
                 async for piece in self._stt.stream(until_set(audio, stopped)):
                     failures = 0
@@ -189,11 +214,24 @@ class TranscriptionManager:
                     segment = self._segment(piece, utterance, participant_id, name, origin)
                     if piece.is_final:
                         utterance = None
-                    await self._handle(segment)
+                        if live:
+                            live.close()
+                            live = None
+                        await self._handle(await self._in_english(segment, piece.language))
+                    elif self._translate is None:
+                        await self._handle(segment)
+                    else:
+                        if live is None or live.seg_id != segment.seg_id:
+                            live = OpenSentence(self, segment)
+                        live.latest = segment
+                        if not self._speaks_another_language(participant_id):
+                            await self._handle(segment)
                 return
             except asyncio.CancelledError:
                 raise
             except Exception:
+                if live:
+                    live.close()  # not after the backoff below: the dropped stream is done
                 failures += 1
                 log.warning(
                     "Transcriber dropped for %s (%d in a row)",
@@ -205,6 +243,9 @@ class TranscriptionManager:
                     await self._unavailable(participant_id, name)
                     return
                 await asyncio.sleep(self._restart_backoff * 2 ** (failures - 1))
+            finally:
+                if live:  # however the stream ended, its open sentence stops translating
+                    live.close()
 
     def _segment(
         self, piece: SpeechPiece, seg_id: str, participant_id: str, name: str, origin: float
@@ -220,11 +261,14 @@ class TranscriptionManager:
             t_end=origin + piece.end,
         )
 
-    async def _handle(self, segment: TranscriptSegment) -> None:
+    async def _publish(self, segment: TranscriptSegment) -> None:
         try:
             await self._bus.publish(Topic.TRANSCRIPT, segment)
         except Exception:
             log.exception("Could not publish caption %s", segment.seg_id)
+
+    async def _handle(self, segment: TranscriptSegment) -> None:
+        await self._publish(segment)
         if segment.is_final:
             self._recent.append(segment)
             self._spawn(self._save(segment))
@@ -239,6 +283,33 @@ class TranscriptionManager:
                 await self._on_unavailable(participant_id, name)
             except Exception:
                 log.exception("Could not report captions unavailable for %s", participant_id)
+
+    # translation (#106)
+
+    def _speaks_another_language(self, participant_id: str) -> bool:
+        language = self._languages.get(participant_id)
+        return language is not None and language != "en"
+
+    async def _in_english(
+        self, segment: TranscriptSegment, detected: str | None
+    ) -> TranscriptSegment:
+        """A finished sentence as the room should read it. English (or no translator, or no
+        language known) is unchanged; otherwise translated, or kept untranslated on failure."""
+        language = normalise_language(detected) or self._languages.get(segment.speaker_id)
+        if language:
+            self._languages[segment.speaker_id] = language
+        if self._translate is None or language in (None, "en"):
+            return segment
+        try:
+            english = (await self._translate(segment.text, language)).text.strip()
+        except Exception as e:
+            log.warning("Could not translate %s (%s): %s", segment.seg_id, language, e)
+            english = ""
+        if not english:
+            return segment.model_copy(update={"language": language})
+        return segment.model_copy(
+            update={"text": english, "original_text": segment.text, "language": language}
+        )
 
     # saving
 
@@ -321,6 +392,68 @@ class TranscriptionManager:
     def _forget(self, track_sid: str, session: Session) -> None:
         if self._sessions.get(track_sid) is session:
             del self._sessions[track_sid]
+
+
+class OpenSentence:
+    """A sentence still being spoken, translated provisionally every provisional_seconds while
+    it grows. At most one request in flight; an answer is shown only if it is the newest and the
+    sentence is still open."""
+
+    def __init__(self, manager: TranscriptionManager, first: TranscriptSegment):
+        self.manager = manager
+        self.seg_id = first.seg_id
+        self.latest = first
+        self.requested: str | None = None
+        self.sent = 0
+        self.shown = 0
+        self.in_flight = False
+        self.closed = False
+        self.timer = asyncio.create_task(self._tick())
+
+    def close(self) -> None:
+        self.closed = True
+        self.timer.cancel()
+
+    async def _tick(self) -> None:
+        m = self.manager
+        while not self.closed:
+            await asyncio.sleep(m._provisional_seconds)
+            if m._languages.get(self.latest.speaker_id) == "en":
+                return  # known English: the original is what the room reads
+            if not self.in_flight and self.latest.text != self.requested:
+                m._spawn(self._request(self.latest))
+
+    async def _request(self, segment: TranscriptSegment) -> None:
+        m = self.manager
+        self.in_flight, self.requested = True, segment.text
+        self.sent += 1
+        number = self.sent
+        hint = m._languages.get(segment.speaker_id)
+        try:
+            answer = await m._translate(segment.text, hint)  # type: ignore[misc]
+        except Exception as e:
+            log.info("Provisional translation of %s failed: %s", segment.seg_id, e)
+            return
+        finally:
+            self.in_flight = False
+        if self.closed or number <= self.shown:
+            return  # the sentence finished, or a newer answer was shown
+        self.shown = number
+        language = normalise_language(answer.language)
+        if language is None:
+            return
+        m._languages[segment.speaker_id] = language
+        if language == "en" or not answer.text.strip():
+            return
+        await m._publish(
+            segment.model_copy(
+                update={
+                    "text": answer.text.strip(),
+                    "original_text": segment.text,
+                    "language": language,
+                }
+            )
+        )
 
 
 async def until_set(audio, stopped: asyncio.Event) -> AsyncIterator[Any]:
