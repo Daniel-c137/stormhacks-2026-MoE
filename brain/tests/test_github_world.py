@@ -198,3 +198,45 @@ async def test_a_pr_merged_after_the_latest_release_is_flagged_as_not_released(s
     [verdict_prompt] = [c.prompt for c in llm.calls if c.schema is FactCheckVerdicts]
     assert "merged 2026-10-02" in verdict_prompt
     assert "v0.9.3" in verdict_prompt and "2026-09-30" in verdict_prompt
+
+
+async def ask_with(world_url: str, *calls: PlannedCall):
+    from ask_support import scripted as scripted_ask
+
+    from brain.agent.ask import DraftAnswer, Question, ToolOrchestrator
+
+    store = InMemoryStore(teams=[TEAM], people=[ALEX, SARAH])
+    await store.save_settings(
+        TeamSettings(team_id=TEAM.id, github=GitHubSettings(repo=REPO), jira=JiraSettings())
+    )
+    llm = scripted_ask(*calls)
+    orchestrator = ToolOrchestrator(
+        llm, store, settings=Settings(_env_file=None, github_mcp_url=world_url)
+    )
+    question = Question(
+        id="q1",
+        team_id=TEAM.id,
+        text="Which version has the Approve check fix?",
+        asker_id=SARAH.id,
+        asker_name=SARAH.name,
+        visibility="public",
+    )
+    answer = await orchestrator.ask(question)
+    [prompt] = [c.prompt for c in llm.calls if c.schema is DraftAnswer]
+    return answer, prompt
+
+
+async def test_a_merged_pull_request_says_whether_the_latest_release_has_it(world_url):
+    # only the pull request is looked up; the latest release is read for it
+    _, prompt = await ask_with(world_url, PlannedCall(tool="github_read", number=50, kind="pr"))
+
+    [pr_line] = [line for line in prompt.splitlines() if f"{REPO}#50" in line and "[e" in line]
+    assert "merged after the latest release, v0.9.3 (published 2026-09-30)" in pr_line
+    assert "not released yet" in pr_line
+
+
+async def test_a_pull_request_merged_before_the_latest_release_is_in_it_or_earlier(world_url):
+    _, prompt = await ask_with(world_url, PlannedCall(tool="github_read", number=40, kind="pr"))
+
+    [pr_line] = [line for line in prompt.splitlines() if f"{REPO}#40" in line and "[e" in line]
+    assert "released in v0.9.3 or earlier" in pr_line

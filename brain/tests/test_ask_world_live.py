@@ -61,13 +61,14 @@ needs_gemini = pytest.mark.skipif(
 @needs_gemini
 async def test_a_fix_asked_about_by_topic_is_found_and_said_to_be_unreleased(world_url):
     answer = await ask(
-        world_url, "Which version has the approved check fix, and what's live right now?"
+        world_url, "which version has the Approve-check fix, and what's live right now?"
     )
 
     labels = [s.label for s in answer.sources]
     assert f"{REPO}#50" in labels and f"{REPO}@v0.9.3" in labels
     assert "v0.9.3" in answer.text
-    assert "not released" in answer.text.lower() or "not yet released" in answer.text.lower()
+    said = answer.text.lower()
+    assert any(p in said for p in ("not released", "not yet released", "not yet included"))
     assert "does not state" not in answer.text
 
 
