@@ -12,7 +12,7 @@ import { useConnectors, useSettings, useVoices } from "@/hooks/useApi";
 import { ApiError, changePassword, deletePhoto, describeError, updateMe, updateSettings, uploadPhoto, waitText } from "@/lib/api";
 import { signOut } from "@/lib/auth";
 import { initialsOf } from "@/lib/format";
-import { defaultOptionLabel, isClip, savedVoice, voiceChoice } from "@/lib/voiceChoice";
+import { defaultOptionLabel, isClip, savedVoice, voiceChoice, voiceOptions } from "@/lib/voiceChoice";
 
 const SENSITIVITY: [Sensitivity, string, string][] = [
   [
@@ -391,7 +391,9 @@ export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
                 />
               </div>
 
-              <fieldset className="sgroup" disabled={!admin} aria-labelledby="g-agent">
+              {/* Only an admin changes these, but anyone can hear the voice: each control that
+                  changes a setting is disabled for others, not the whole group (Preview stays). */}
+              <fieldset className="sgroup" aria-labelledby="g-agent">
                 <h2 id="g-agent">{agent}</h2>
                 <section className="srow" aria-labelledby="s-voice">
                   <h3 id="s-voice">Voice</h3>
@@ -403,6 +405,7 @@ export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
                         voices={voices.data}
                         saved={s.voice}
                         previewing={previewing}
+                        canChoose={admin}
                         onChange={(voice) => {
                           stopPreview();
                           set({ voice });
@@ -424,7 +427,13 @@ export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
                     <div className="sens" role="radiogroup" aria-label="Sensitivity">
                       {options.map(([value, label, desc]) => (
                         <label key={value} className="opt-label">
-                          <input type="radio" name="sens" checked={s.sensitivity === value} onChange={() => set({ sensitivity: value })} />
+                          <input
+                            type="radio"
+                            name="sens"
+                            disabled={!admin}
+                            checked={s.sensitivity === value}
+                            onChange={() => set({ sensitivity: value })}
+                          />
                           <span>
                             <span className="opt-name">{label}</span>
                             <span className="opt-desc">{desc}</span>
@@ -440,6 +449,7 @@ export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
                         <input
                           id="s-int"
                           type="range"
+                          disabled={!admin}
                           min={1}
                           max={15}
                           step={1}
@@ -481,12 +491,15 @@ function VoicePicker({
   voices,
   saved,
   previewing,
+  canChoose,
   onChange,
   onPreview,
 }: {
   voices: Voice[];
   saved: string | null | undefined;
   previewing: string | null;
+  /** Only an admin changes the voice; anyone can preview it. */
+  canChoose: boolean;
   onChange: (voice: string | null) => void;
   onPreview: (voiceId: string, sample: string) => void;
 }) {
@@ -496,10 +509,16 @@ function VoicePicker({
   return (
     <div className="voice-pick">
       <div className="voice-row">
-        <select className="field" aria-labelledby="s-voice" value={value} onChange={(e) => onChange(savedVoice(e.target.value))}>
+        <select
+          className="field"
+          aria-labelledby="s-voice"
+          value={value}
+          disabled={!canChoose}
+          onChange={(e) => onChange(savedVoice(e.target.value))}
+        >
           <option value="">{defaultOptionLabel(defaultVoice)}</option>
           {unavailable && <option value={value}>Saved voice (no longer available)</option>}
-          {voices.map((v) => (
+          {voiceOptions(voices).map((v) => (
             <option key={v.id} value={v.id}>
               {v.name}
             </option>

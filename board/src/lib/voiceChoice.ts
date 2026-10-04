@@ -23,9 +23,19 @@ export interface VoiceChoice<V extends VoiceOption> {
  * Speak and Listen fall back to the configured default voice. */
 export function voiceChoice<V extends VoiceOption>(voices: V[], saved: string | null | undefined): VoiceChoice<V> {
   const defaultVoice = voices.find((v) => v.default_label);
-  if (!saved) return { value: "", defaultVoice, unavailable: false, shown: defaultVoice };
+  // The default voice saved by id is the same voice as Default: shown as Default, listed once.
+  if (!saved || saved === defaultVoice?.id) return { value: "", defaultVoice, unavailable: false, shown: defaultVoice };
   const listed = voices.find((v) => v.id === saved);
   return { value: saved, defaultVoice, unavailable: listed === undefined, shown: listed };
+}
+
+/** The voices to list after Default: every voice but the default (which Default already is), by
+ * name, ignoring case and with numbers in order ("Voice 9" before "Voice 10"). ElevenLabs's own
+ * order is no help when an account lists hundreds. */
+export function voiceOptions<V extends VoiceOption>(voices: V[]): V[] {
+  return voices
+    .filter((v) => !v.default_label)
+    .sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base", numeric: true }));
 }
 
 /** The option for no saved voice, named after the default voice when the list has it. */
