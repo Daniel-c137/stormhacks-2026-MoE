@@ -13,7 +13,15 @@ MEETING = "m-1"
 _seq = count(1)
 
 
-def said(text: str, *, by: str = "u-alex", name: str = "Alex Chen", t: float = 10.0, final=True):
+def said(
+    text: str,
+    *,
+    by: str = "u-alex",
+    name: str = "Alex Chen",
+    t: float = 10.0,
+    end: float | None = None,
+    final=True,
+):
     n = next(_seq)
     return TranscriptSegment(
         seg_id=f"seg-{n}",
@@ -23,7 +31,7 @@ def said(text: str, *, by: str = "u-alex", name: str = "Alex Chen", t: float = 1
         text=text,
         is_final=final,
         t_start=t,
-        t_end=t + 2.0,
+        t_end=t + 2.0 if end is None else end,
     )
 
 
@@ -106,10 +114,18 @@ def test_name_at_the_end_keeps_the_question_before_it(detector):
     assert inv.question == "What's the status of DS-117?"
 
 
-def test_name_at_the_end_without_punctuation(detector):
-    inv = detector.on_segment(said("can you check the checkout PR omni man"))
-
-    assert inv.question == "can you check the checkout PR"
+@pytest.mark.parametrize(
+    "text",
+    [
+        "can you check the checkout PR omni man",
+        "can you check the checkout PR OmniMan?",
+        "can you check the checkout PR, OmniMan.",
+        "I asked OmniMan.",
+    ],
+)
+def test_name_at_the_end_needs_a_comma_before_it_and_a_question_mark(detector, text):
+    assert detector.on_segment(said(text)) is None
+    assert detector.due(float("inf")) == []
 
 
 @pytest.mark.parametrize(
@@ -143,7 +159,6 @@ def test_the_agents_own_speech_never_invokes(detector):
 
 def test_name_alone_takes_the_same_speakers_next_segment_as_the_question(detector):
     assert detector.on_segment(said("OmniMan?", t=10.0)) is None
-    assert detector.on_segment(said("I'm not sure either.", by="u-sarah", t=11.0)) is None
 
     inv = detector.on_segment(said("Is the checkout PR merged?", t=12.0))
 
@@ -333,6 +348,221 @@ def test_polaris_by_name_alone_is_the_wake_phrase():
     inv = detector.on_segment(said("Polaris, what is the refund window?"))
 
     assert inv is not None and inv.question == "what is the refund window?"
+
+
+# real meetings (issue #108): times are seconds from the meeting start, as saved
+
+DANIAL = {"by": "u-danial", "name": "Danial"}
+REZA = {"by": "u-reza", "name": "Mohammad Reza"}
+HOSSEIN = {"by": "u-hossein", "name": "Hossein"}
+
+
+@pytest.fixture
+def polaris() -> WakeDetector:
+    return WakeDetector(default_aliases("Polaris"))
+
+
+def replay(detector: WakeDetector, segments) -> list:
+    """Segments in order, with the worker's timer: whatever is due by each segment's start goes
+    first, and whatever is still held goes when the meeting ends."""
+    invocations = []
+    for segment in segments:
+        invocations += detector.due(segment.t_start)
+        if inv := detector.on_segment(segment):
+            invocations.append(inv)
+    invocations += detector.due(float("inf"))
+    return invocations
+
+
+FOUR_PERSON_MEETING = [
+    said("I don't know what that might be.", t=25.8, end=27.0, **REZA),
+    said("Okay. Sure.", t=27.3, end=28.1, **HOSSEIN),
+    said(
+        "خب، ولی یکم سرعتش چیزه. یکی حرف بزنه ببینیم میاد بالا. تو داری حرف می‌زنی. جا به جا.",
+        t=33.1,
+        end=39.0,
+        **HOSSEIN,
+    ),
+    said("Hey, guys.", t=67.1, end=67.9, **HOSSEIN),
+    said("Oh, I need-", t=71.2, end=72.0, **REZA),
+    said("Um, Polaris,", t=112.5, end=114.8, **DANIAL),
+    said("این دوباره. دوباره گفتی اون Polaris.", t=120.2, end=123.1, **DANIAL),
+    said(
+        "بذار ببینیم چیکار کنیم. بذار ببینیم چیکار کنیم. پسره دیگه.", t=125.2, end=130.0, **DANIAL
+    ),
+    said("یه سؤال این الان چرا فقط از...", t=137.9, end=140.5, **DANIAL),
+    said("Polaris, how are you?", t=166.9, end=168.2, **DANIAL),
+    said("Polaris,", t=219.5, end=220.3, **DANIAL),
+    said("Polaris,", t=227.0, end=227.8, **DANIAL),
+    said("Polaris,", t=248.7, end=249.5, **DANIAL),
+    said("Uh, w- b- b- b- b", t=256.6, end=258.0, **REZA),
+]
+
+
+def test_the_four_person_meeting_asks_only_how_are_you(polaris):
+    [inv] = replay(polaris, FOUR_PERSON_MEETING)
+
+    assert inv.question == "how are you?"
+    assert inv.asked_by_name == "Danial"
+    assert inv.t == 166.9
+
+
+def test_side_talk_that_mentions_the_name_after_the_name_alone_is_not_a_question(polaris):
+    """1:52 "Um, Polaris," then 2:00 Persian side-talk, "you said Polaris again"."""
+    assert replay(polaris, FOUR_PERSON_MEETING[5:7]) == []
+
+
+def test_how_are_you_after_the_name_is_a_question(polaris):
+    inv = polaris.on_segment(said("Polaris, how are you?", t=166.9, end=168.2, **DANIAL))
+
+    assert inv is not None and inv.question == "how are you?"
+
+
+def test_the_name_alone_three_times_asks_nothing(polaris):
+    assert replay(polaris, FOUR_PERSON_MEETING[10:13]) == []
+
+
+SOLO_MEETING = [
+    said("Polaris, what's the status of...", t=274.0, end=276.3, **DANIAL),
+    said("DS-104 in Jira.", t=277.8, end=279.4, **DANIAL),
+    said(
+        "Okay. Uh, we have decided to refund the affected users this week, and I'll email the "
+        "affected users once",
+        t=296.9,
+        end=315.8,
+        **DANIAL,
+    ),
+    said("the refunds are done.", t=316.0, end=316.9, **DANIAL),
+]
+
+
+def test_the_solo_meetings_question_split_by_a_pause_is_one_question(polaris):
+    [inv] = replay(polaris, SOLO_MEETING)
+
+    assert inv.question == "what's the status of DS-104 in Jira."
+    assert inv.t == 274.0
+
+
+def test_scribes_name_then_question_is_one_question(polaris):
+    """The probe: Scribe commits the name said alone, and the question 2.4 s later."""
+    [inv] = replay(
+        polaris,
+        [
+            said("Polaris.", t=1.0, end=1.6, **DANIAL),
+            said("Who owns DS-115?", t=4.0, end=5.2, **DANIAL),
+        ],
+    )
+
+    assert inv.question == "Who owns DS-115?"
+    assert inv.t == 4.0
+
+
+def test_scribes_name_and_question_in_one_segment(polaris):
+    inv = polaris.on_segment(said("Polaris, what is the status of DS-104 in Jira?", **DANIAL))
+
+    assert inv is not None and inv.question == "what is the status of DS-104 in Jira?"
+
+
+def test_another_speaker_after_the_name_alone_cancels_it(polaris):
+    assert polaris.on_segment(said("Polaris.", t=10.0, end=10.6, **DANIAL)) is None
+    assert polaris.on_segment(said("I don't know what that might be.", t=11.0, **REZA)) is None
+
+    assert polaris.on_segment(said("Who owns DS-115?", t=13.5, **DANIAL)) is None
+    assert polaris.due(float("inf")) == []
+
+
+def test_another_speaker_cancels_a_fragment_waiting_after_the_name(polaris):
+    polaris.on_segment(said("Polaris.", t=10.0, end=10.6, **DANIAL))
+    assert polaris.on_segment(said("What's the status of...", t=11.0, end=12.5, **DANIAL)) is None
+
+    assert polaris.on_segment(said("Hey, guys.", t=13.0, **HOSSEIN)) is None
+    assert polaris.on_segment(said("DS-104?", t=15.0, **DANIAL)) is None
+    assert polaris.due(float("inf")) == []
+
+
+def test_the_name_alone_waits_eight_seconds(polaris):
+    polaris.on_segment(said("Polaris.", t=10.0, end=10.6, **DANIAL))
+    assert polaris.on_segment(said("Who owns DS-115?", t=18.8, **DANIAL)) is None
+
+    polaris.on_segment(said("Polaris.", t=30.0, end=30.6, **DANIAL))
+    inv = polaris.on_segment(said("Who owns DS-115?", t=38.4, **DANIAL))
+    assert inv is not None and inv.question == "Who owns DS-115?"
+
+
+def test_saying_the_name_alone_again_restarts_the_wait(polaris):
+    polaris.on_segment(said("Polaris,", t=10.0, end=10.6, **DANIAL))
+    polaris.on_segment(said("Polaris,", t=17.0, end=17.6, **DANIAL))
+
+    inv = polaris.on_segment(said("Who owns DS-115?", t=24.0, **DANIAL))
+
+    assert inv is not None and inv.question == "Who owns DS-115?"
+
+
+@pytest.mark.parametrize(
+    "fragment",
+    [
+        "Oh, I need-",
+        "Uh, w- b- b- b- b",
+        "یه سؤال این الان چرا فقط از...",
+        "Okay. Sure.",
+        "So we" + chr(0x2026),
+    ],
+)
+def test_a_fragment_after_the_name_alone_is_never_the_question(polaris, fragment):
+    polaris.on_segment(said("Polaris,", t=10.0, end=10.6, **DANIAL))
+
+    assert polaris.on_segment(said(fragment, t=11.0, end=12.0, **DANIAL)) is None
+    assert polaris.next_due() is not None  # it waits for the rest
+    assert polaris.due(float("inf")) == []
+    assert polaris.next_due() is None
+
+
+def test_a_fragment_after_the_name_alone_joins_the_rest_of_the_question(polaris):
+    polaris.on_segment(said("Polaris,", t=10.0, end=10.6, **DANIAL))
+    polaris.on_segment(said("Okay. So", t=11.0, end=12.0, **DANIAL))
+
+    inv = polaris.on_segment(said("who owns DS-115?", t=16.0, **DANIAL))
+
+    assert inv is not None and inv.question == "Okay. So who owns DS-115?"
+    assert inv.t == 11.0
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Polaris said earlier that the release is on Friday.",
+        "Polaris was wrong about the refund window" + chr(0x2026),
+        "Polaris is down again",
+        "Polaris answers in English only.",
+        "I asked Polaris yesterday.",
+        "این دوباره. دوباره گفتی اون Polaris.",
+    ],
+)
+def test_talking_about_polaris_is_not_calling_it(polaris, text):
+    assert polaris.on_segment(said(text, **DANIAL)) is None
+    assert polaris.due(float("inf")) == []
+
+
+@pytest.mark.parametrize(
+    "text, question",
+    [
+        ("Polaris what's the status of DS-104?", "what's the status of DS-104?"),
+        ("Polaris who owns DS-115?", "who owns DS-115?"),
+        ("Polaris is DS-104 done?", "is DS-104 done?"),
+        ("Polaris can you check DS-104?", "can you check DS-104?"),
+        ("Polaris please summarize the last decision.", "please summarize the last decision."),
+        ("Polaris: list the open blockers.", "list the open blockers."),
+        ("Hey Polaris! Remind me what we decided.", "Remind me what we decided."),
+        ("Polaris" + chr(0x2026) + " who owns DS-115?", "who owns DS-115?"),
+        ("Polaris، وضعیت DS-104 چیه؟", "وضعیت DS-104 چیه؟"),
+        ("What's the status of DS-117, Polaris?", "What's the status of DS-117?"),
+        ("وضعیت DS-104 چیه، Polaris?", "وضعیت DS-104 چیه?"),
+    ],
+)
+def test_calling_polaris_by_name(polaris, text, question):
+    inv = polaris.on_segment(said(text, **DANIAL))
+
+    assert inv is not None and inv.question == question
 
 
 # public chat
