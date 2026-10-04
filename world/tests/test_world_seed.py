@@ -568,6 +568,7 @@ def test_the_command_refuses_to_run_without_embeddings(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     monkeypatch.setenv("GEMINI_MODEL", "test-model")
     monkeypatch.setenv("GEMINI_EMBEDDING_MODEL", "")
+    monkeypatch.setenv("OPENROUTER_EMBEDDING_MODEL", "")  # nor the fallback a .env may set
 
     with pytest.raises(SystemExit, match="GEMINI_EMBEDDING_MODEL"):
         seed.main(["--snapshot", "demo"])
@@ -580,6 +581,7 @@ def test_the_command_refuses_embeddings_the_database_cannot_hold(monkeypatch):
         "GEMINI_MODEL": "test-model",
         "GEMINI_EMBEDDING_MODEL": "test-embedding",
         "GEMINI_EMBEDDING_DIM": "1536",
+        "OPENROUTER_EMBEDDING_MODEL": "",  # nor the fallback a .env may set
     }.items():
         monkeypatch.setenv(name, value)
 
