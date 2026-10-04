@@ -2,9 +2,9 @@
 
 1. Plan: the model picks up to MAX_TOOL_CALLS read-only tools, with arguments, from a fixed menu.
 2. Execute: the tools run at the same time, each with a timeout, scoped to the asker's team. What
-   they find, and what people said in the meeting, is numbered as evidence, each item with its
-   Source; a tool that is unconfigured or fails goes into Answer.unavailable. The agent's own
-   words are context, never evidence.
+   they find, what people said in the meeting and the meeting's saved agenda are numbered as
+   evidence, each item with its Source; a tool that is unconfigured or fails goes into
+   Answer.unavailable. The agent's own words are context, never evidence.
 3. Answer: the model writes the answer and names the evidence it relies on. Only evidence that
    exists is cited, and inference is marked as such. With no evidence the answer says so.
 
@@ -29,6 +29,8 @@ from brain.report.extraction import by_agent, clock, speaker
 from brain.store import Store
 from brain.zones import team_zone
 from contracts import (
+    Agenda,
+    AgendaItem,
     Answer,
     AskTurn,
     CodeSnippet,
@@ -58,6 +60,7 @@ MAX_TOOL_CALLS = 4
 MAX_EVIDENCE = 40
 MAX_RECENT_SEGMENTS = 20
 MAX_TEXT = 600
+MAX_AGENDA_TEXT = 2000  # the whole agenda is one evidence item
 MAX_CODE_LINE = 200
 MAX_LOGGED_NAME = 60
 
@@ -70,6 +73,7 @@ NO_EVIDENCE = "I couldn't find anything in the team's records that answers this,
 UNVERIFIED = "I couldn't verify an answer against any source, so I won't guess."
 FROM_CONVERSATION = "(From our earlier conversation, not a new source.)"
 OMITTED = "Some results were left out (limit {limit})"
+AGENDA_LABEL = "Agenda"
 
 # Transcript, conversation and tool results are fenced between these markers in the prompts.
 BEGIN_DATA = "<<<BEGIN QUOTED DATA>>>"
@@ -227,10 +231,11 @@ class ToolOrchestrator:
         meeting = await toolbox.meeting(question.meeting_id) if question.meeting_id else None
         recent = recent_segments(question, meeting)
         own = [s for s in recent if by_agent(s)]
+        agenda = agenda_finding(meeting, await self.store.agenda(meeting.id)) if meeting else None
         context = render_context(question, meeting, members, today)
 
         plan = await self.llm.generate_structured(
-            render_plan_prompt(context, question, recent, toolbox, self.max_calls),
+            render_plan_prompt(context, question, recent, toolbox, self.max_calls, agenda),
             AskPlan,
             system=plan_system(self.max_calls),
         )
@@ -245,6 +250,7 @@ class ToolOrchestrator:
                 if not by_agent(s)
             ]
             groups.insert(0, said)
+            groups.insert(1, [agenda] if agenda else [])
         evidence, omitted = number(groups, self.max_evidence, newest_first=meeting is not None)
         if omitted:
             unavailable.append(OMITTED.format(limit=self.max_evidence))
@@ -303,6 +309,45 @@ def recent_segments(question: Question, meeting: Meeting | None) -> list[Transcr
         return []
     final = [s for s in question.recent if s.is_final and s.meeting_id == meeting.id]
     return final[-MAX_RECENT_SEGMENTS:]
+
+
+def agenda_finding(meeting: Meeting, agenda: Agenda | None) -> Finding | None:
+    """The meeting's saved agenda as one piece of evidence; None without one or with no items."""
+    if agenda is None or not agenda.items:
+        return None
+    return Finding(
+        text=render_agenda(meeting, agenda),
+        source=Source(kind="meeting", label=AGENDA_LABEL, meeting_id=meeting.id),
+    )
+
+
+def render_agenda(meeting: Meeting, agenda: Agenda) -> str:
+    """Each item in order with its status and timebox and, once timekeeping has run, the talk
+    time it has had so far; then the items still open (pending or current)."""
+    items, still_open = [], []
+    for n, item in enumerate(agenda.items, start=1):
+        if item.status == "pending":
+            still_open.append(str(n))
+        details = [
+            agenda_status(item, agenda),
+            f"timebox {item.minutes} min" if item.minutes else "no timebox",
+        ]
+        if agenda.tracked_until is not None:
+            details.append(f"{int(item.discussed_s / 60 + 0.5)} min used")
+        items.append(f"{n}. {oneline(item.title)} ({', '.join(details)})")
+    left = f"items {', '.join(still_open)}" if still_open else "none"
+    return f'"{oneline(meeting.title)}" agenda, in order: {"; ".join(items)}. Still open: {left}.'
+
+
+def agenda_status(item: AgendaItem, agenda: Agenda) -> str:
+    """pending, covered or skipped as saved; a pending item being discussed now is current."""
+    if item.status == "pending" and item.id == agenda.current_item_id:
+        return "current, being discussed now"
+    return item.status
+
+
+def is_agenda(source: Source) -> bool:
+    return source.kind == "meeting" and source.t is None and source.label == AGENDA_LABEL
 
 
 def number(
@@ -449,8 +494,8 @@ purpose. Choose the read-only lookups that would find the facts to answer it.
 
 Rules:
 - Pick at most {max_calls} calls, using only tool names from the menu.
-- Pick none when the conversation or what people said in the recent transcript already answers
-  the question.
+- Pick none when the conversation, what people said in the recent transcript or the meeting's
+  agenda already answers the question.
 - Lines {agent} spoke in the transcript are your own earlier answers, not a source. To answer
   from them, look the facts up again.
 {DATA_RULE}
@@ -527,9 +572,13 @@ def render_plan_prompt(
     recent: list[TranscriptSegment],
     toolbox: TeamToolbox,
     max_calls: int,
+    agenda: Finding | None = None,
 ) -> str:
     agent = get_identity().agent_name
     lines = list(context)
+    if agenda:
+        lines += ["", "This meeting's agenda (already part of the evidence):"]
+        lines += fenced([clip(agenda.text, MAX_AGENDA_TEXT)])
     if recent:
         lines += ["", "Recent transcript of this meeting ([time] speaker: text):"]
         lines += fenced(f"[{clock(s.t_start)}] {speaker(s, agent)}: {clip(s.text)}" for s in recent)
@@ -577,7 +626,8 @@ LINE_BREAKS = re.compile(r"[\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]+")
 def render_evidence(item: Evidence) -> list[str]:
     finding = item.finding
     if finding.snippet is None:
-        return [f"[{item.id}] {finding.source.label}{dated(finding)}: {clip(finding.text)}"]
+        text = clip(finding.text, MAX_AGENDA_TEXT if is_agenda(finding.source) else MAX_TEXT)
+        return [f"[{item.id}] {finding.source.label}{dated(finding)}: {text}"]
     snippet = finding.snippet
     numbered = [
         f"{n:>4} | {clip_line(line)}"
@@ -610,6 +660,6 @@ def unfence(text: str) -> str:
     return re.sub(r">{3,}", ">>", re.sub(r"<{3,}", "<<", text))
 
 
-def clip(text: str) -> str:
+def clip(text: str, limit: int = MAX_TEXT) -> str:
     text = " ".join(text.split())
-    return text if len(text) <= MAX_TEXT else text[: MAX_TEXT - 1] + "…"
+    return text if len(text) <= limit else text[: limit - 1] + "…"
