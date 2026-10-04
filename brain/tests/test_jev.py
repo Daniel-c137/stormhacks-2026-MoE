@@ -80,6 +80,8 @@ async def test_a_timeout_is_an_llm_error():
         {"answers": {"about": ANSWERS["about"]}},  # a question left unanswered
         {"answers": {**ANSWERS, "over": {"noul": "high"}}},  # not a probability
         {"answers": {**ANSWERS, "about": {"choice": "c"}}},  # not one of the options
+        {"answers": {**ANSWERS, "about": {"choice": ["a"]}}},  # not an option at all
+        {"answers": {**ANSWERS, "over": {"noul": True}}},  # not a probability either
     ],
 )
 async def test_an_answer_that_does_not_fit_the_questions_is_an_llm_error(body):

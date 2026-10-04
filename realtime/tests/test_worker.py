@@ -13,6 +13,7 @@ from realtime_worker.worker import (
     CHAT_TOPIC,
     MeetingSession,
     RoomChat,
+    agenda_check_delay,
     meeting_clock,
     scribe_language,
     speech_translator,
@@ -179,9 +180,21 @@ def test_scribes_silence_threshold_defaults_to_one_second_within_what_scribe_acc
 
 
 def test_the_agenda_is_checked_after_each_caption_only_with_jev():
-    """JEV_MODEL is the brain's; the worker reads the same setting to know the tracker is cheap
-    enough to ask after every caption. It waits for the brain's settle time first."""
+    """JEV_MODEL and OPENROUTER_API_KEY are the brain's; the worker reads the same settings to
+    know the tracker is cheap enough to ask after every caption. Without the key the brain keeps
+    time with Gemini, so the worker does not either."""
     assert Settings(_env_file=None).agenda_after_captions is False
-    on = Settings(_env_file=None, jev_model="typesafe/jev-1.13")
+    assert Settings(_env_file=None, jev_model="typesafe/jev-1.13").agenda_after_captions is False
+    on = Settings(_env_file=None, jev_model="typesafe/jev-1.13", openrouter_api_key="sk-or-x")
     assert on.agenda_after_captions is True
-    assert on.agenda_check_delay_seconds == 2.5
+
+
+def test_a_caption_check_waits_past_the_brains_settle_and_a_translation():
+    """The brain treats a caption as settled 3 s after it ends (JEV_SETTLE_S), 4 s more with
+    translation on, when a caption waits up to 4 s for its translation before it is saved."""
+    settings = Settings(_env_file=None)
+    assert settings.agenda_check_delay_seconds == 3.5
+    assert agenda_check_delay(settings, a_meeting(translate=False)) == 3.5
+    assert agenda_check_delay(settings, a_meeting(translate=True)) == 7.5
+    with pytest.raises(ValueError):
+        Settings(_env_file=None, agenda_check_delay_seconds=2.5)

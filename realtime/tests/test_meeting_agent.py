@@ -608,6 +608,18 @@ async def test_a_failing_check_is_logged_and_the_next_caption_checks_again(
     assert "brain is down" in caplog.text
 
 
+async def test_a_caption_saved_after_the_agent_closed_checks_nothing(make_agent, brain):
+    """Closing the meeting flushes the last captions after the agent has stopped."""
+    clock = MeetingClock()
+    agent = make_agent(agenda_after_captions=True, agenda_check_delay=0.01, clock=clock)
+    await agent.aclose()
+
+    agent.caption_saved(clock())
+    await asyncio.sleep(0.05)
+
+    assert brain.agenda_calls == 0
+
+
 async def test_without_jev_a_saved_caption_never_checks_the_agenda(make_agent, brain):
     clock = MeetingClock()
     agent = make_agent(agenda_check_delay=0.01, clock=clock)

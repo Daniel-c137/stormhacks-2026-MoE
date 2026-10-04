@@ -4,6 +4,7 @@ enough to ask as soon as a caption settles, so a finished item is ticked within 
 it the tracker asks Gemini at its own pace, as before. Either way, a stretch of only small talk
 never finishes an item."""
 
+import anyio
 import pytest
 from api_support import SARAH
 from test_agenda_tracking import (
@@ -20,7 +21,7 @@ from test_agenda_tracking import (
 )
 
 from brain.agent.agenda_jev import COVERED_P, JEV_MAX_LINES
-from brain.agent.timekeeping import JEV_SETTLE_S, SETTLE_S
+from brain.agent.timekeeping import JEV_SETTLE_S, JEV_TRANSLATION_LAG_S, SETTLE_S
 from brain.api.deps import get_jev, get_llm_factory
 from brain.llm import LLMError
 from contracts import AGENT_PARTICIPANT_ID
@@ -103,6 +104,40 @@ def test_a_line_that_has_not_settled_waits(worker, client_as, store, jev):
 
     assert jev.calls == []
     assert body["agenda"]["tracked_until"] is None
+
+
+def test_another_speakers_caption_arriving_late_is_still_asked_about(worker, client_as, store, jev):
+    """Sarah's caption ended before Alex's but reached the brain 2.5 s after hers ended: it is
+    not skipped, because Alex's had not settled yet when the check after it ran."""
+    meeting, _ = standup(store, client_as)
+    ingest(worker, meeting, said(meeting, 1, "Waitlist email goes Thursday", 4, 10))
+    jev.says("a1")
+
+    tracked(worker, meeting, now=12.5)  # the worker's check after Alex's caption, too early
+    ingest(worker, meeting, said(meeting, 2, "Agreed, that's settled", 7, 9.5, SARAH))
+    tracked(worker, meeting, now=10 + JEV_SETTLE_S)
+
+    assert JEV_SETTLE_S >= 3
+    [(state, _)] = jev.calls
+    assert list(state["new_lines"].values()) == [
+        "[00:04] Alex Chen: Waitlist email goes Thursday",
+        "[00:07] Sarah Kim: Agreed, that's settled",
+    ]
+
+
+def test_with_translation_on_a_caption_settles_after_its_translation(worker, client_as, store, jev):
+    meeting, _ = standup(store, client_as)
+    live = anyio.run(store.meeting, meeting)
+    anyio.run(store.update_meeting, live.model_copy(update={"translate": True}))
+    ingest(worker, meeting, said(meeting, 1, "Waitlist is done, next", 10, 12))
+    jev.says("a1", closed={"a1": 0.9})
+
+    early = tracked(worker, meeting, now=12 + JEV_SETTLE_S)
+    settled = tracked(worker, meeting, now=12 + JEV_SETTLE_S + JEV_TRANSLATION_LAG_S)
+
+    assert early["agenda"]["tracked_until"] is None
+    assert settled["agenda"]["tracked_until"] == 12
+    assert len(jev.calls) == 1
 
 
 def test_nothing_new_asks_nothing(worker, client_as, store, jev):
