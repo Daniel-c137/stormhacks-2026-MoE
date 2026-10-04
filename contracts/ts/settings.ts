@@ -1,5 +1,7 @@
 export type Sensitivity = "quiet" | "balanced" | "eager";
 export type WhoCanAllow = "everyone" | "host";
+export type ConnectorName = "github" | "jira";
+export type ConnectorState = "connected" | "not_configured" | "failing";
 
 export interface GitHubSettings {
   repo?: string | null;
@@ -20,6 +22,7 @@ export interface Voice {
   name: string;
   desc: string;
   sample: string;
+  default_label?: string | null; // only on the agent's default voice, naming the agent
 }
 
 export interface TeamSettings {
@@ -31,4 +34,12 @@ export interface TeamSettings {
   sensitivity: Sensitivity;
   interrupt_minutes: number;
   who_can_allow: WhoCanAllow;
+  timezone: string; // IANA name, e.g. "America/Vancouver"; dates people see use it
+}
+
+/** Whether an integration can be used right now. Failing and unconfigured are never hidden. */
+export interface ConnectorStatus {
+  name: ConnectorName;
+  state: ConnectorState;
+  detail?: string | null;
 }

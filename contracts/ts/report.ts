@@ -63,6 +63,8 @@ export interface ReportProgress {
   steps: string[];
   current: number;
   done: boolean;
+  error?: string | null; // why the pipeline stopped at the current step
+  updated_at?: string | null; // ISO datetime the write-up last saved progress
 }
 
 /** A specific human approval: which drafts go where. */
@@ -77,4 +79,5 @@ export interface TaskPushResult {
   key?: string | null;
   url?: string | null;
   error?: string | null;
+  warning?: string | null;
 }

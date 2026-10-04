@@ -2,10 +2,14 @@
 members = ["contracts", "brain", "realtime", "world"]
 
 [dependency-groups]
-dev = ["ruff", "pytest"]
+dev = ["ruff", "pytest", "pgserver"]
 
 [tool.pytest.ini_options]
-markers = ["live: calls real external services; skipped unless their credentials are configured"]
+markers = [
+    "live: calls real external services; deselected unless run with -m live, skipped without credentials",
+]
+# A configured .env never spends API quota by accident; `-m live` on the command line wins.
+addopts = ["-m", "not live"]
 
 [tool.ruff]
 line-length = 100

@@ -1,8 +1,11 @@
-from datetime import date
+from collections.abc import Sequence
+from datetime import UTC, date, tzinfo
 
 from brain.llm import LLM
+from brain.zones import local_date
 from contracts import (
     AGENT_PARTICIPANT_ID,
+    AgendaItem,
     Decision,
     Report,
     Risk,
@@ -16,21 +19,27 @@ from .extraction import ReportExtraction, render_prompt, system_prompt
 from .models import TranscriptInput
 
 
-async def build_report(llm: LLM, meeting: TranscriptInput) -> Report:
-    """Ask the LLM for the meeting record, then keep only what the transcript supports."""
+async def build_report(
+    llm: LLM, meeting: TranscriptInput, *, agenda: Sequence[AgendaItem] = (), zone: tzinfo = UTC
+) -> Report:
+    """Ask the LLM for the meeting record, then keep only what the transcript supports. With an
+    agenda, the topics follow its items in order. The meeting's date, which relative due dates
+    resolve against, is its day in the team's `zone`."""
     segments = meeting.final_segments()
     if not segments:
         raise ValueError(f"Meeting {meeting.meeting_id} has no final segments to report on")
     people = meeting.people()
     labelled = {f"s{i}": s for i, s in enumerate(segments, 1)}
-    meeting_date = meeting.started_at.date() if meeting.started_at else None
+    meeting_date = local_date(meeting.started_at, zone)
+    day = f"{meeting_date.isoformat()} ({meeting_date:%A})" if meeting_date else None
 
     extraction = await llm.generate_structured(
         render_prompt(
             title=meeting.title,
-            meeting_date=meeting_date.isoformat() if meeting_date else None,
+            meeting_date=day,
             people=people,
             labelled=labelled,
+            agenda=agenda,
         ),
         ReportExtraction,
         system=system_prompt(),
