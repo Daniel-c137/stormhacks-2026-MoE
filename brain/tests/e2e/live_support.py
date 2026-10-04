@@ -202,7 +202,9 @@ def live_dsn(pg_server, team, cast, logins, github_source) -> Iterator[str]:
         store = PostgresStore(dsn)
         await store.create_team(team)
         for person in cast.everyone:
-            await store.upsert_person(person, team.id)
+            # Alice, the host, is the team's admin: only an admin approves the push to Jira.
+            admin = person.id == cast.alice.id
+            await store.upsert_person(person.model_copy(update={"is_admin": admin}), team.id)
             login = logins[person.id]
             await store.set_login(person.id, login.email, hash_password(login.password))
         await store.save_settings(

@@ -279,9 +279,9 @@ def test_the_approver_is_the_caller_whatever_the_body_says(client_as, store, pus
     draft = task(meeting["id"], 1)
     processed(store, meeting, draft)
 
-    push(client_as(SARAH), meeting["id"], draft.id, approved_by="The CEO")
+    push(client_as(ALEX), meeting["id"], draft.id, approved_by="The CEO")
 
-    assert pushing.created[0]["description"].endswith(f"Approved for Jira by {SARAH.name}.")
+    assert pushing.created[0]["description"].endswith(f"Approved for Jira by {ALEX.name}.")
     assert "The CEO" not in pushing.created[0]["description"]
 
 
@@ -351,7 +351,7 @@ def test_push_to_another_teams_meeting_is_404(client_as, store, pushing):
     assert pushing.created == []
 
 
-def test_push_without_jira_configured_is_503(client_as, store):
+def test_push_without_jira_connected_or_configured_is_503(client_as, store):
     meeting = create(client_as(ALEX))
     draft = task(meeting["id"], 1)
     processed(store, meeting, draft)
@@ -359,7 +359,7 @@ def test_push_without_jira_configured_is_503(client_as, store):
     response = push(client_as(ALEX), meeting["id"], draft.id)
 
     assert response.status_code == 503
-    assert "Jira is not configured" in response.json()["detail"]
+    assert "Jira is not connected" in response.json()["detail"]
     assert meeting_in_store(store, meeting["id"]).status == "needs_review"
 
 

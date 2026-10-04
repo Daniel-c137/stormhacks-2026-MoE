@@ -2,6 +2,7 @@
 
 import re
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile
@@ -11,6 +12,7 @@ from contracts import (
     CodeRepoChoice,
     ConnectorStatus,
     ConnectorsUpdate,
+    JiraAccountConnect,
     Person,
     ProfileUpdate,
     Team,
@@ -18,11 +20,14 @@ from contracts import (
     Voice,
 )
 
+from ..auth import NOT_CONFIGURED, signing_secret
 from ..config import Settings
 from ..connectors import connector_statuses
 from ..gitlab import valid_project
 from ..jira import site_host
-from ..store import NotFound, Store
+from ..jira_rest import NOT_A_SITE, JiraAccess, JiraCloud, JiraRejected, JiraUnreachable
+from ..sealing import seal
+from ..store import JiraAccount, NotFound, Store
 from ..voices import VoicesFailed, VoicesUnavailable, fetch_voices, with_default
 from ..zones import is_zone
 from .deps import (
@@ -191,7 +196,8 @@ async def write_connectors(
 ) -> TeamSettings:
     """The team's GitHub repositories, GitLab projects and Jira site and project, replacing
     the saved ones; admins only. A repository that stays keeps its connection and index state
-    (a new branch or tag drops its index). Paths are checked and repeats refused."""
+    (a new branch or tag drops its index). Paths are checked and repeats refused. The Jira
+    account stays connected while the site does: its token was checked against that site only."""
     team = await user_team(store, user)
     current = await store.settings(team.id)
     github = repos(body.github, current.github.repos, "GitHub repository", github_path)
@@ -199,6 +205,10 @@ async def write_connectors(
     jira = current.jira.model_copy(
         update={"site": site_host(text(body.jira.site)), "project": jira_key(body.jira.project)}
     )
+    account = await store.jira_account(team.id)
+    if account is not None and jira.site != account.site:
+        await store.delete_jira_account(team.id)
+        jira = jira.model_copy(update={"connected": False, "account_email": None})
     return await store.save_settings(
         current.model_copy(
             update={
@@ -261,6 +271,88 @@ def jira_key(project: str | None) -> str | None:
     if not re.fullmatch(r"[A-Z][A-Z0-9_]{1,9}", key):
         raise HTTPException(status_code=422, detail=f"{key!r} is not a Jira project key")
     return key
+
+
+MAX_API_TOKEN = 2000
+
+
+@router.put("/settings/jira/account")
+async def connect_jira_account(
+    body: JiraAccountConnect,
+    user: Person = Depends(require_admin),
+    store: Store = Depends(get_store),
+    config: Settings = Depends(get_settings),
+    transport: httpx.AsyncBaseTransport | None = Depends(get_http_transport),
+) -> TeamSettings:
+    """Connects the team's Jira account; admins only. The email and API token are checked
+    against the site, and the project against what that account can see, before anything is
+    saved. The token is stored encrypted and never returned; approved task drafts are then
+    created as issues on the site as that account."""
+    email, token = body.email.strip(), body.api_token.strip()
+    project = jira_key(body.project)
+    if not email or not token or project is None:
+        raise HTTPException(
+            status_code=422, detail="The account's email, its API token and a project are needed"
+        )
+    if len(email) > MAX_TEXT_SETTING or len(token) > MAX_API_TOKEN:
+        raise HTTPException(status_code=422, detail="That email or API token is too long")
+    try:
+        access = JiraAccess(site=body.site, email=email, api_token=token, project_key=project)
+    except ValueError:
+        raise HTTPException(status_code=422, detail=NOT_A_SITE) from None
+    if (secret := signing_secret(config)) is None:
+        raise HTTPException(status_code=503, detail=NOT_CONFIGURED)
+
+    cloud = JiraCloud(access, transport=transport)
+    try:
+        try:
+            await cloud.myself()
+        except JiraRejected as e:
+            if e.status not in (401, 403):
+                raise
+            detail = f"{access.site} did not accept that email and API token"
+            raise HTTPException(status_code=422, detail=detail) from None
+        try:
+            await cloud.project(project)
+        except JiraRejected as e:
+            if e.status not in (403, 404):
+                raise
+            detail = f"{access.site} has no project {project} that this account can see"
+            raise HTTPException(status_code=422, detail=detail) from None
+    except JiraUnreachable as e:
+        raise HTTPException(status_code=502, detail=str(e)) from None
+    except JiraRejected as e:
+        detail = f"{access.site} answered {e.status}: {e}"
+        raise HTTPException(status_code=502, detail=detail) from None
+
+    team = await user_team(store, user)
+    await store.save_jira_account(
+        JiraAccount(
+            team_id=team.id,
+            site=access.site,
+            email=email,
+            sealed_token=seal(token, secret),
+            connected_by=user.id,
+            connected_at=datetime.now(UTC),
+        )
+    )
+    current = await store.settings(team.id)
+    jira = current.jira.model_copy(
+        update={"site": access.site, "project": project, "connected": True, "account_email": email}
+    )
+    return await store.save_settings(current.model_copy(update={"jira": jira}))
+
+
+@router.delete("/settings/jira/account")
+async def disconnect_jira_account(
+    user: Person = Depends(require_admin), store: Store = Depends(get_store)
+) -> TeamSettings:
+    """Forgets the team's Jira account and its token; admins only. The site and project stay."""
+    team = await user_team(store, user)
+    await store.delete_jira_account(team.id)
+    current = await store.settings(team.id)
+    jira = current.jira.model_copy(update={"connected": False, "account_email": None})
+    return await store.save_settings(current.model_copy(update={"jira": jira}))
 
 
 @router.get("/settings/connectors")

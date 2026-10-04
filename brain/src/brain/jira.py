@@ -2,10 +2,13 @@
 Jira MCP server.
 
 The same tool names work against the world's mock and the real server; JIRA_MCP_URL decides.
+A team whose admin connected its Jira account pushes through the site's REST API instead
+(brain.jira_rest); what a push is, and which drafts it creates, is the same for both.
 """
 
 import json
 import re
+from typing import Literal
 
 from mcp import Client
 from mcp.server.mcpserver import MCPServer
@@ -57,10 +60,8 @@ def jira_config(settings: Settings) -> JiraConfig:
     )
 
 
-class JiraPusher:
-    def __init__(self, config: JiraConfig, *, target: str | MCPServer | None = None):
-        self.config = config
-        self.target = target or config.mcp_url
+class TaskPusher:
+    """An approved push, wherever the issues are created: which drafts go, and one result each."""
 
     async def push(
         self, meeting: ProcessedMeeting, request: TaskPushRequest
@@ -83,20 +84,45 @@ class JiraPusher:
             elif not draft.include:
                 results[task_id] = TaskPushResult(task_id=task_id, error="Draft is excluded")
             elif draft.key:
-                results[task_id] = self.pushed(task_id, draft.key)
+                results[task_id] = TaskPushResult(
+                    task_id=task_id, key=draft.key, url=self.url(draft.key)
+                )
             else:
                 to_create.append(draft)
 
         if to_create:
-            try:
-                async with Client(self.target) as client:
-                    for draft in to_create:
-                        results[draft.id] = await self.create(client, draft, meeting, request)
-            except Exception as e:  # transport failure: report it per draft, keep what was created
-                error = f"Jira MCP call failed: {root_cause(e)}"
-                for draft in to_create:
-                    results.setdefault(draft.id, TaskPushResult(task_id=draft.id, error=error))
+            results |= await self.create_all(to_create, meeting, request)
         return [results[task_id] for task_id in task_ids]
+
+    async def create_all(
+        self, drafts: list[TaskDraft], meeting: ProcessedMeeting, request: TaskPushRequest
+    ) -> dict[str, TaskPushResult]:
+        """A result for every draft: its new key, or why it was not created."""
+        raise NotImplementedError
+
+    def url(self, key: str) -> str | None:
+        """Where the issue can be opened, when the site's address is known."""
+        raise NotImplementedError
+
+
+class JiraPusher(TaskPusher):
+    def __init__(self, config: JiraConfig, *, target: str | MCPServer | None = None):
+        self.config = config
+        self.target = target or config.mcp_url
+
+    async def create_all(
+        self, drafts: list[TaskDraft], meeting: ProcessedMeeting, request: TaskPushRequest
+    ) -> dict[str, TaskPushResult]:
+        results: dict[str, TaskPushResult] = {}
+        try:
+            async with Client(self.target) as client:
+                for draft in drafts:
+                    results[draft.id] = await self.create(client, draft, meeting, request)
+        except Exception as e:  # transport failure: report it per draft, keep what was created
+            error = f"Jira MCP call failed: {root_cause(e)}"
+            for draft in drafts:
+                results.setdefault(draft.id, TaskPushResult(task_id=draft.id, error=error))
+        return results
 
     async def create(
         self,
@@ -147,8 +173,11 @@ class JiraPusher:
         return None, f"created unassigned: {len(ids)} Jira accounts match {search}"
 
     def pushed(self, task_id: str, key: str, warning: str | None = None) -> TaskPushResult:
-        url = f"{self.config.base_url.rstrip('/')}/browse/{key}" if self.config.base_url else None
-        return TaskPushResult(task_id=task_id, key=key, url=url, warning=warning)
+        return TaskPushResult(task_id=task_id, key=key, url=self.url(key), warning=warning)
+
+    def url(self, key: str) -> str | None:
+        base = self.config.base_url
+        return f"{base.rstrip('/')}/browse/{key}" if base else None
 
 
 class JiraIssue(BaseModel):
@@ -274,19 +303,31 @@ def apply_results(tasks: list[TaskDraft], results: list[TaskPushResult]) -> list
     ]
 
 
-def describe(draft: TaskDraft, meeting: ProcessedMeeting, approved_by: str) -> str:
+def describe_parts(
+    draft: TaskDraft, meeting: ProcessedMeeting, approved_by: str
+) -> list[tuple[Literal["text", "quote"], str]]:
+    """An issue's description, a paragraph at a time: what the draft says, the meeting and
+    moment it came from, the words quoted, the owner named, and who approved it."""
     day = local_date(meeting.started_at, team_zone(meeting.timezone))
     on = f" ({day.isoformat()})" if day else ""
     at = f" at {clock(draft.t)}" if draft.t is not None else ""
     names = {person.id: person.name for person in meeting.members}
-    parts = [draft.description] if draft.description else []
-    parts.append(f'From the meeting "{meeting.title}"{on}{at}' + (":" if draft.quote else "."))
+    parts: list[tuple[Literal["text", "quote"], str]] = []
+    if draft.description:
+        parts.append(("text", draft.description))
+    source = f'From the meeting "{meeting.title}"{on}{at}' + (":" if draft.quote else ".")
+    parts.append(("text", source))
     if draft.quote:
-        parts.append(f"> {draft.quote}")
+        parts.append(("quote", draft.quote))
     if draft.owner_id in names:
-        parts.append(f"Owner named in the meeting: {names[draft.owner_id]}")
-    parts.append(f"Approved for Jira by {approved_by.strip()}.")
-    return "\n\n".join(parts)
+        parts.append(("text", f"Owner named in the meeting: {names[draft.owner_id]}"))
+    parts.append(("text", f"Approved for Jira by {approved_by.strip()}."))
+    return parts
+
+
+def describe(draft: TaskDraft, meeting: ProcessedMeeting, approved_by: str) -> str:
+    parts = describe_parts(draft, meeting, approved_by)
+    return "\n\n".join(f"> {text}" if kind == "quote" else text for kind, text in parts)
 
 
 def issue_key(result: CallToolResult) -> str | None:

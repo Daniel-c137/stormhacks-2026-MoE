@@ -22,9 +22,12 @@ from contracts import (
 
 from ..agent.ask import Question, ToolOrchestrator
 from ..agent.pipeline import PipelineRunner, PostMeetingPipeline, can_retry
+from ..auth import signing_secret
 from ..config import Settings
-from ..jira import ApprovalRequired, JiraPusher, JiraUnavailable, apply_results
+from ..jira import ApprovalRequired, JiraPusher, JiraUnavailable, TaskPusher, apply_results
+from ..jira_rest import JiraAccess, JiraRestPusher
 from ..report import ProcessedMeeting
+from ..sealing import Unsealable, unseal
 from ..speech import (
     CONTENT_TYPE,
     MeetingLocks,
@@ -34,8 +37,9 @@ from ..speech import (
     missing,
     synthesize,
 )
-from ..store import Conflict, NotFound, Store
+from ..store import Conflict, JiraAccount, NotFound, Store
 from .deps import (
+    ADMIN_ONLY,
     ask_agent,
     current_user,
     get_http_transport,
@@ -211,28 +215,67 @@ async def update_task(
     return await store.update_task(edited)
 
 
+NOT_CONNECTED = (
+    "Jira is not connected: an admin connects the team's Jira account in Settings, under Connectors"
+)
+CONNECT_AGAIN = (
+    "The saved Jira connection can no longer be read. Connect Jira again in Settings, "
+    "under Connectors"
+)
+
+
+def connected_pusher(
+    account: JiraAccount,
+    project: str | None,
+    config: Settings,
+    transport: httpx.AsyncBaseTransport | None,
+) -> JiraRestPusher:
+    """The pusher for a team's connected account. 409 when the push cannot be made as it is
+    saved: no project chosen, or a token sealed under an AUTH_SECRET the server no longer has."""
+    if not project:
+        raise HTTPException(status_code=409, detail="No Jira project is chosen in Settings")
+    try:
+        token = unseal(account.sealed_token, signing_secret(config) or "")
+        access = JiraAccess(
+            site=account.site, email=account.email, api_token=token, project_key=project
+        )
+    except (Unsealable, ValueError):
+        raise HTTPException(status_code=409, detail=CONNECT_AGAIN) from None
+    return JiraRestPusher(access, transport=transport)
+
+
 @router.post("/meetings/{meeting_id}/tasks/push")
 async def push_tasks(
     meeting_id: str,
     body: TaskPushRequest,
     user: Person = Depends(current_user),
     store: Store = Depends(get_store),
+    config: Settings = Depends(get_settings),
+    transport: httpx.AsyncBaseTransport | None = Depends(get_http_transport),
     make_pusher: Callable[[], JiraPusher] = Depends(get_jira_pusher),
 ) -> list[TaskPushResult]:
     """The only path to external writes. Runs once a human approved these drafts and destination:
-    the meeting's host or an admin, always recorded as the approver. The meeting leaves review
-    once every included draft has a key; a draft Jira rejected keeps it in review so it can be
-    fixed and pushed again."""
+    an admin, always recorded as the approver. With the team's Jira account connected, the drafts
+    become issues on its Jira site; otherwise they go to the Jira MCP server, when one is
+    configured. The meeting leaves review once every included draft has a key; a draft Jira
+    rejected keeps it in review so it can be fixed and pushed again."""
     meeting = await team_meeting(store, user, meeting_id)
-    host_or_admin(meeting, user)
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail=ADMIN_ONLY)
     if meeting.status not in REVIEWABLE:
         raise HTTPException(
             status_code=409, detail=f"The meeting is {meeting.status}, not in review"
         )
-    try:
-        pusher = make_pusher()
-    except JiraUnavailable as e:
-        raise HTTPException(status_code=503, detail=str(e)) from None
+    team_settings = await store.settings(meeting.team_id)
+    account = await store.jira_account(meeting.team_id)
+    pusher: TaskPusher
+    if account is not None:
+        pusher = connected_pusher(account, team_settings.jira.project, config, transport)
+    else:
+        try:
+            pusher = make_pusher()
+        except JiraUnavailable:
+            raise HTTPException(status_code=503, detail=NOT_CONNECTED) from None
     try:
         report = await store.report(meeting.id)
     except NotFound:
@@ -242,7 +285,7 @@ async def push_tasks(
         meeting_id=meeting.id,
         title=meeting.title,
         started_at=meeting.started_at,
-        timezone=(await store.settings(meeting.team_id)).timezone,
+        timezone=team_settings.timezone,
         members=await store.members(meeting.team_id),
         report=report,
     )

@@ -50,7 +50,10 @@ class GitLabSettings(BaseModel):
 class JiraSettings(BaseModel):
     site: str | None = None
     project: str | None = None
+    # An admin connected an Atlassian account (PUT /settings/jira/account): approved task drafts
+    # are created as issues on `site` as `account_email`. Its API token never leaves the brain.
     connected: bool = False
+    account_email: str | None = None
 
 
 class Voice(BaseModel):
@@ -87,9 +90,21 @@ class JiraChoice(BaseModel):
     project: str | None = None
 
 
+class JiraAccountConnect(BaseModel):
+    """PUT /settings/jira/account (admins only): the Jira Cloud site (name.atlassian.net), the
+    Atlassian account's email and API token, and the project issues are created in. The brain
+    checks them against Jira before saving; the token is stored encrypted and never returned."""
+
+    site: str
+    email: str
+    api_token: str
+    project: str
+
+
 class ConnectorsUpdate(BaseModel):
     """PUT /settings/connectors (admins only): the whole choice, replacing the saved one.
-    Repositories already connected keep their connection and index state."""
+    Repositories already connected keep their connection and index state. Another Jira site
+    (or none) disconnects the Jira account."""
 
     github: list[CodeRepoChoice] = Field(default=[], max_length=MAX_CODE_REPOS)
     gitlab: list[CodeRepoChoice] = Field(default=[], max_length=MAX_CODE_REPOS)

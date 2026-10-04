@@ -33,6 +33,7 @@ from .db import connection
 from .store import (
     Conflict,
     FactCheckState,
+    JiraAccount,
     Login,
     NotFound,
     ReportAudio,
@@ -72,6 +73,7 @@ FACT_CHECK = (
 )
 FACT_CHECK_STATE = "meeting_id, checked_until, checked_at"
 LOGIN = "person_id, email, password_hash, created_at, updated_at"
+JIRA_ACCOUNT = "team_id, site, email, sealed_token, connected_by, connected_at"
 # Newest first by started_at, or scheduled_start before it starts; ties in creation order.
 NEWEST_MEETING_FIRST = "coalesce(m.started_at, m.scheduled_start) desc nulls last, m.seq"
 REPORT_ROWS = ("meeting_id", "summary", "tasks", "decisions")
@@ -281,6 +283,29 @@ class PostgresStore:
                 values,
             )
         return settings.model_copy(deep=True)
+
+    async def jira_account(self, team_id: str) -> JiraAccount | None:
+        async with self._tx() as cur:
+            row = await self._one(
+                cur, f"select {JIRA_ACCOUNT} from jira_accounts where team_id = %s", [team_id]
+            )
+        return JiraAccount.model_validate(_utc(row)) if row else None
+
+    async def save_jira_account(self, account: JiraAccount) -> JiraAccount:
+        async with self._tx() as cur:
+            await self._team(cur, account.team_id)
+            await cur.execute(
+                f"insert into jira_accounts ({JIRA_ACCOUNT})"
+                " values (%(team_id)s, %(site)s, %(email)s, %(sealed_token)s, %(connected_by)s,"
+                " %(connected_at)s)"
+                f" on conflict (team_id) do update set {_from_excluded(JIRA_ACCOUNT)}",
+                account.model_dump(),
+            )
+        return account.model_copy()
+
+    async def delete_jira_account(self, team_id: str) -> None:
+        async with self._tx() as cur:
+            await cur.execute("delete from jira_accounts where team_id = %s", [team_id])
 
     # logins
 

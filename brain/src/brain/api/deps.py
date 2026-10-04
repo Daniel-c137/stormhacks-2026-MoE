@@ -214,7 +214,8 @@ def host_or_admin(meeting: Meeting, user: Person) -> None:
 
 
 def get_jira_pusher(settings: Settings = Depends(get_settings)) -> Callable[[], JiraPusher]:
-    """Makes the pusher for an approved push; JiraUnavailable when Jira is not configured.
+    """Makes the pusher for a team with no Jira account connected: the Jira MCP server
+    (JIRA_MCP_URL, the world's mock in the demo); JiraUnavailable when that is not configured.
     A factory, so the route checks the team and the meeting before Jira's configuration.
     Tests override it with an in-process Jira."""
     return lambda: JiraPusher(jira_config(settings))
