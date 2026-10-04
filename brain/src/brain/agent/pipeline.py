@@ -149,6 +149,8 @@ class ReportPipeline:
             else:
                 report = Report(meeting_id=meeting_id, summary=NO_TRANSCRIPT)
             progress = await self._at(progress, SAVE)
+            # The public fact-checks from the live meeting; private ones were never stored.
+            report.fact_checks = await self.store.fact_checks(meeting_id)
             await self.store.complete_report(report, superseded)
         except asyncio.CancelledError:
             await self._failed(progress, INTERRUPTED)

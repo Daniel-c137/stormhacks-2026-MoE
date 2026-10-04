@@ -1,3 +1,4 @@
+import hashlib
 import re
 import socket
 import threading
@@ -18,6 +19,7 @@ from api_support import (  # noqa: F401  (shared fixtures)
 )
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import CallToolResult, EmbeddedResource, TextContent, TextResourceContents
 from memory_support import memory_pool  # noqa: F401  (shared fixtures)
 from pg_support import pg_dsn, pg_server  # noqa: F401  (shared fixtures)
 
@@ -134,14 +136,39 @@ def fake_jira() -> FakeJira:
     return FakeJira()
 
 
+MAIN_SHA = "4f2a9c1e8b7d6a5f4e3d2c1b0a9f8e7d6c5b4a39"
+RELEASE_SHA = "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d"
+REFUNDS_PY = '''"""Refunds for cancelled subscriptions."""
+
+from datetime import timedelta
+
+# How long after a charge a user can still ask for a refund.
+REFUND_WINDOW_DAYS = 30
+REFUND_WINDOW = timedelta(days=REFUND_WINDOW_DAYS)
+
+
+def refundable(charged_days_ago: int) -> bool:
+    return charged_days_ago <= REFUND_WINDOW_DAYS
+'''
+FEES_PY = '''"""Our success fee."""
+
+# Share of the first year's savings we charge.
+FEE_RATE = 0.30
+'''
+
+
 class FakeGitHub:
     """Stand-in for GitHub's MCP server: issue and pull request search and reads in GitHub's REST
-    shapes, plus add_issue_comment, a write the agent must never call.
+    shapes, code search and file reads in the shapes of the official server (minimal code search
+    items; a file as text plus an embedded resource whose URI names the commit), plus
+    add_issue_comment, a write the agent must never call.
 
     Searches scope like the real server's prepareSearchArgs: a repo: qualifier in the query wins,
     otherwise owner/repo scope it; org: and user: narrow to an owner. Then every other word must
     be in the title. `elsewhere` holds items of other repositories the server's token can also
-    read; `ignore_scope` makes searches return them regardless, like a misbehaving server."""
+    read; `ignore_scope` makes searches return them regardless, like a misbehaving server.
+    `releases` are the repository's releases, newest first, for list_releases and
+    get_latest_release."""
 
     def __init__(self):
         self.ignore_scope = False
@@ -174,6 +201,21 @@ class FakeGitHub:
                 "html_url": "https://github.com/dropsubs/app/pull/212",
                 "body": "Validates the signup address.",
             }
+        }
+        self.releases: list[dict[str, Any]] = []
+        # Code at commits of dropsubs/app, by commit SHA, and the branches pointing at them.
+        # Code search sees the default branch, like GitHub's index. With resolve_refs off, file
+        # reads name the branch instead of the commit, like a server that cannot resolve refs.
+        self.full_name = "dropsubs/app"
+        self.commits: dict[str, dict[str, str]] = {
+            MAIN_SHA: {"api/billing/refunds.py": REFUNDS_PY, "api/billing/fees.py": FEES_PY},
+            RELEASE_SHA: {"api/billing/refunds.py": REFUNDS_PY.replace("= 30", "= 14")},
+        }
+        self.branches = {"main": MAIN_SHA, "release": RELEASE_SHA}
+        self.default_branch = "main"
+        self.resolve_refs = True
+        self.elsewhere_code: dict[str, dict[str, str]] = {
+            "otherorg/private-repo": {"refunds_secret.py": "REFUND_WINDOW_DAYS = 365  # secret\n"}
         }
         self.server = MCPServer("github")
 
@@ -233,9 +275,99 @@ class FakeGitHub:
             return self.pulls[pullNumber]
 
         @self.server.tool()
+        def list_releases(
+            owner: str, repo: str, page: int | None = None, perPage: int | None = None
+        ) -> list[dict[str, Any]]:
+            self.calls.append(("list_releases", {"owner": owner, "repo": repo}))
+            return self.releases[: perPage or None]
+
+        @self.server.tool()
+        def get_latest_release(owner: str, repo: str) -> dict[str, Any]:
+            self.calls.append(("get_latest_release", {"owner": owner, "repo": repo}))
+            if not self.releases:
+                raise ToolError("Not Found")
+            return self.releases[0]
+
+        @self.server.tool()
         def add_issue_comment(owner: str, repo: str, issue_number: int, body: str) -> dict:
             self.comments.append({"issue_number": issue_number, "body": body})
             return {"id": 1}
+
+        @self.server.tool()
+        def search_code(
+            query: str,
+            sort: str | None = None,
+            order: str | None = None,
+            page: int | None = None,
+            perPage: int | None = None,
+        ) -> dict[str, Any]:
+            self.calls.append(("search_code", {"query": query, "perPage": perPage}))
+            scope = re.search(r"\brepo:(\S+)", query)
+            owner = re.search(r"\b(?:org|user):(\S+)", query)
+            words = [w for w in query.lower().split() if ":" not in w]
+            repos = {self.full_name: self.commits[self.branches[self.default_branch]]}
+            repos |= self.elsewhere_code
+            items = []
+            for name, files in repos.items():
+                if not self.ignore_scope and (
+                    (scope and scope.group(1) != name)
+                    or (owner and not name.startswith(f"{owner.group(1)}/"))
+                ):
+                    continue
+                for path, text in files.items():
+                    if all(w in path.lower() or w in text.lower() for w in words):
+                        items.append(
+                            {
+                                "name": path.rsplit("/", 1)[-1],
+                                "path": path,
+                                "sha": blob_sha(text),
+                                "repository": name,
+                            }
+                        )
+            return {"total_count": len(items), "incomplete_results": False, "items": items}
+
+        @self.server.tool()
+        def get_file_contents(
+            owner: str,
+            repo: str,
+            path: str = "/",
+            ref: str | None = None,
+            sha: str | None = None,
+        ) -> CallToolResult:
+            self.calls.append(
+                ("get_file_contents", {"owner": owner, "repo": repo, "path": path, "ref": ref})
+            )
+            if f"{owner}/{repo}" != self.full_name:
+                raise ToolError("404 Not Found")
+            branch = (ref or self.default_branch).removeprefix("refs/heads/")
+            commit = sha or self.branches.get(branch)
+            if commit not in self.commits:
+                raise ToolError(f"failed to resolve git reference {ref or sha}")
+            text = self.commits[commit].get(path.lstrip("/"))
+            if text is None:
+                raise ToolError("404 Not Found")
+            at = f"sha/{commit}" if self.resolve_refs else f"refs/heads/{branch}"
+            return CallToolResult(
+                content=[
+                    TextContent(
+                        type="text",
+                        text=f"successfully downloaded text file (SHA: {blob_sha(text)})",
+                    ),
+                    EmbeddedResource(
+                        type="resource",
+                        resource=TextResourceContents(
+                            uri=f"repo://{owner}/{repo}/{at}/contents/{path.lstrip('/')}",
+                            mime_type="text/plain; charset=utf-8",
+                            text=text,
+                        ),
+                    ),
+                ]
+            )
+
+
+def blob_sha(text: str) -> str:
+    data = text.encode()
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
 
 
 @pytest.fixture

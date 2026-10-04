@@ -17,6 +17,7 @@ from contracts import (
     ChatMessage,
     Decision,
     DecisionRelation,
+    FactCheck,
     GitHubSettings,
     JiraSettings,
     Meeting,
@@ -31,7 +32,7 @@ from contracts import (
 from contracts.meeting import MeetingStatus
 
 from .db import connection
-from .store import Conflict, NotFound, new_join_code, photo_path, unique_segments
+from .store import Conflict, FactCheckState, NotFound, new_join_code, photo_path, unique_segments
 
 Row = dict[str, Any]
 Cursor = AsyncCursor[Row]
@@ -51,6 +52,11 @@ TASK = "id, meeting_id, title, description, owner_id, due, t, quote, include, ke
 DECISION = "id, meeting_id, text, made_by, t, quote, status, relation_type, relation_decision_id"
 AGENDA = "generated_at, updated_at, current_item_id, tracked_until, revision"
 SEGMENT = "seg_id, meeting_id, speaker_id, speaker_name, text, is_final, t_start, t_end"
+FACT_CHECK = (
+    "id, claim, speaker_name, verdict, confidence, severity, snippet_ids, sources, raised_hand,"
+    " visibility, recipient_id, t, created_at"
+)
+FACT_CHECK_STATE = "meeting_id, checked_until, checked_at, hand_raised_at"
 # Newest first by started_at, or scheduled_start before it starts; ties in creation order.
 NEWEST_MEETING_FIRST = "coalesce(m.started_at, m.scheduled_start) desc nulls last, m.seq"
 REPORT_ROWS = ("meeting_id", "summary", "tasks", "decisions")
@@ -537,6 +543,72 @@ class PostgresStore:
                     for i, item in enumerate(agenda.items)
                 ],
             )
+
+    # fact-checks
+
+    async def add_fact_check(self, meeting_id: str, check: FactCheck) -> None:
+        if check.visibility != "public" or check.recipient_id is not None:
+            raise ValueError("Private fact-checks are never stored")
+        values = check.model_dump(mode="json") | {
+            "meeting_id": meeting_id,
+            "created_at": check.created_at,
+            "snippet_ids": Jsonb(check.snippet_ids),
+            "sources": Jsonb([s.model_dump(mode="json") for s in check.sources]),
+        }
+        async with self._tx() as cur:
+            await cur.execute(
+                f"insert into fact_checks (meeting_id, {FACT_CHECK})"
+                " values (%(meeting_id)s, %(id)s, %(claim)s, %(speaker_name)s, %(verdict)s,"
+                " %(confidence)s, %(severity)s, %(snippet_ids)s, %(sources)s, %(raised_hand)s,"
+                " %(visibility)s, %(recipient_id)s, %(t)s, %(created_at)s)"
+                " on conflict (meeting_id, id) do nothing",
+                values,
+            )
+
+    async def fact_checks(self, meeting_id: str) -> list[FactCheck]:
+        async with self._tx() as cur:
+            rows = await self._all(
+                cur,
+                f"select {FACT_CHECK} from fact_checks where meeting_id = %s order by seq",
+                [meeting_id],
+            )
+        return [FactCheck.model_validate(_utc(r)) for r in rows]
+
+    async def fact_check_state(self, meeting_id: str) -> FactCheckState | None:
+        async with self._tx() as cur:
+            row = await self._one(
+                cur,
+                f"select {FACT_CHECK_STATE} from fact_check_state where meeting_id = %s",
+                [meeting_id],
+            )
+        return FactCheckState.model_validate(row) if row else None
+
+    async def save_fact_check_state_if(
+        self, state: FactCheckState, *, checked_until: float | None
+    ) -> FactCheckState:
+        values = state.model_dump() | {"expected": checked_until}
+        if checked_until is None:
+            # A first save inserts; of overlapping first saves the later ones find the row.
+            sql = (
+                f"insert into fact_check_state ({FACT_CHECK_STATE})"
+                " values (%(meeting_id)s, %(checked_until)s, %(checked_at)s, %(hand_raised_at)s)"
+                " on conflict (meeting_id) do update set checked_until = excluded.checked_until,"
+                " checked_at = excluded.checked_at, hand_raised_at = excluded.hand_raised_at"
+                " where fact_check_state.checked_until is null"
+                " returning meeting_id"
+            )
+        else:
+            # The row lock makes an overlapping save wait, then find checked_until moved.
+            sql = (
+                "update fact_check_state set checked_until = %(checked_until)s,"
+                " checked_at = %(checked_at)s, hand_raised_at = %(hand_raised_at)s"
+                " where meeting_id = %(meeting_id)s and checked_until = %(expected)s"
+                " returning meeting_id"
+            )
+        async with self._tx() as cur:
+            if await self._one(cur, sql, values) is None:
+                raise Conflict(f"fact-checks of meeting {state.meeting_id} moved on meanwhile")
+        return state.model_copy(deep=True)
 
     # reports, tasks and decisions
 
