@@ -7,11 +7,12 @@ a relation is set only for a confident verdict on one of those pairs, never othe
 import re
 from collections.abc import Callable, Mapping, Sequence
 from datetime import date
-from typing import Literal
+from typing import Literal, Protocol
 
 from pydantic import BaseModel, Field
 
 from brain.llm import LLM
+from brain.memory import MemoryHit
 from brain.store import Store
 from contracts import Decision, DecisionRelation
 
@@ -103,6 +104,45 @@ async def link_decisions(
 async def apply_links(store: Store, links: DecisionLinks) -> None:
     for decision in [*links.past, *links.new]:
         await store.update_decision(decision)
+
+
+MEMORY_SEARCH_K = 50
+"""Memory chunks read per new decision; most are transcript, summary or task chunks."""
+
+
+class MemorySearch(Protocol):
+    """MeetingMemory's search, all that memory candidates need."""
+
+    async def search(self, team_id: str, query: str, k: int = 8) -> list[MemoryHit]: ...
+
+
+async def memory_candidates(
+    memory: MemorySearch,
+    team_id: str,
+    new: Sequence[Decision],
+    past: Sequence[Decision],
+    *,
+    k: int = MEMORY_SEARCH_K,
+) -> CandidateSource:
+    """A candidate source that offers the past decisions meeting memory finds closest to each new
+    decision, mapped from decision chunks to `past` by ref_id, then lexical candidates to fill
+    the rest. Memory is searched here, once per new decision, because candidate sources are
+    synchronous."""
+    known = {p.id for p in past}
+    found: dict[str, list[str]] = {}
+    for decision in new:
+        hits = await memory.search(team_id, decision.text, k=k)
+        refs = [h.chunk.ref_id for h in hits if h.chunk.kind == "decision"]
+        found[decision.id] = list(dict.fromkeys(r for r in refs if r in known))
+
+    def pick(decision: Decision, eligible: Sequence[Decision]) -> list[Decision]:
+        by_id = {p.id: p for p in eligible}
+        ranked = [by_id[i] for i in found.get(decision.id, []) if i in by_id]
+        shown = {p.id for p in ranked}
+        ranked += [p for p in lexical_candidates(decision, eligible) if p.id not in shown]
+        return ranked[:MAX_CANDIDATES]
+
+    return pick
 
 
 def eligible_pair(new: Decision, past: Decision) -> bool:

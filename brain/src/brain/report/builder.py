@@ -1,8 +1,10 @@
+from collections.abc import Sequence
 from datetime import date
 
 from brain.llm import LLM
 from contracts import (
     AGENT_PARTICIPANT_ID,
+    AgendaItem,
     Decision,
     Report,
     Risk,
@@ -16,8 +18,11 @@ from .extraction import ReportExtraction, render_prompt, system_prompt
 from .models import TranscriptInput
 
 
-async def build_report(llm: LLM, meeting: TranscriptInput) -> Report:
-    """Ask the LLM for the meeting record, then keep only what the transcript supports."""
+async def build_report(
+    llm: LLM, meeting: TranscriptInput, *, agenda: Sequence[AgendaItem] = ()
+) -> Report:
+    """Ask the LLM for the meeting record, then keep only what the transcript supports. With an
+    agenda, the topics follow its items in order."""
     segments = meeting.final_segments()
     if not segments:
         raise ValueError(f"Meeting {meeting.meeting_id} has no final segments to report on")
@@ -31,6 +36,7 @@ async def build_report(llm: LLM, meeting: TranscriptInput) -> Report:
             meeting_date=meeting_date.isoformat() if meeting_date else None,
             people=people,
             labelled=labelled,
+            agenda=agenda,
         ),
         ReportExtraction,
         system=system_prompt(),

@@ -16,6 +16,7 @@ from ..agent.ask import (
     Question,
     ToolOrchestrator,
 )
+from ..agent.pipeline import PipelineRunner, PostMeetingPipeline, ReportPipeline
 from ..auth import AuthNotConfigured, InvalidToken, KeysUnavailable, TokenVerifier
 from ..config import Settings
 from ..jira import JiraPusher, jira_config
@@ -57,6 +58,12 @@ async def get_llm(settings: Settings = Depends(get_settings)) -> LLM:
         raise HTTPException(status_code=503, detail=str(e)) from None
 
 
+def get_llm_factory(settings: Settings = Depends(get_settings)) -> Callable[[], LLM]:
+    """Makes the LLM when the write-up needs it, so ending a meeting never fails on an
+    unconfigured Gemini; the write-up step shows LLMUnavailable instead. Tests override it."""
+    return lambda: make_llm(settings)
+
+
 def get_memory(
     request: Request, settings: Settings = Depends(get_settings)
 ) -> MeetingMemory | None:
@@ -82,6 +89,23 @@ def get_orchestrator(
 ) -> ToolOrchestrator:
     """The agent for deliberate questions. Read-only; GitHub and Jira when configured."""
     return ToolOrchestrator(llm, store, settings=settings, memory=memory)
+
+
+def get_pipeline(
+    store: Store = Depends(get_store),
+    settings: Settings = Depends(get_settings),
+    make_llm: Callable[[], LLM] = Depends(get_llm_factory),
+    memory: MeetingMemory | None = Depends(get_memory),
+) -> PostMeetingPipeline:
+    return ReportPipeline(store, make_llm, memory, settle_seconds=settings.pipeline_settle_seconds)
+
+
+def get_runner(request: Request) -> PipelineRunner:
+    """The app's background write-ups (created with the app)."""
+    state = request.app.state
+    if not hasattr(state, "pipeline_runner"):
+        state.pipeline_runner = PipelineRunner()
+    return state.pipeline_runner
 
 
 def get_verifier(request: Request, settings: Settings = Depends(get_settings)) -> TokenVerifier:
