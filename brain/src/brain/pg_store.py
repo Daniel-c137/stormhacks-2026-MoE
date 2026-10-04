@@ -32,7 +32,15 @@ from contracts import (
 from contracts.meeting import MeetingStatus
 
 from .db import connection
-from .store import Conflict, FactCheckState, NotFound, new_join_code, photo_path, unique_segments
+from .store import (
+    Conflict,
+    FactCheckState,
+    NotFound,
+    ReportAudio,
+    new_join_code,
+    photo_path,
+    unique_segments,
+)
 
 Row = dict[str, Any]
 Cursor = AsyncCursor[Row]
@@ -738,6 +746,30 @@ class PostgresStore:
                 [meeting_id],
             )
         return ReportProgress.model_validate(row) if row else None
+
+    async def save_report_audio(
+        self, meeting_id: str, key: str, content_type: str, data: bytes
+    ) -> ReportAudio:
+        async with self._tx() as cur:
+            await cur.execute(
+                "insert into report_audio (meeting_id, key, content_type, data)"
+                " values (%s, %s, %s, %s) on conflict (meeting_id) do update"
+                " set key = excluded.key, content_type = excluded.content_type,"
+                " data = excluded.data",
+                [meeting_id, key, content_type, bytes(data)],
+            )
+        return ReportAudio(key, content_type, bytes(data))
+
+    async def report_audio(self, meeting_id: str) -> ReportAudio:
+        async with self._tx() as cur:
+            row = await self._one(
+                cur,
+                "select key, content_type, data from report_audio where meeting_id = %s",
+                [meeting_id],
+            )
+        if row is None:
+            raise NotFound(f"report audio for meeting {meeting_id}")
+        return ReportAudio(row["key"], row["content_type"], bytes(row["data"]))
 
     async def task(self, team_id: str, task_id: str) -> TaskDraft:
         async with self._tx() as cur:

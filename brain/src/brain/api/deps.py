@@ -25,6 +25,7 @@ from ..jira import JiraPusher, jira_config
 from ..livekit_rooms import Rooms, rooms_from_settings
 from ..llm import LLM, LLMError, LLMUnavailable, make_embedder, make_llm
 from ..memory import MeetingMemory, PgMemoryStore, UnusableMemory
+from ..speech import MeetingLocks
 from ..store import NotFound, Store
 
 logger = logging.getLogger(__name__)
@@ -122,6 +123,14 @@ def get_runner(request: Request) -> PipelineRunner:
     if not hasattr(state, "pipeline_runner"):
         state.pipeline_runner = PipelineRunner()
     return state.pipeline_runner
+
+
+def get_speech_locks(request: Request) -> MeetingLocks:
+    """The app's per-meeting locks around making report audio."""
+    state = request.app.state
+    if not hasattr(state, "speech_locks"):
+        state.speech_locks = MeetingLocks()
+    return state.speech_locks
 
 
 def get_rooms(settings: Settings = Depends(get_settings)) -> Rooms:
