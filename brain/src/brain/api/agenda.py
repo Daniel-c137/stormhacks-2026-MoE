@@ -1,5 +1,6 @@
-"""The lobby agenda (board -> brain): the team edits a timeboxed list before and during the
-meeting; the agent only rewrites topics and suggests items, and never saves either."""
+"""Personal agendas (board -> brain): everyone has their own timeboxed list for a meeting, which
+they edit before and during it and nobody else sees. The agent only rewrites topics and suggests
+items, and never saves either."""
 
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -47,10 +48,12 @@ GITHUB_NOT_READ = "GitHub: open issues and pull requests are not read for sugges
 async def get_agenda(
     meeting_id: str, user: Person = Depends(current_user), store: Store = Depends(get_store)
 ) -> Agenda:
-    """The saved agenda, or an empty one."""
+    """Your own agenda for the meeting, or an empty one: everyone has their own."""
     meeting = await team_meeting(store, user, meeting_id)
-    saved = await store.agenda(meeting.id)
-    return saved or Agenda(meeting_id=meeting.id, items=[], generated_at=datetime.now(UTC))
+    saved = await store.agenda(meeting.id, user.id)
+    return saved or Agenda(
+        meeting_id=meeting.id, person_id=user.id, items=[], generated_at=datetime.now(UTC)
+    )
 
 
 @router.put("/meetings/{meeting_id}/agenda")
@@ -60,7 +63,8 @@ async def update_agenda(
     user: Person = Depends(current_user),
     store: Store = Depends(get_store),
 ) -> Agenda:
-    """Saves the whole edited list in order. Any teammate, until the meeting ends."""
+    """Saves your own agenda: the whole edited list in order, until the meeting ends. Nobody
+    else's agenda changes."""
     meeting = await team_meeting(store, user, meeting_id)
     if meeting.status not in EDITABLE:
         raise HTTPException(status_code=409, detail="The meeting has ended; its agenda is final")
@@ -85,7 +89,7 @@ async def update_agenda(
     new_ids: dict[int, str] = {}
     for _ in range(EDIT_ATTEMPTS):
         now = datetime.now(UTC)
-        saved = await store.agenda(meeting.id)
+        saved = await store.agenda(meeting.id, user.id)
         existing = {item.id: item for item in saved.items} if saved else {}
         items: list[AgendaItem] = []
         for n, edit in enumerate(body.items):
@@ -112,7 +116,7 @@ async def update_agenda(
                 items.append(AgendaItem(id=item_id, added_by=user.id, **changes))
         # Timekeeping state stays: discussed time and nudges on the items, and the tracked
         # point and current item (unless it was removed) on the agenda.
-        base = saved or Agenda(meeting_id=meeting.id, items=[], generated_at=now)
+        base = saved or Agenda(meeting_id=meeting.id, person_id=user.id, items=[], generated_at=now)
         current = base.current_item_id
         agenda = base.model_copy(
             update={
@@ -153,9 +157,9 @@ async def suggest_agenda(
 ) -> AgendaSuggestions:
     """Proposed items from the team's earlier reports, open and overdue tasks and unfinished
     Jira work, each with why, its sources and a timebox, none repeating an item already on the
-    agenda. Nothing is saved: a person adds them like any other item."""
+    asker's own agenda. Nothing is saved: a person adds them like any other item."""
     meeting = await team_meeting(store, user, meeting_id)
-    saved = await store.agenda(meeting.id)
+    saved = await store.agenda(meeting.id, user.id)  # skip only what's on your own agenda
     zone = await zone_of(store, meeting.team_id)
     today = team_today(zone)
     inputs = await store_inputs(store, meeting.team_id, meeting.id, today, zone)
