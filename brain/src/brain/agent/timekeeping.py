@@ -7,12 +7,13 @@ and are only shown: the agent never speaks on its own.
 """
 
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 
-from brain.llm import LLM
+from brain.llm import LLM, LLMError
 from brain.store import Conflict, Store
 from contracts import (
     Agenda,
@@ -26,8 +27,12 @@ from contracts import (
 
 SETTLE_S = 5.0  # segments ending this close to `now` wait a tick, so late finals are not skipped
 PAUSE_S = 15.0  # a pause up to this long between utterances still counts as discussion
+MIN_TALK_S = 20.0  # the model is asked once the new stretch holds this much talk,
+MAX_WAIT_S = 60.0  # or once this long has passed since the tracked point
+NOW_SLACK_S = 60.0  # how far a tick's `now` may run ahead of the brain's clock
 END_WARN_MIN = 5  # nudge about items that have not come up this close to the scheduled end
 MAX_BATCH = 200  # segments per classification; a longer backlog keeps the latest
+SAVE_ATTEMPTS = 3  # saves of one tick's result before giving up on an agenda that keeps changing
 
 
 class AgendaTrackDraft(BaseModel):
@@ -101,30 +106,43 @@ async def classify(
     return item_id(draft.current), covered
 
 
-def talk_time(segments: Sequence[TranscriptSegment], after: float) -> float:
-    """Seconds of discussion after `after`: overlapping speakers count once, and pauses up to
-    PAUSE_S between utterances count too."""
-    spans = sorted((max(s.t_start, after), s.t_end) for s in segments if s.t_end > after)
-    total = 0.0
-    start = end = None
+def runs(segments: Sequence[TranscriptSegment], until: float) -> list[tuple[float, float]]:
+    """Stretches of discussion up to `until`: overlapping speakers merged, and pauses up to PAUSE_S
+    between utterances bridged."""
+    spans = sorted((s.t_start, min(s.t_end, until)) for s in segments if s.t_start < until)
+    merged: list[tuple[float, float]] = []
     for a, b in spans:
-        if end is not None and a - end <= PAUSE_S:
-            end = max(end, b)
-            continue
-        if end is not None:
-            total += end - start
-        start, end = a, b
-    if end is not None:
-        total += end - start
-    return total
+        if merged and a - merged[-1][1] <= PAUSE_S:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], b))
+        else:
+            merged.append((a, b))
+    return merged
+
+
+def talk_time(segments: Sequence[TranscriptSegment], after: float | None, until: float) -> float:
+    """Seconds of discussion up to `until` that the tick which tracked up to `after` did not count.
+
+    That tick counted up to where the speech it knew of ended, so a pause from there into this
+    stretch counts now, like any other pause, and an utterance across `after` counts on both
+    sides of it, once."""
+    if after is None:
+        counted_to = -math.inf
+    else:
+        known = [min(s.t_end, after) for s in segments if s.t_start < after]
+        counted_to = min(after, max(known, default=after))
+    return sum(max(0.0, b - max(a, counted_to)) for a, b in runs(segments, until))
 
 
 def scheduled_end_t(meeting: Meeting) -> float | None:
-    """The scheduled end in seconds from the actual start; None without a duration."""
+    """The scheduled end in seconds from the actual start; None without a duration. A meeting
+    that started after its slot ran out (or within END_WARN_MIN of its end) gets its full
+    duration from the actual start instead."""
     if meeting.duration_min is None or meeting.started_at is None:
         return None
+    duration = meeting.duration_min * 60
     planned_start = meeting.scheduled_start or meeting.started_at
-    return (planned_start - meeting.started_at).total_seconds() + meeting.duration_min * 60
+    end = (planned_start - meeting.started_at).total_seconds() + duration
+    return end if end > END_WARN_MIN * 60 else duration
 
 
 def seconds_since_start(meeting: Meeting) -> float:
@@ -169,58 +187,102 @@ def nudge(agenda: Agenda, meeting: Meeting, now: float) -> tuple[Agenda, list[Ag
     return agenda.model_copy(update={"items": items}), nudges
 
 
-def advance(
-    agenda: Agenda,
-    tracked_until: float,
-    classified: tuple[str | None, set[str]] | None,
-    seconds: float,
-) -> Agenda:
+@dataclass(frozen=True)
+class Stretch:
+    """What a tick learned: the point it tracked up to and, if the model was asked, which item
+    the stretch was about (with its talk time) and which items it finished."""
+
+    until: float
+    asked: bool = False
+    current: str | None = None
+    covered: frozenset[str] = frozenset()
+    seconds: float = 0.0
+
+
+def advance(agenda: Agenda, stretch: Stretch) -> Agenda:
     """The agenda after a stretch: its time to the current item, covered items marked. Ids no
     longer on the agenda (a person removed the item meanwhile) are ignored."""
-    changes: dict = {"tracked_until": tracked_until}
-    if classified is not None:
-        current, covered = classified
-        ids = {i.id for i in agenda.items}
-        current = current if current in ids else None
-        items = []
-        for item in agenda.items:
-            update: dict = {}
-            if item.id == current:
-                update["discussed_s"] = item.discussed_s + seconds
-            if item.id in covered and item.status == "pending":
-                update["status"] = "covered"
-            items.append(item.model_copy(update=update) if update else item)
-        changes |= {"items": items, "current_item_id": current}
+    ids = {i.id for i in agenda.items}
+    current = stretch.current if stretch.current in ids else None
+    items = []
+    for item in agenda.items:
+        update: dict = {}
+        if item.id == current and stretch.seconds:
+            update["discussed_s"] = item.discussed_s + stretch.seconds
+        if item.id in stretch.covered and item.status == "pending":
+            update["status"] = "covered"
+        items.append(item.model_copy(update=update) if update else item)
+    changes: dict = {"tracked_until": stretch.until, "items": items}
+    if stretch.asked:
+        changes["current_item_id"] = current
     return agenda.model_copy(update=changes)
 
 
-async def track_agenda(store: Store, llm: LLM, meeting: Meeting, now: float) -> AgendaTrackResponse:
-    """One tick at `now` seconds from the meeting start. The caller serialises ticks per meeting;
-    across replicas the compare-and-set on tracked_until keeps a stretch from counting twice.
-    An LLMError propagates with nothing saved, so the next tick retries the same stretch."""
+class ClassificationFailed(Exception):
+    """The model call failed or Gemini is not configured. Nothing was tracked, so the next tick
+    retries the stretch; `response` still carries the rule nudges, which were saved."""
+
+    def __init__(self, response: AgendaTrackResponse, error: LLMError):
+        super().__init__(str(error))
+        self.response = response
+        self.error = error
+
+
+def empty_agenda(meeting_id: str) -> Agenda:
+    return Agenda(meeting_id=meeting_id, items=[], generated_at=datetime.now(UTC))
+
+
+async def track_agenda(
+    store: Store, make_llm: Callable[[], LLM], meeting: Meeting, now: float
+) -> AgendaTrackResponse:
+    """One tick at `now` seconds from the meeting start. The caller serialises ticks per meeting.
+
+    The model is made and asked only when the stretch since the tracked point holds MIN_TALK_S
+    of talk or has run MAX_WAIT_S. The result is saved with a compare-and-set on the agenda's
+    revision; when someone else saved first (a lobby edit, another replica's tick), it is applied
+    again to what they saved, without asking the model again. Raises ClassificationFailed when
+    the model fails, and Conflict when the agenda kept changing under SAVE_ATTEMPTS saves."""
     agenda = await store.agenda(meeting.id)
     if agenda is None or not agenda.items:
-        empty = Agenda(meeting_id=meeting.id, items=[], generated_at=datetime.now(UTC))
-        return AgendaTrackResponse(agenda=agenda or empty, nudges=[])
+        return AgendaTrackResponse(agenda=agenda or empty_agenda(meeting.id), nudges=[])
 
     since = agenda.tracked_until
-    after = since if since is not None else -math.inf
-    until = max(now - SETTLE_S, after, 0.0)
-    batch = [s for s in await store.transcript(meeting.id) if after < s.t_end <= until]
-    batch = batch[-MAX_BATCH:]
-    classified, seconds = None, 0.0
-    if batch:
-        classified = await classify(llm, agenda, batch)
-        seconds = talk_time(batch, after)
-
-    # Edits may have landed while the model was thinking; apply the stretch to the latest list.
-    latest = await store.agenda(meeting.id)
-    if latest is None or latest.tracked_until != since:
-        return AgendaTrackResponse(agenda=latest or agenda, nudges=[])
-    updated, nudges = nudge(advance(latest, until, classified, seconds), meeting, now)
-    if updated != latest:
+    until = max(now - SETTLE_S, since or 0.0)
+    transcript = await store.transcript(meeting.id)
+    talk = talk_time(transcript, since, until)
+    batch = [s for s in transcript if (since is None or s.t_end > since) and s.t_end <= until]
+    stretch: Stretch | None = None
+    failure: LLMError | None = None
+    if talk == 0:
+        stretch = Stretch(until)  # nothing said since: move on without the model
+    elif batch and (talk >= MIN_TALK_S or until - (since or 0.0) >= MAX_WAIT_S):
         try:
-            updated = await store.save_agenda_if(updated, tracked_until=since)
-        except Conflict:  # another replica tracked this stretch first
-            return AgendaTrackResponse(agenda=await store.agenda(meeting.id) or latest, nudges=[])
-    return AgendaTrackResponse(agenda=updated, nudges=nudges)
+            current, covered = await classify(make_llm(), agenda, batch[-MAX_BATCH:])
+        except LLMError as e:
+            failure = e
+        else:
+            stretch = Stretch(until, True, current, frozenset(covered), talk)
+
+    response = await save(store, meeting, now, since, stretch)
+    if failure is not None:
+        raise ClassificationFailed(response, failure) from failure
+    return response
+
+
+async def save(
+    store: Store, meeting: Meeting, now: float, since: float | None, stretch: Stretch | None
+) -> AgendaTrackResponse:
+    """Applies the stretch (if any) and the nudge rules to the latest agenda and saves it if that
+    changed anything."""
+    for _ in range(SAVE_ATTEMPTS):
+        latest = await store.agenda(meeting.id)
+        if latest is None or latest.tracked_until != since:  # another tick tracked it first
+            return AgendaTrackResponse(agenda=latest or empty_agenda(meeting.id), nudges=[])
+        updated, nudges = nudge(advance(latest, stretch) if stretch else latest, meeting, now)
+        if updated == latest:
+            return AgendaTrackResponse(agenda=latest, nudges=[])
+        try:
+            return AgendaTrackResponse(agenda=await store.save_agenda_if(updated), nudges=nudges)
+        except Conflict:
+            continue  # saved meanwhile: apply the same stretch to what was saved
+    raise Conflict(f"the agenda of meeting {meeting.id} kept changing")

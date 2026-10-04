@@ -1,9 +1,11 @@
 """Realtime -> brain. Not exposed to browsers."""
 
 import asyncio
+from collections.abc import Callable
 from weakref import WeakValueDictionary
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from contracts import (
     AgendaTrackRequest,
@@ -18,13 +20,18 @@ from contracts import (
 
 from ..agent.ask import Question, ToolOrchestrator
 from ..agent.factcheck import FactChecker
-from ..agent.timekeeping import seconds_since_start, track_agenda
+from ..agent.timekeeping import (
+    NOW_SLACK_S,
+    ClassificationFailed,
+    seconds_since_start,
+    track_agenda,
+)
 from ..llm import LLM, LLMError, LLMUnavailable
-from ..store import NotFound, Store
+from ..store import Conflict, NotFound, Store
 from .deps import (
     ask_agent,
     get_fact_checker,
-    get_llm,
+    get_llm_factory,
     get_orchestrator,
     get_store,
     not_implemented,
@@ -113,11 +120,15 @@ async def track_agenda_tick(
     request: Request,
     body: AgendaTrackRequest | None = None,
     store: Store = Depends(get_store),
-    llm: LLM = Depends(get_llm),
+    make_llm: Callable[[], LLM] = Depends(get_llm_factory),
 ) -> AgendaTrackResponse:
     """The worker's timer tick (every 30-60 s, never per utterance) for a live meeting. Reads the
     final segments since the last tick from the store, so the worker sends none. The worker
     publishes the agenda on Topic.AGENDA and each nudge on Topic.AGENDA_NUDGE; nothing is spoken.
+
+    Gemini is needed only when there is a stretch to classify: 503 when it is not configured,
+    502 when the call fails. Either way nothing is tracked, and the body still carries the agenda
+    and the rule nudges (saved as sent) for the worker to publish.
     """
     try:
         meeting = await store.meeting(meeting_id)
@@ -125,12 +136,27 @@ async def track_agenda_tick(
         raise HTTPException(status_code=404, detail="Meeting not found") from None
     if meeting.status != "live":
         raise HTTPException(status_code=409, detail="Only a live meeting keeps time")
-    now = body.now if body and body.now is not None else seconds_since_start(meeting)
+    elapsed = seconds_since_start(meeting)
+    if body and body.now is not None and body.now > elapsed + NOW_SLACK_S:
+        raise HTTPException(
+            status_code=422,
+            detail=f"now is {body.now:.0f} s, but the meeting started {elapsed:.0f} s ago",
+        )
+    now = body.now if body and body.now is not None else elapsed
     async with meeting_lock(request, "agenda", meeting_id):
         try:
-            return await track_agenda(store, llm, meeting, now)
-        except LLMError as e:
-            raise HTTPException(status_code=502, detail=f"Could not track the agenda: {e}") from e
+            return await track_agenda(store, make_llm, meeting, now)
+        except ClassificationFailed as e:
+            unavailable = isinstance(e.error, LLMUnavailable)
+            detail = str(e.error) if unavailable else f"Could not track the agenda: {e.error}"
+            return JSONResponse(
+                status_code=503 if unavailable else 502,
+                content={"detail": detail, **e.response.model_dump(mode="json")},
+            )
+        except Conflict:
+            raise HTTPException(
+                status_code=409, detail="The agenda kept changing; the next tick retries"
+            ) from None
 
 
 @router.post("/meetings/{meeting_id}/fact-check")

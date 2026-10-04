@@ -1,5 +1,5 @@
 // HTTP request and response bodies. Board -> brain, and realtime -> brain (internal).
-import type { Agenda, AgendaNudge } from "./agenda";
+import type { Agenda, AgendaItemStatus, AgendaNudge } from "./agenda";
 import type { AgentState, Answer, CodeSnippet, FactCheck, Invocation, Visibility } from "./agent";
 import type { Meeting } from "./meeting";
 import type { TranscriptSegment } from "./transcript";
@@ -42,6 +42,7 @@ export interface AgendaItemInput {
   id?: string | null;
   title: string;
   minutes?: number | null;
+  status?: AgendaItemStatus | null; // null keeps the item's status; new items are pending
 }
 
 /** The whole edited list, in order. Items left out are removed. */
@@ -58,7 +59,8 @@ export interface AgendaRewriteResponse {
 }
 
 /** realtime -> brain on a timer. `now` is seconds from the meeting start; omitted, the brain
- * takes it from started_at. */
+ * takes it from started_at. A finite time no later than the real time since the start (plus a
+ * minute of slack). */
 export interface AgendaTrackRequest {
   now?: number | null;
 }

@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from .agenda import Agenda, AgendaNudge
+from .agenda import Agenda, AgendaItemStatus, AgendaNudge
 from .agent import AgentState, Answer, CodeSnippet, FactCheck, Invocation, Visibility
 from .meeting import Meeting
 from .transcript import TranscriptSegment
@@ -53,6 +53,7 @@ class AgendaItemInput(BaseModel):
     id: str | None = None
     title: str
     minutes: int | None = None
+    status: AgendaItemStatus | None = None  # None keeps the item's status; new items are pending
 
 
 class AgendaUpdate(BaseModel):
@@ -71,9 +72,10 @@ class AgendaRewriteResponse(BaseModel):
 
 class AgendaTrackRequest(BaseModel):
     """realtime -> brain on a timer. `now` is seconds from the meeting start; omitted, the
-    brain takes it from started_at."""
+    brain takes it from started_at. A finite time no later than the real time since the start
+    (plus a minute of slack)."""
 
-    now: float | None = Field(default=None, ge=0)
+    now: float | None = Field(default=None, ge=0, allow_inf_nan=False)
 
 
 class AgendaTrackResponse(BaseModel):

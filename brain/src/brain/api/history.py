@@ -1,6 +1,7 @@
 """After the meeting: transcript, report, task review and history Q&A (board -> brain)."""
 
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -19,7 +20,8 @@ from contracts import (
 )
 
 from ..agent.ask import Question, ToolOrchestrator
-from ..agent.pipeline import PipelineRunner, PostMeetingPipeline
+from ..agent.pipeline import PipelineRunner, PostMeetingPipeline, can_retry
+from ..config import Settings
 from ..jira import ApprovalRequired, JiraPusher, JiraUnavailable, apply_results
 from ..report import ProcessedMeeting
 from ..store import Conflict, NotFound, Store
@@ -30,6 +32,7 @@ from .deps import (
     get_orchestrator,
     get_pipeline,
     get_runner,
+    get_settings,
     get_store,
     team_meeting,
     user_team,
@@ -38,6 +41,7 @@ from .deps import (
 router = APIRouter(tags=["history"])
 
 REVIEWABLE = {"needs_review", "pushed"}
+RUNNING = "The write-up is still running"
 
 
 @router.get("/meetings/{meeting_id}/transcript")
@@ -79,21 +83,32 @@ async def retry_report(
     store: Store = Depends(get_store),
     pipeline: PostMeetingPipeline = Depends(get_pipeline),
     runner: PipelineRunner = Depends(get_runner),
+    settings: Settings = Depends(get_settings),
 ) -> ReportProgress:
-    """Host only, once the last write-up failed. Starts it over; the report and the meeting's
-    memory are replaced, not added to."""
+    """Host only, for a meeting still being written up that nothing here is running: once the
+    last run failed, never saved progress, or has made no progress for PIPELINE_STALE_MINUTES
+    (its process died). Starts it over; the report, its links and the meeting's memory are
+    replaced, not added to. A refused retry changes nothing."""
     meeting = await team_meeting(store, user, meeting_id)
     if meeting.host_id != user.id:
         raise HTTPException(status_code=403, detail="Only the host can retry the write-up")
     if meeting.status != "processing":
-        raise HTTPException(status_code=409, detail=f"The meeting is {meeting.status}")
+        raise HTTPException(
+            status_code=409, detail=f"The meeting is {meeting.status}, not being written up"
+        )
+    if runner.running(meeting.id):
+        raise HTTPException(status_code=409, detail=RUNNING)
     progress = await store.report_progress(meeting.id)
-    if runner.running(meeting.id) or progress is None or progress.error is None:
-        raise HTTPException(status_code=409, detail="The write-up has not failed")
-    queued = await pipeline.queued(meeting.id)
+    minutes = settings.pipeline_stale_minutes
+    if not can_retry(progress, datetime.now(UTC), timedelta(minutes=minutes)):
+        raise HTTPException(
+            status_code=409,
+            detail="The write-up is still in progress; it can be retried once it fails or makes"
+            f" no progress for {minutes:g} minutes",
+        )
     if not runner.start(meeting.id, pipeline.run):
-        raise HTTPException(status_code=409, detail="The write-up is already running")
-    return queued
+        raise HTTPException(status_code=409, detail=RUNNING)
+    return pipeline.progress(meeting.id)
 
 
 @router.patch("/meetings/{meeting_id}/tasks/{task_id}")

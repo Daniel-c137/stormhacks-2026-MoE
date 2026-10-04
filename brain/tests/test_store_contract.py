@@ -35,6 +35,7 @@ from contracts import (
     AgendaItem,
     ChatMessage,
     Decision,
+    DecisionRelation,
     FactCheck,
     GitHubSettings,
     JiraSettings,
@@ -710,8 +711,9 @@ async def test_an_agenda_is_none_until_saved_then_replaced_on_save(store):
         items=[AgendaItem(id="a1", title="Refund status", minutes=10, added_by=alex.id)],
         generated_at=at(0),
     )
-    assert await store.save_agenda(first) == first
-    assert await store.agenda(meeting.id) == first
+    saved = await store.save_agenda(first)
+    assert saved == first.model_copy(update={"revision": 1})
+    assert await store.agenda(meeting.id) == saved
 
     edited = first.model_copy(
         update={
@@ -724,7 +726,7 @@ async def test_an_agenda_is_none_until_saved_then_replaced_on_save(store):
     )
     await store.save_agenda(edited)
 
-    assert await store.agenda(meeting.id) == edited
+    assert await store.agenda(meeting.id) == edited.model_copy(update={"revision": 2})
 
 
 async def test_an_agendas_timekeeping_state_is_saved_with_it(store):
@@ -744,12 +746,12 @@ async def test_an_agendas_timekeeping_state_is_saved_with_it(store):
     await store.save_agenda(tracked)
 
     saved = await store.agenda(meeting.id)
-    assert saved == tracked
+    assert saved == tracked.model_copy(update={"revision": 1})
     assert (saved.current_item_id, saved.tracked_until) == ("a1", 1265.25)
     assert [(i.discussed_s, i.nudged_t) for i in saved.items] == [(312.5, None), (0, 1260.0)]
 
 
-async def test_a_timekeeping_save_goes_through_only_from_the_expected_point(store):
+async def test_a_conditional_save_goes_through_only_at_the_revision_it_read(store):
     team, alex, *_ = await two_teams(store)
     meeting = await store.create_meeting(team.id, "Standup", alex.id)
     planned = Agenda(
@@ -758,28 +760,31 @@ async def test_a_timekeeping_save_goes_through_only_from_the_expected_point(stor
         generated_at=at(0),
     )
     with pytest.raises(NotFound):
-        await store.save_agenda_if(planned, tracked_until=None)
-    await store.save_agenda(planned)
+        await store.save_agenda_if(planned.model_copy(update={"meeting_id": new_id()}))
 
-    first = planned.model_copy(
-        update={
-            "items": [planned.items[0].model_copy(update={"discussed_s": 30.0})],
-            "current_item_id": "a1",
-            "tracked_until": 55.0,
-        }
-    )
-    assert await store.save_agenda_if(first, tracked_until=None) == first
-    stale = first.model_copy(update={"tracked_until": 85.0})
+    # Revision 0 is "none saved yet": the first conditional save creates it.
+    created = await store.save_agenda_if(planned)
+    assert created == planned.model_copy(update={"revision": 1})
     with pytest.raises(Conflict):
-        await store.save_agenda_if(stale, tracked_until=None)
-    assert await store.agenda(meeting.id) == first
+        await store.save_agenda_if(planned)
 
-    second = first.model_copy(update={"tracked_until": 85.0})
-    assert await store.save_agenda_if(second, tracked_until=55.0) == second
+    tracked = created.model_copy(update={"current_item_id": "a1", "tracked_until": 55.0})
+    second = await store.save_agenda_if(tracked)
+    assert second == tracked.model_copy(update={"revision": 2})
+    renamed = created.model_copy(
+        update={"items": [created.items[0].model_copy(update={"title": "Email"})]}
+    )
+    with pytest.raises(Conflict):  # read at revision 1; the tracked save landed since
+        await store.save_agenda_if(renamed)
     assert await store.agenda(meeting.id) == second
 
+    await store.save_agenda(second)  # an unconditional save bumps the revision too
+    with pytest.raises(Conflict):
+        await store.save_agenda_if(second)
+    assert (await store.agenda(meeting.id)).revision == 3
 
-async def test_overlapping_timekeeping_saves_let_exactly_one_through(store):
+
+async def test_overlapping_conditional_saves_let_exactly_one_through(store):
     team, alex, *_ = await two_teams(store)
     meeting = await store.create_meeting(team.id, "Standup", alex.id)
     planned = Agenda(
@@ -787,22 +792,39 @@ async def test_overlapping_timekeeping_saves_let_exactly_one_through(store):
         items=[AgendaItem(id="a1", title="Waitlist email", minutes=10)],
         generated_at=at(0),
     )
-    await store.save_agenda(planned)
     outcomes: list[str] = []
 
-    async def save(n: int) -> None:
-        tracked = planned.model_copy(update={"tracked_until": 55.0 + n})
+    async def save(agenda: Agenda) -> None:
         try:
-            await store.save_agenda_if(tracked, tracked_until=None)
+            await store.save_agenda_if(agenda)
             outcomes.append("saved")
         except Conflict:
             outcomes.append("conflict")
 
-    async with anyio.create_task_group() as tg:
+    async with anyio.create_task_group() as tg:  # five first saves
         for n in range(5):
-            tg.start_soon(save, n)
-
+            tg.start_soon(save, planned.model_copy(update={"tracked_until": float(n)}))
     assert sorted(outcomes) == ["conflict"] * 4 + ["saved"]
+
+    read = await store.agenda(meeting.id)
+    outcomes.clear()
+    async with anyio.create_task_group() as tg:  # five saves of what was read at revision 1
+        for n in range(5):
+            tg.start_soon(save, read.model_copy(update={"tracked_until": 55.0 + n}))
+    assert sorted(outcomes) == ["conflict"] * 4 + ["saved"]
+    assert (await store.agenda(meeting.id)).revision == 2
+
+
+async def test_overlapping_unconditional_saves_each_bump_the_revision(store):
+    team, alex, *_ = await two_teams(store)
+    meeting = await store.create_meeting(team.id, "Standup", alex.id)
+    planned = Agenda(meeting_id=meeting.id, items=[], generated_at=at(0))
+
+    async with anyio.create_task_group() as tg:
+        for _ in range(5):
+            tg.start_soon(store.save_agenda, planned)
+
+    assert (await store.agenda(meeting.id)).revision == 5
 
 
 async def test_an_agenda_for_a_missing_meeting_is_refused(store):
@@ -1039,6 +1061,94 @@ async def test_saving_a_report_again_replaces_its_tasks_and_decisions(store):
         await store.task(team.id, f"{meeting.id}-task-2")
 
 
+def superseded_by(past: Decision, new: Decision) -> Decision:
+    relation = DecisionRelation(type="superseded_by", decision_id=new.id)
+    return past.model_copy(update={"status": "superseded", "relation": relation})
+
+
+async def linked_meetings(store: Store):
+    """(team, alex, an earlier meeting's report with one decision, a processing meeting)"""
+    team, alex, *_ = await two_teams(store)
+    earlier = await ended_meeting(store, team, alex, "Planning", at(0))
+    past = report_for(earlier.id, owner=alex, decisions=["Use Redis for jobs"], tasks=[])
+    await store.save_report(past)
+    meeting = await ended_meeting(store, team, alex, "Review", at(120))
+    return team, alex, past, meeting
+
+
+async def test_completing_a_report_saves_it_applies_its_links_and_moves_it_to_review(store):
+    team, alex, past, meeting = await linked_meetings(store)
+    report = report_for(meeting.id, owner=alex, decisions=["Keep Postgres for jobs"], tasks=["X"])
+    (old,), (new,) = past.decisions, report.decisions
+    contradicts = DecisionRelation(type="contradicts", decision_id=old.id)
+    report.decisions[0] = new = new.model_copy(update={"relation": contradicts})
+
+    completed = await store.complete_report(report, [superseded_by(old, new)])
+
+    assert completed.status == "needs_review"
+    assert await store.meeting(meeting.id) == completed
+    assert await store.report(meeting.id) == report
+    assert {d.id: d for d in await store.decisions(team.id)} == {
+        old.id: superseded_by(old, new),
+        new.id: new,
+    }
+
+
+async def test_completing_a_report_is_all_or_nothing(store):
+    team, alex, past, meeting = await linked_meetings(store)
+    report = report_for(meeting.id, owner=alex, decisions=["Keep Postgres"], tasks=["X"])
+    (old,), (new,) = past.decisions, report.decisions
+    missing = superseded_by(old.model_copy(update={"id": new_id()}), new)
+
+    with pytest.raises(NotFound):
+        await store.complete_report(report, [superseded_by(old, new), missing])
+
+    assert (await store.meeting(meeting.id)).status == "processing"
+    with pytest.raises(NotFound):
+        await store.report(meeting.id)
+    assert await store.decisions(team.id) == [old]
+    assert await store.tasks(team.id) == []
+
+
+async def test_only_a_meeting_being_written_up_can_be_completed(store):
+    team, alex, *_ = await two_teams(store)
+    live = await store.create_meeting(team.id, "Live", alex.id)
+    report = report_for(live.id, owner=alex, decisions=["A"], tasks=[])
+
+    with pytest.raises(Conflict):
+        await store.complete_report(report)
+    assert (await store.meeting(live.id)).status == "live"
+    with pytest.raises(NotFound):
+        await store.report(live.id)
+
+    meeting = await ended_meeting(store, team, alex, "Review", at(0))
+    await store.complete_report(report_for(meeting.id, owner=alex, decisions=[], tasks=[]))
+    with pytest.raises(Conflict):
+        await store.complete_report(report_for(meeting.id, owner=alex, decisions=["B"], tasks=[]))
+    with pytest.raises(NotFound):
+        await store.complete_report(report.model_copy(update={"meeting_id": new_id()}))
+
+
+async def test_completing_again_undoes_the_links_of_the_meetings_earlier_decisions(store):
+    team, alex, past, meeting = await linked_meetings(store)
+    other = await ended_meeting(store, team, alex, "Other", at(60))
+    theirs = report_for(other.id, owner=alex, decisions=["Use Kafka"], tasks=[])
+    await store.save_report(theirs)
+    (old,) = past.decisions
+    # An earlier, interrupted save left this meeting's decision retiring the past one.
+    earlier = report_for(meeting.id, owner=alex, decisions=["Keep Postgres"], tasks=[])
+    await store.save_report(earlier)
+    await store.update_decision(superseded_by(old, earlier.decisions[0]))
+    # A decision retired by another meeting's decision is not this meeting's to undo.
+    await store.update_decision(superseded_by(theirs.decisions[0], old))
+
+    await store.complete_report(report_for(meeting.id, owner=alex, decisions=[], tasks=[]))
+
+    saved = {d.id: d for d in await store.decisions(team.id)}
+    assert saved[old.id] == old
+    assert saved[theirs.decisions[0].id] == superseded_by(theirs.decisions[0], old)
+
+
 async def test_report_progress_is_none_until_saved_and_keeps_its_error(store):
     team, alex, *_ = await two_teams(store)
     meeting = await ended_meeting(store, team, alex, "Standup", at(0))
@@ -1049,7 +1159,9 @@ async def test_report_progress_is_none_until_saved_and_keeps_its_error(store):
     await store.save_report_progress(running)
     assert await store.report_progress(meeting.id) == running
 
-    failed = running.model_copy(update={"current": 2, "error": "Gemini is unavailable"})
+    failed = running.model_copy(
+        update={"current": 2, "error": "Gemini is unavailable", "updated_at": at(31)}
+    )
     await store.save_report_progress(failed)
     assert await store.report_progress(meeting.id) == failed
 

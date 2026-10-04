@@ -91,6 +91,17 @@ def test_an_agenda_edit_may_add_items_without_ids():
     )
 
     assert [(i.id, i.minutes) for i in update.items] == [("a1", 10), (None, None)]
+    assert [i.status for i in update.items] == [None, None]
+
+
+def test_an_agenda_edit_may_set_an_items_status():
+    update = AgendaUpdate.model_validate(
+        {"items": [{"id": "a1", "title": "Refunds", "status": "pending"}, {"title": "Docs"}]}
+    )
+
+    assert [i.status for i in update.items] == ["pending", None]
+    with pytest.raises(ValidationError):
+        AgendaUpdate.model_validate({"items": [{"title": "Refunds", "status": "done"}]})
 
 
 def test_agendas_saved_before_timekeeping_still_parse():
@@ -104,13 +115,15 @@ def test_agendas_saved_before_timekeeping_still_parse():
 
     assert (old.current_item_id, old.tracked_until) == (None, None)
     assert (old.items[0].discussed_s, old.items[0].nudged_t) == (0, None)
+    assert old.revision == 0
 
 
 def test_a_track_request_may_omit_now_but_never_goes_negative():
     assert AgendaTrackRequest().now is None
     assert AgendaTrackRequest(now=90.5).now == 90.5
-    with pytest.raises(ValidationError):
-        AgendaTrackRequest(now=-1)
+    for bad in (-1, float("inf"), float("nan")):
+        with pytest.raises(ValidationError):
+            AgendaTrackRequest(now=bad)
     with pytest.raises(ValidationError):
         AgendaItem(id="a1", title="Refunds", discussed_s=-1)
     response = AgendaTrackResponse(

@@ -3,7 +3,7 @@ Private chat is never indexed."""
 
 from .chunking import chunk_report, chunk_transcript
 from .in_memory import InMemoryMemoryStore
-from .meeting_memory import MeetingMemory
+from .meeting_memory import MeetingMemory, MemoryMisconfigured, UnusableMemory
 from .models import Chunk, ChunkKind, MemoryHit, MemoryStore
 from .pg import PgMemoryStore
 
@@ -13,8 +13,10 @@ __all__ = [
     "InMemoryMemoryStore",
     "MeetingMemory",
     "MemoryHit",
+    "MemoryMisconfigured",
     "MemoryStore",
     "PgMemoryStore",
+    "UnusableMemory",
     "chunk_report",
     "chunk_transcript",
 ]

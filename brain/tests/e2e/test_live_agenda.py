@@ -75,7 +75,7 @@ async def test_live_gemini_tracks_a_standup_stretch_about_the_waitlist_email():
         ],
     )
 
-    result = await track_agenda(store, llm, meeting, now=60)
+    result = await track_agenda(store, lambda: llm, meeting, now=60)
     print(f"{result.agenda.model_dump_json(indent=1)} (answered by {llm.last_model})")
 
     waitlist = result.agenda.items[0]

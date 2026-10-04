@@ -22,7 +22,7 @@ from ..auth import AuthNotConfigured, InvalidToken, KeysUnavailable, TokenVerifi
 from ..config import Settings
 from ..jira import JiraPusher, jira_config
 from ..llm import LLM, LLMError, LLMUnavailable, make_embedder, make_llm
-from ..memory import MeetingMemory, PgMemoryStore
+from ..memory import MeetingMemory, PgMemoryStore, UnusableMemory
 from ..store import NotFound, Store
 
 logger = logging.getLogger(__name__)
@@ -67,9 +67,10 @@ def get_llm_factory(settings: Settings = Depends(get_settings)) -> Callable[[], 
 
 def get_memory(
     request: Request, settings: Settings = Depends(get_settings)
-) -> MeetingMemory | None:
-    """Meeting memory in Postgres (the store's pool on app.state.db_pool) with Gemini embeddings,
-    or None when either is missing. Tests override it with an in-memory store."""
+) -> MeetingMemory | UnusableMemory | None:
+    """Meeting memory in Postgres (the store's pool on app.state.db_pool) with Gemini embeddings;
+    None when either is missing; UnusableMemory when both are set but cannot work together, so
+    the write-up reports the misconfiguration. Tests override it with an in-memory store."""
     pool = getattr(request.app.state, "db_pool", None)
     if pool is None:
         return None
@@ -78,14 +79,14 @@ def get_memory(
     except LLMUnavailable:
         return None
     except ValueError as e:  # embedding dimensions the table cannot hold
-        logger.warning("meeting memory is unavailable: %s", e)
-        return None
+        logger.warning("meeting memory is misconfigured: %s", e)
+        return UnusableMemory(str(e))
 
 
 def get_orchestrator(
     llm: LLM = Depends(get_llm),
     store: Store = Depends(get_store),
-    memory: MeetingMemory | None = Depends(get_memory),
+    memory: MeetingMemory | UnusableMemory | None = Depends(get_memory),
     settings: Settings = Depends(get_settings),
 ) -> ToolOrchestrator:
     """The agent for deliberate questions. Read-only; GitHub and Jira when configured."""
@@ -108,7 +109,7 @@ def get_pipeline(
     store: Store = Depends(get_store),
     settings: Settings = Depends(get_settings),
     make_llm: Callable[[], LLM] = Depends(get_llm_factory),
-    memory: MeetingMemory | None = Depends(get_memory),
+    memory: MeetingMemory | UnusableMemory | None = Depends(get_memory),
 ) -> PostMeetingPipeline:
     return ReportPipeline(store, make_llm, memory, settle_seconds=settings.pipeline_settle_seconds)
 
