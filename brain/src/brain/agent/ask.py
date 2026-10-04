@@ -202,21 +202,25 @@ class ToolOrchestrator:
             )
         )
 
-    async def ask(self, question: Question) -> Answer:
-        today = date.today()
-        team_settings = await self.store.settings(question.team_id)
-        members = await self.store.members(question.team_id)
-        toolbox = TeamToolbox(
-            question.team_id,
-            question.asker_id,
+    async def toolbox(self, team_id: str, asker_id: str, today: date) -> TeamToolbox:
+        """The team's read-only tools, with its GitHub and Jira when configured."""
+        team_settings = await self.store.settings(team_id)
+        return TeamToolbox(
+            team_id,
+            asker_id,
             self.store,
-            members=members,
+            members=await self.store.members(team_id),
             memory=self.memory,
             jira=jira_reader(self.settings, team_settings, self.jira_target),
             github=github_reader(self.settings, team_settings, self.github_target),
             timeout=self.timeout,
             today=today,
         )
+
+    async def ask(self, question: Question) -> Answer:
+        today = date.today()
+        toolbox = await self.toolbox(question.team_id, question.asker_id, today)
+        members = list(toolbox.members.values())
         meeting = await toolbox.meeting(question.meeting_id) if question.meeting_id else None
         recent = recent_segments(question, meeting)
         context = render_context(question, meeting, members, today)

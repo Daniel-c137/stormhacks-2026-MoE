@@ -6,6 +6,7 @@ answers. Every call goes through the read allowlist.
 """
 
 import re
+from datetime import datetime
 from typing import Any, Literal
 from urllib.parse import quote, unquote, urlparse
 
@@ -97,6 +98,15 @@ class GitHubItem(BaseModel):
     title: str
     state: str | None = None
     merged: bool | None = None
+    merged_at: datetime | None = None
+    body: str | None = None
+    url: str | None = None
+
+
+class GitHubRelease(BaseModel):
+    tag: str
+    name: str | None = None
+    published_at: datetime | None = None
     body: str | None = None
     url: str | None = None
 
@@ -151,6 +161,18 @@ class GitHubReader:
         if item is None:
             raise GitHubError(f"GitHub returned nothing for {self.full_name}#{number}")
         return item
+
+    async def releases(self, limit: int = 5) -> list[GitHubRelease]:
+        """The repository's latest releases, newest first. What a release contains is what is
+        released: a pull request merged after the latest release is not released yet."""
+        data = await self._call(
+            "list_releases", {"owner": self.owner, "repo": self.repo, "perPage": limit}
+        )
+        if isinstance(data, dict):
+            data = data.get("result", data.get("items", data.get("releases")))
+        raw = [r for r in data if isinstance(r, dict)] if isinstance(data, list) else []
+        found = [release(r) for r in raw]
+        return [r for r in found if r is not None][:limit]
 
     async def search_code(self, text: str, limit: int = 5) -> list[CodeHit]:
         """Files of the repository whose code matches the text.
@@ -230,6 +252,7 @@ class GitHubReader:
             title=str(raw.get("title") or "").strip(),
             state=raw.get("state") if isinstance(raw.get("state"), str) else None,
             merged=raw.get("merged") if isinstance(raw.get("merged"), bool) else None,
+            merged_at=timestamp(raw.get("merged_at")),
             body=body.strip()[:MAX_BODY] if isinstance(body, str) and body.strip() else None,
             url=raw.get("html_url") if isinstance(raw.get("html_url"), str) else None,
         )
@@ -243,3 +266,27 @@ class GitHubReader:
             raise GitHubError(str(e)) from e
         except Exception as e:
             raise GitHubError(f"GitHub MCP call failed: {root_cause(e)}") from e
+
+
+def timestamp(value: Any) -> datetime | None:
+    """An ISO 8601 time from GitHub, or None when it is missing or unreadable."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def release(raw: dict[str, Any]) -> GitHubRelease | None:
+    tag = raw.get("tag_name")
+    if not isinstance(tag, str) or not tag.strip():
+        return None
+    body = raw.get("body")
+    return GitHubRelease(
+        tag=tag.strip(),
+        name=raw.get("name") if isinstance(raw.get("name"), str) else None,
+        published_at=timestamp(raw.get("published_at")),
+        body=body.strip()[:MAX_BODY] if isinstance(body, str) and body.strip() else None,
+        url=raw.get("html_url") if isinstance(raw.get("html_url"), str) else None,
+    )

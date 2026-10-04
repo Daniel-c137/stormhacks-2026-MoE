@@ -16,9 +16,13 @@ from contracts import (
     AgendaTrackRequest,
     AgendaTrackResponse,
     AgendaUpdate,
+    AgentState,
     AskRequest,
     ConnectorStatus,
     CreateMeetingRequest,
+    FactCheck,
+    FactCheckRequest,
+    FactCheckResponse,
     Meeting,
     Person,
     ReportProgress,
@@ -127,6 +131,31 @@ def test_a_track_request_may_omit_now_but_never_goes_negative():
         nudges=[],
     )
     assert AgendaTrackResponse.model_validate(response.model_dump()) == response
+
+
+def test_a_fact_check_tick_may_omit_now_and_returns_nothing_by_default():
+    assert FactCheckRequest().now is None
+    with pytest.raises(ValidationError):
+        FactCheckRequest(now=-1)
+    empty = FactCheckResponse()
+    assert (empty.checks, empty.agent_state, empty.snippets) == ([], None, [])
+    raised = FactCheckResponse(
+        checks=[
+            FactCheck(
+                id="f1",
+                claim="PR 41 is released.",
+                speaker_name="Sarah Kim",
+                verdict="contradicted",
+                confidence=0.9,
+                severity="high",
+                raised_hand=True,
+            )
+        ],
+        agent_state=AgentState(
+            state="hand_raised", detail="Fact-check", hand_urgency="critical", hand_reason="x"
+        ),
+    )
+    assert FactCheckResponse.model_validate(raised.model_dump()) == raised
 
 
 def test_connector_status_names_only_known_connectors_and_states():

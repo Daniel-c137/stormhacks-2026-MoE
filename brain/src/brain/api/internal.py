@@ -11,22 +11,26 @@ from contracts import (
     AgendaTrackRequest,
     AgendaTrackResponse,
     ChatMessage,
+    FactCheckRequest,
+    FactCheckResponse,
     InvokeRequest,
     InvokeResponse,
     SegmentsIngest,
 )
 
 from ..agent.ask import Question, ToolOrchestrator
+from ..agent.factcheck import FactChecker
 from ..agent.timekeeping import (
     NOW_SLACK_S,
     ClassificationFailed,
     seconds_since_start,
     track_agenda,
 )
-from ..llm import LLM, LLMUnavailable
+from ..llm import LLM, LLMError, LLMUnavailable
 from ..store import Conflict, NotFound, Store
 from .deps import (
     ask_agent,
+    get_fact_checker,
     get_llm_factory,
     get_orchestrator,
     get_store,
@@ -97,16 +101,16 @@ async def invoke(
     return InvokeResponse(answer=await ask_agent(orchestrator, question))
 
 
-def agenda_lock(request: Request, meeting_id: str) -> asyncio.Lock:
-    """One lock per meeting in this process, so overlapping ticks never classify a stretch twice.
-    Kept only while someone holds or waits for it."""
+def meeting_lock(request: Request, kind: str, meeting_id: str) -> asyncio.Lock:
+    """One lock per meeting and kind of tick in this process, so overlapping ticks never handle
+    a stretch twice. Kept only while someone holds or waits for it."""
     state = request.app.state
-    if not hasattr(state, "agenda_locks"):
-        state.agenda_locks = WeakValueDictionary()
-    locks: WeakValueDictionary[str, asyncio.Lock] = state.agenda_locks
-    lock = locks.get(meeting_id)
+    if not hasattr(state, "tick_locks"):
+        state.tick_locks = WeakValueDictionary()
+    locks: WeakValueDictionary[tuple[str, str], asyncio.Lock] = state.tick_locks
+    lock = locks.get((kind, meeting_id))
     if lock is None:
-        lock = locks[meeting_id] = asyncio.Lock()
+        lock = locks[(kind, meeting_id)] = asyncio.Lock()
     return lock
 
 
@@ -139,7 +143,7 @@ async def track_agenda_tick(
             detail=f"now is {body.now:.0f} s, but the meeting started {elapsed:.0f} s ago",
         )
     now = body.now if body and body.now is not None else elapsed
-    async with agenda_lock(request, meeting_id):
+    async with meeting_lock(request, "agenda", meeting_id):
         try:
             return await track_agenda(store, make_llm, meeting, now)
         except ClassificationFailed as e:
@@ -153,3 +157,31 @@ async def track_agenda_tick(
             raise HTTPException(
                 status_code=409, detail="The agenda kept changing; the next tick retries"
             ) from None
+
+
+@router.post("/meetings/{meeting_id}/fact-check")
+async def fact_check_tick(
+    meeting_id: str,
+    request: Request,
+    body: FactCheckRequest | None = None,
+    store: Store = Depends(get_store),
+    checker: FactChecker = Depends(get_fact_checker),
+) -> FactCheckResponse:
+    """The worker's timer tick (every 30-60 s, never per utterance) for a live meeting. Reads the
+    final segments since the last tick from the store, so the worker sends none. The worker
+    publishes each check on Topic.FACT_CHECK, a private one only to its recipient, and
+    agent_state on Topic.AGENT_STATE; nothing is spoken."""
+    try:
+        meeting = await store.meeting(meeting_id)
+    except NotFound:
+        raise HTTPException(status_code=404, detail="Meeting not found") from None
+    if meeting.status != "live":
+        raise HTTPException(status_code=409, detail="Only a live meeting is fact-checked")
+    now = body.now if body and body.now is not None else seconds_since_start(meeting)
+    async with meeting_lock(request, "fact-check", meeting_id):
+        try:
+            return await checker.tick(meeting, now)
+        except LLMUnavailable as e:
+            raise HTTPException(status_code=503, detail=str(e)) from None
+        except LLMError as e:
+            raise HTTPException(status_code=502, detail=f"Could not fact-check: {e}") from e
