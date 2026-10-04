@@ -9,10 +9,11 @@ verified email. The board gets a one-time code, never the session token in a URL
 
 import base64
 import hashlib
+import re
 import secrets
 import time
 from dataclasses import dataclass, field
-from urllib.parse import urlencode
+from urllib.parse import unquote, urlencode, urlsplit
 
 import httpx
 import jwt
@@ -33,6 +34,7 @@ FLOW_SECONDS = 10 * 60  # time allowed at Google
 FLOW_AUDIENCE = "google-signin"
 CODE_SECONDS = 60  # the board swaps its one-time code at once
 KEYS_SECONDS = 60 * 60  # Google rotates its keys rarely and publishes the new one early
+UNSAFE = re.compile(r"[\\\x00-\x1f\x7f]")  # a backslash or an ASCII control character
 
 
 class GoogleSignInFailed(Exception):
@@ -58,8 +60,16 @@ class Flow:
 
 
 def safe_next(path: str | None) -> str:
-    """A same-site path to land on after signing in; anything else is home."""
-    return path if path and path.startswith("/") and not path.startswith("//") else "/"
+    """A same-site path to land on after signing in; anything else is home. Browsers read a
+    backslash as a slash and drop tabs and newlines, so `/\\evil.com` and `/<TAB>/evil.com` are
+    //evil.com to them: a backslash or a control character, as given or once percent-decoded,
+    is refused, and so is anything that isn't a single-slash path."""
+    if not path or not path.startswith("/") or path.startswith("//"):
+        return "/"
+    if any(UNSAFE.search(text) for text in (path, unquote(path))):
+        return "/"
+    parts = urlsplit(path)
+    return "/" if parts.scheme or parts.netloc else path
 
 
 def new_flow(next_path: str | None) -> Flow:
