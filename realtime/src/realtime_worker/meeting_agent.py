@@ -104,7 +104,7 @@ class MeetingAgent:
         spoken_max_chars: int = 600,
         agenda_tick_seconds: float = 10,
         agenda_after_captions: bool = False,
-        agenda_check_delay: float = 2.5,
+        agenda_check_delay: float = 3.5,
         fact_check_tick_seconds: float = 60,
         ask_seconds: float = ASK_SECONDS,
         clock: Callable[[], float] | None = None,
@@ -145,6 +145,7 @@ class MeetingAgent:
         self._agenda_lock = asyncio.Lock()  # one agenda check at a time: a tick or a caption's
         self._agenda_due: list[float] = []  # when saved captions settle, on the meeting clock
         self._agenda_waiter: asyncio.Task[None] | None = None
+        self._closed = False
         self._tasks: set[asyncio.Task[None]] = set()
 
     def start(self) -> None:
@@ -164,6 +165,7 @@ class MeetingAgent:
             log.warning("Could not tell the brain the agent joined %s: %s", self.meeting_id, e)
 
     async def aclose(self) -> None:
+        self._closed = True  # the transcription flushes its last captions after this
         for task in [*self._tasks, *self._asking.values()]:
             task.cancel()
         await asyncio.gather(*self._tasks, *self._asking.values(), return_exceptions=True)
@@ -507,7 +509,7 @@ class MeetingAgent:
         """A final caption that ended at `t_end` (meeting clock) reached the brain. With Jev
         keeping time the agenda is checked once it has settled there, agenda_check_delay after
         it ended; captions settling within AGENDA_GATHER_S of each other share one check."""
-        if not self._agenda_after_captions or self._clock is None:
+        if not self._agenda_after_captions or self._clock is None or self._closed:
             return
         self._agenda_due.append(t_end + self._agenda_check_delay)
         if self._agenda_waiter is None or self._agenda_waiter.done():

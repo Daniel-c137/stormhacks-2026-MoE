@@ -62,7 +62,8 @@ def check(key: str, question: dict[str, Any], answer: Any) -> None:
     if not isinstance(answer, dict):
         raise LLMError(f"Jev left {key} unanswered")
     kind = question.get("type")
-    if kind == "choice" and answer.get("choice") not in question.get("criteria", {}):
+    choice = answer.get("choice")
+    if kind == "choice" and not (isinstance(choice, str) and choice in question["criteria"]):
         raise LLMError(f"Jev's choice for {key} is not one of its options")
     if kind == "noul" and not probability(answer.get("noul")):
         raise LLMError(f"Jev's answer to {key} is not a probability")

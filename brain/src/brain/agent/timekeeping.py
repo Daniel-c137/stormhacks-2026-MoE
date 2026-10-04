@@ -44,9 +44,13 @@ from .agenda_jev import Jev, jev_labels
 from .ask import DATA_RULE, clip, fenced
 
 SETTLE_S = 5.0  # captions ending this close to `now` wait a tick, so late finals are not skipped
-# With Jev the worker checks 2.5 s after each caption ends (its AGENDA_CHECK_DELAY_SECONDS), so a
-# caption has settled by then, and another speaker's finishing at about the same time has arrived.
-JEV_SETTLE_S = 2.0
+# With Jev the worker checks 3.5 s after each caption ends (its AGENDA_CHECK_DELAY_SECONDS). A
+# caption reaches the brain about 1.5 s after its last word; one that ended earlier but arrives
+# after a later one has been tracked is never labelled, so this leaves another speaker's caption
+# finishing at about the same time room to arrive. With translation on, a caption waits up to
+# 4 s more for its translation before it is saved.
+JEV_SETTLE_S = 3.0
+JEV_TRANSLATION_LAG_S = 4.0
 PAUSE_S = 15.0  # a pause up to this long between utterances still counts as discussion
 # With the worker's tick every 10 s, the sentence that finishes an item is asked about at the
 # first tick after it settles: within about 15 s, plus the model call. The worker's tick is what
@@ -439,7 +443,10 @@ async def track_agenda(
         return AgendaTrackResponse(agenda=agenda or empty_agenda(meeting.id), nudges=[])
 
     since = agenda.tracked_until
-    settled = now - (SETTLE_S if jev is None else JEV_SETTLE_S)
+    if jev is None:
+        settled = now - SETTLE_S
+    else:
+        settled = now - JEV_SETTLE_S - (JEV_TRANSLATION_LAG_S if meeting.translate else 0)
     transcript = await store.transcript(meeting.id)
     batch = sorted(
         (s for s in transcript if (since is None or s.t_end > since) and s.t_end <= settled),
