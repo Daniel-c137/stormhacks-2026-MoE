@@ -42,6 +42,17 @@ class ReportAudio(NamedTuple):
     data: bytes
 
 
+class Login(BaseModel):
+    """A person's email and password sign-in. Only the argon2 hash is kept; it never leaves the
+    brain."""
+
+    person_id: str
+    email: str
+    password_hash: str
+    created_at: datetime
+    updated_at: datetime
+
+
 class FactCheckState(BaseModel):
     """Where a live meeting's fact-checks stand. Times are seconds from the meeting start."""
 
@@ -52,9 +63,9 @@ class FactCheckState(BaseModel):
 
 
 class Store(Protocol):
-    """Supabase Postgres. Reads keyed by team take the team id and return only that team's rows.
-    Reads keyed by meeting (meeting, transcript, report, agenda, ...) return any meeting's rows;
-    the API checks the meeting's team first (deps.team_meeting).
+    """Our Postgres (pg_store.PostgresStore). Reads keyed by team take the team id and return
+    only that team's rows. Reads keyed by meeting (meeting, transcript, report, agenda, ...)
+    return any meeting's rows; the API checks the meeting's team first (deps.team_meeting).
 
     Missing rows raise NotFound, including the meeting a write hangs off. Writes return what
     was saved. The contract is pinned down by brain/tests/test_store_contract.py, which every
@@ -100,6 +111,21 @@ class Store(Protocol):
         ...
 
     async def save_settings(self, settings: TeamSettings) -> TeamSettings: ...
+
+    # logins
+
+    async def set_login(self, person_id: str, email: str, password_hash: str) -> Login:
+        """Inserts or replaces the person's login. Conflict when another person's login has the
+        email (ignoring case); NotFound when the person is missing."""
+        ...
+
+    async def login_by_email(self, email: str) -> Login:
+        """Ignores case; NotFound when no login has the email."""
+        ...
+
+    async def login(self, person_id: str) -> Login:
+        """NotFound when the person has no login."""
+        ...
 
     # meetings
 
@@ -290,7 +316,7 @@ def _when(meeting: Meeting) -> datetime:
 
 
 class InMemoryStore:
-    """The whole store in process memory. For tests and local dev before Supabase; everything is
+    """The whole store in process memory. For tests and local dev without Postgres; everything is
     lost on restart."""
 
     def __init__(self, teams: Iterable[Team] = (), people: Iterable[Person] = ()):
@@ -298,6 +324,7 @@ class InMemoryStore:
         self._people = {p.id: _copy(p) for p in people}
         self._photos: dict[str, tuple[str, bytes]] = {}
         self._settings: dict[str, TeamSettings] = {}
+        self._logins: dict[str, Login] = {}
         self._meetings: dict[str, Meeting] = {}
         self._segments: dict[str, dict[str, TranscriptSegment]] = {}
         self._chat: dict[str, dict[str, ChatMessage]] = {}
@@ -407,6 +434,37 @@ class InMemoryStore:
         self._team(settings.team_id)
         self._settings[settings.team_id] = _copy(settings)
         return _copy(settings)
+
+    # logins
+
+    async def set_login(self, person_id: str, email: str, password_hash: str) -> Login:
+        self._person(person_id)
+        for other in self._logins.values():
+            if other.person_id != person_id and other.email.lower() == email.lower():
+                raise Conflict("another person signs in with this email")
+        now = datetime.now(UTC)
+        saved = self._logins.get(person_id)
+        login = Login(
+            person_id=person_id,
+            email=email,
+            password_hash=password_hash,
+            created_at=saved.created_at if saved else now,
+            updated_at=now,
+        )
+        self._logins[person_id] = login
+        return _copy(login)
+
+    async def login_by_email(self, email: str) -> Login:
+        for login in self._logins.values():
+            if login.email.lower() == email.lower():
+                return _copy(login)
+        raise NotFound("no login with this email")
+
+    async def login(self, person_id: str) -> Login:
+        saved = self._logins.get(person_id)
+        if saved is None:
+            raise NotFound(f"login for person {person_id}")
+        return _copy(saved)
 
     # meetings
 

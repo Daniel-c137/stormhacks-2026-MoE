@@ -1,6 +1,6 @@
 "use client";
 
-/** Supabase email/password sign-in. */
+/** Email/password sign-in, checked by the brain (lib/auth.ts, POST /auth/login). */
 export function LoginForm() {
   return null;
 }

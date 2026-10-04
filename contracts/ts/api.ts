@@ -1,10 +1,29 @@
 // HTTP request and response bodies. Board -> brain, and realtime -> brain (internal).
 import type { Agenda, AgendaItemStatus, AgendaNudge } from "./agenda";
 import type { AgentState, Answer, CodeSnippet, FactCheck, Invocation, Visibility } from "./agent";
-import type { Meeting } from "./meeting";
+import type { Meeting, Person } from "./meeting";
 import type { TranscriptSegment } from "./transcript";
 
 export type AskTurnRole = "user" | "agent";
+
+/** POST /auth/login. There is no public sign-up; accounts come from `brain add-user`. */
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+/** The board sends `token` as `Authorization: Bearer <token>` until `expires_at`. */
+export interface LoginResponse {
+  token: string;
+  expires_at: string; // ISO 8601
+  person: Person;
+}
+
+/** POST /auth/password while signed in. The new password is at least 10 characters. */
+export interface PasswordChange {
+  current_password: string;
+  new_password: string;
+}
 
 /** Without scheduled_start the meeting starts now; with it, the meeting waits as scheduled. */
 export interface CreateMeetingRequest {

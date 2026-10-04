@@ -9,7 +9,6 @@ dependencies = [
     "uvicorn[standard]",
     "pydantic-settings",
     "google-genai",
-    "supabase",
     "livekit-api",
     "mcp",
     "pyjwt[crypto]>=2.15.1",
@@ -18,6 +17,7 @@ dependencies = [
     "psycopg-pool",
     "python-multipart",
     "tzdata>=2026.5",
+    "argon2-cffi>=25.1.0",
 ]
 
 [project.scripts]

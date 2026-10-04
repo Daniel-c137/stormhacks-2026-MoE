@@ -1,4 +1,4 @@
-"""The Store on Postgres, the database behind Supabase. Schema: supabase/migrations/*_core.sql."""
+"""The Store on our Postgres 16 + pgvector. Schema: db/migrations (*_core.sql first)."""
 
 from collections.abc import AsyncIterator, Collection, Sequence
 from contextlib import asynccontextmanager
@@ -35,6 +35,7 @@ from .db import connection
 from .store import (
     Conflict,
     FactCheckState,
+    Login,
     NotFound,
     ReportAudio,
     new_join_code,
@@ -65,6 +66,7 @@ FACT_CHECK = (
     " visibility, recipient_id, t, created_at"
 )
 FACT_CHECK_STATE = "meeting_id, checked_until, checked_at, hand_raised_at"
+LOGIN = "person_id, email, password_hash, created_at, updated_at"
 # Newest first by started_at, or scheduled_start before it starts; ties in creation order.
 NEWEST_MEETING_FIRST = "coalesce(m.started_at, m.scheduled_start) desc nulls last, m.seq"
 REPORT_ROWS = ("meeting_id", "summary", "tasks", "decisions")
@@ -276,6 +278,42 @@ class PostgresStore:
                 values,
             )
         return settings.model_copy(deep=True)
+
+    # logins
+
+    async def set_login(self, person_id: str, email: str, password_hash: str) -> Login:
+        try:
+            async with self._tx() as cur:
+                row = await self._one(
+                    cur,
+                    "insert into logins (person_id, email, password_hash)"
+                    " values (%s, %s, %s)"
+                    " on conflict (person_id) do update set email = excluded.email,"
+                    " password_hash = excluded.password_hash, updated_at = now()"
+                    f" returning {LOGIN}",
+                    [person_id, email, password_hash],
+                )
+        except errors.UniqueViolation:
+            raise Conflict("another person signs in with this email") from None
+        return Login.model_validate(_utc(row or {}))
+
+    async def login_by_email(self, email: str) -> Login:
+        async with self._tx() as cur:
+            row = await self._one(
+                cur, f"select {LOGIN} from logins where lower(email) = lower(%s)", [email]
+            )
+        if row is None:
+            raise NotFound("no login with this email")
+        return Login.model_validate(_utc(row))
+
+    async def login(self, person_id: str) -> Login:
+        async with self._tx() as cur:
+            row = await self._one(
+                cur, f"select {LOGIN} from logins where person_id = %s", [person_id]
+            )
+        if row is None:
+            raise NotFound(f"login for person {person_id}")
+        return Login.model_validate(_utc(row))
 
     # meetings
 

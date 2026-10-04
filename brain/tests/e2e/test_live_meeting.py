@@ -1,14 +1,15 @@
 """Live: one meeting end to end through the real brain, against real Gemini.
 
 The brain runs as a uvicorn subprocess on embedded Postgres 16 + pgvector (pgserver, every
-migration applied), with Supabase sessions signed locally (HS256) and an internal token for the
-worker's calls. Jira is the demo world's mock Jira over mock-data (the tests' FakeJira if the
-world package is missing), with the standup's people renamed to the people it knows. GitHub is
-the tests' FakeGitHub, where PR #41 merged after the latest release. LiveKit is unreachable on
-purpose. The team is on America/Vancouver. The steps run in order and share one meeting: schedule
-and agenda, join, transcript ingest, timekeeping and fact-check ticks, questions in the meeting,
-end, the write-up, review and push to Jira, then history and settings. They assert invariants,
-not wording. A step whose earlier step failed is skipped, naming what it needed.
+migration applied). The cast sign in through POST /auth/login with passwords seeded for this
+run, and the worker calls with an internal token. Jira is the demo world's mock Jira over
+mock-data (the tests' FakeJira if the world package is missing), with the standup's people
+renamed to the people it knows. GitHub is the tests' FakeGitHub, where PR #41 merged after the
+latest release. LiveKit is unreachable on purpose. The team is on America/Vancouver. The steps
+run in order and share one meeting: schedule and agenda, join, transcript ingest, timekeeping
+and fact-check ticks, questions in the meeting, end, the write-up, review and push to Jira, then
+history and settings. They assert invariants, not wording. A step whose earlier step failed is
+skipped, naming what it needed.
 
 Run from the repo root (deselected by default; skipped without Gemini and embedding settings):
 
@@ -49,6 +50,7 @@ from live_support import (  # noqa: F401  (shared fixtures)
     Brain,
     Cast,
     JiraSource,
+    Login,
     brain,
     cast,
     elevenlabs_characters,
@@ -56,6 +58,8 @@ from live_support import (  # noqa: F401  (shared fixtures)
     jira_source,
     listen_enabled,
     live_dsn,
+    log_in,
+    logins,
     session,
     team,
 )
@@ -93,10 +97,9 @@ class Flow:
     client: httpx.Client
     cast: Cast
     jira: JiraSource
-    alice: dict[str, str]
-    bob: dict[str, str]
-    carol: dict[str, str]
+    logins: dict[str, Login]
     worker: dict[str, str]
+    sessions: dict[str, dict[str, str]] = field(default_factory=dict)
     meeting: dict[str, Any] | None = None
     segments: list[dict[str, Any]] = field(default_factory=list)
     contradicted: list[dict[str, Any]] | None = None
@@ -104,6 +107,21 @@ class Flow:
     write_up_done: bool = False
     report: dict[str, Any] | None = None
     home_answer: dict[str, Any] | None = None
+
+    def headers(self, person_id: str) -> dict[str, str]:
+        return need(self.sessions.get(person_id), "a session from logging in (test_01)")
+
+    @property
+    def alice(self) -> dict[str, str]:
+        return self.headers(self.cast.alice.id)
+
+    @property
+    def bob(self) -> dict[str, str]:
+        return self.headers(self.cast.bob.id)
+
+    @property
+    def carol(self) -> dict[str, str]:
+        return self.headers(self.cast.carol.id)
 
     @property
     def mid(self) -> str:
@@ -130,15 +148,13 @@ def short(response: httpx.Response, n: int = 200) -> str:
 
 
 @pytest.fixture(scope="module")
-def flow(brain: Brain, cast: Cast, jira_source: JiraSource):  # noqa: F811
+def flow(brain: Brain, cast: Cast, jira_source: JiraSource, logins: dict[str, Login]):  # noqa: F811
     with httpx.Client(base_url=brain.url, timeout=120) as client:
         yield Flow(
             client=client,
             cast=cast,
             jira=jira_source,
-            alice=session(brain, cast.alice),
-            bob=session(brain, cast.bob),
-            carol=session(brain, cast.carol),
+            logins=logins,
             worker={"X-Internal-Token": brain.internal_token},
         )
 
@@ -175,6 +191,14 @@ class TestLiveMeeting:
     """Before, during and after one meeting, in order."""
 
     def test_01_sessions(self, flow: Flow):
+        alice = flow.logins[flow.cast.alice.id]
+        r = log_in(flow.client, Login(alice.email, alice.password + "-wrong"))
+        assert r.status_code == 401, f"a wrong password must be refused: {short(r)}"
+        for person in flow.cast.everyone:
+            r = log_in(flow.client, flow.logins[person.id])
+            assert r.status_code == 200 and r.json()["person"]["id"] == person.id, short(r)
+            flow.sessions[person.id] = session(r)
+        show("sessions", f"{len(flow.sessions)} people logged in through POST /auth/login")
         r = flow.client.get("/me", headers=flow.alice)
         assert r.status_code == 200 and r.json()["id"] == flow.cast.alice.id, short(r)
         r = flow.client.get("/me", headers={"Authorization": "Bearer not-a-token"})
