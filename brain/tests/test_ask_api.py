@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from api_support import ALEX, OUTSIDER, SARAH, TEAM, WORKER_TOKEN, create
+from api_support import ALEX, OUTSIDER, SARAH, TEAM, WORKER_TOKEN, create, speakers_join
 from ask_support import citing, scripted
 from fastapi.testclient import TestClient
 
@@ -181,6 +181,7 @@ def test_ask_in_a_meeting_sees_its_recent_transcript(client_as, worker, store, m
         "t_start": 300,
         "t_end": 305,
     }
+    asyncio.run(speakers_join(worker.app, meeting["id"], [said]))
     assert (
         worker.post(f"/internal/meetings/{meeting['id']}/segments", json={"segments": [said]})
     ).status_code == 204

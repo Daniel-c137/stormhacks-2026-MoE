@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 import httpx
 import pytest
-from api_support import ALEX, OUTSIDER, SARAH, TEAM, WORKER_TOKEN
+from api_support import ALEX, OUTSIDER, SARAH, TEAM, WORKER_TOKEN, speakers_join
 from pipeline_support import GatedLLM
 
 from brain.agent.pipeline import REPORT_STEPS
@@ -83,9 +83,11 @@ class Api:
         return response.json()
 
     async def ingest(self, meeting_id: str, lines=LINES, first: int = 1) -> None:
+        said = segments(meeting_id, lines, first)
+        await speakers_join(self.app, meeting_id, said)
         response = await self.http.post(
             f"/internal/meetings/{meeting_id}/segments",
-            json={"segments": segments(meeting_id, lines, first)},
+            json={"segments": said},
             headers={"X-Internal-Token": WORKER_TOKEN},
         )
         assert response.status_code == 204, response.text

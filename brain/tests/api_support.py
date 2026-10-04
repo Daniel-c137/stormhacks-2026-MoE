@@ -17,7 +17,7 @@ from brain.api.deps import current_user, get_rooms, get_settings, get_store
 from brain.config import Settings
 from brain.main import create_app
 from brain.store import InMemoryStore, Store
-from contracts import Person, Team
+from contracts import AGENT_PARTICIPANT_ID, Person, Team
 
 KEY = "test-key"
 SECRET = "test-secret-that-is-long-enough-for-hs256"
@@ -117,6 +117,14 @@ def client_as(app):
 def worker(app) -> TestClient:
     """The realtime worker: no user session, only the shared internal token."""
     return TestClient(app, headers={"X-Internal-Token": WORKER_TOKEN})
+
+
+async def speakers_join(app, meeting_id: str, segments: list[dict]) -> None:
+    """Everyone speaking in these segments joins the meeting first, as through the link: the
+    brain only takes segments from the meeting's participants (or the agent)."""
+    store = app.dependency_overrides[get_store]()
+    for speaker_id in sorted({s["speaker_id"] for s in segments} - {AGENT_PARTICIPANT_ID}):
+        await store.add_participant(meeting_id, speaker_id)
 
 
 def create(client: TestClient, title: str = "Standup") -> dict:
