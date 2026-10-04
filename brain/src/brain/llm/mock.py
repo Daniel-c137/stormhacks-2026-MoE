@@ -28,6 +28,7 @@ class MockLLM:
         self._text = text
         self._structured = dict(structured or {})
         self.calls: list[LLMCall] = []
+        self.last_model: str | None = "mock"
 
     async def generate(self, prompt: str, *, system: str | None = None) -> str:
         self.calls.append(LLMCall(prompt, system, None))

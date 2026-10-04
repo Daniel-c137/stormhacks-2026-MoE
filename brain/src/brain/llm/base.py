@@ -12,6 +12,9 @@ class LLMUnavailable(LLMError):
 
 
 class LLM(Protocol):
+    last_model: str | None
+    """The model that answered the latest call, for logs and the CLI."""
+
     async def generate(self, prompt: str, *, system: str | None = None) -> str: ...
 
     async def generate_structured[T: BaseModel](
