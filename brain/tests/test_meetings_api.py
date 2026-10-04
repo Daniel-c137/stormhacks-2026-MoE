@@ -18,6 +18,7 @@ from livekit.api import TokenVerifier
 
 from brain.api.deps import get_rooms, get_settings
 from brain.config import Settings
+from contracts import AGENT_PARTICIPANT_ID
 
 # test harness
 
@@ -271,6 +272,90 @@ def test_another_team_cannot_end_the_meeting(client_as, rooms):
     assert response.status_code == 404
     assert client_as(ALEX).get(f"/meetings/{meeting['id']}").json()["status"] == "live"
     assert rooms.closed == []
+
+
+# who is in the room now, for the lobby
+
+
+def join(client, meeting: dict) -> None:
+    assert client.post(f"/meetings/join/{meeting['code']}").status_code == 200
+
+
+def presence(client, meeting: dict):
+    return client.get(f"/meetings/{meeting['id']}/presence")
+
+
+def test_presence_lists_the_people_connected_to_the_room_in_join_order(client_as, rooms):
+    alex, sarah = client_as(ALEX), client_as(SARAH)
+    meeting = create(alex)
+    join(alex, meeting)
+    join(sarah, meeting)
+    rooms.connected[meeting["id"]] = [SARAH.id, ALEX.id]
+
+    response = presence(sarah, meeting)
+
+    assert response.status_code == 200
+    assert response.json() == {"person_ids": [ALEX.id, SARAH.id]}
+
+
+def test_someone_who_left_the_room_is_no_longer_present(client_as, rooms):
+    alex, sarah = client_as(ALEX), client_as(SARAH)
+    meeting = create(alex)
+    join(alex, meeting)
+    join(sarah, meeting)
+    rooms.connected[meeting["id"]] = [ALEX.id]  # Sarah joined, then left
+
+    assert presence(alex, meeting).json() == {"person_ids": [ALEX.id]}
+    assert SARAH.id in alex.get(f"/meetings/{meeting['id']}").json()["participant_ids"]
+
+
+def test_the_agent_and_other_room_identities_are_not_people_present(client_as, rooms):
+    alex = client_as(ALEX)
+    meeting = create(alex)
+    join(alex, meeting)
+    rooms.connected[meeting["id"]] = [AGENT_PARTICIPANT_ID, "egress-1", ALEX.id]
+
+    assert presence(alex, meeting).json() == {"person_ids": [ALEX.id]}
+
+
+def test_nobody_is_present_once_the_meeting_ended_and_livekit_is_not_asked(client_as, rooms):
+    alex = client_as(ALEX)
+    meeting = create(alex)
+    join(alex, meeting)
+    alex.post(f"/meetings/{meeting['id']}/end")
+    rooms.connected[meeting["id"]] = [ALEX.id]
+
+    assert presence(alex, meeting).json() == {"person_ids": []}
+    assert rooms.asked == []
+
+
+def test_nobody_is_present_before_a_scheduled_meeting_starts(client_as, rooms):
+    alex = client_as(ALEX)
+    meeting = alex.post(
+        "/meetings", json={"title": "Retro", "scheduled_start": "2030-01-01T16:00:00+00:00"}
+    ).json()
+
+    assert meeting["status"] == "scheduled"
+    assert presence(alex, meeting).json() == {"person_ids": []}
+    assert rooms.asked == []
+
+
+def test_presence_is_unavailable_when_livekit_cannot_be_reached(app, client_as):
+    app.dependency_overrides[get_rooms] = lambda: FakeRooms(fail=True)
+    alex = client_as(ALEX)
+    meeting = create(alex)
+
+    assert presence(alex, meeting).status_code == 503
+
+
+def test_another_team_cannot_see_who_is_present(client_as, rooms):
+    alex = client_as(ALEX)
+    meeting = create(alex)
+    join(alex, meeting)
+    rooms.connected[meeting["id"]] = [ALEX.id]
+
+    assert presence(client_as(OUTSIDER), meeting).status_code == 404
+    assert rooms.asked == []
 
 
 # live translation is a per-meeting switch (#106)

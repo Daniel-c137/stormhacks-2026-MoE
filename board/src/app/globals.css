@@ -225,8 +225,7 @@
   .name-tag { position: absolute; left: 20px; bottom: 22px; padding: 7px 12px; border-radius: 999px; background: rgba(0,0,0,.5); backdrop-filter: blur(8px); font-size: 14px; font-weight: 600; color: #FFFFFF; white-space: nowrap; }
   .consent { position: absolute; top: 18px; right: 18px; z-index: 4; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
   .consent-anchor { position: relative; display: flex; align-items: center; }
-  .consent-btn { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 14px 0 8px; border: 0; border-radius: 999px; background: rgba(0,0,0,.5); backdrop-filter: blur(8px); color: #FFFFFF; font-size: 13px; font-weight: 700; }
-  .consent-btn .mark-slot { width: 26px; height: 26px; }
+  .consent-btn { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; padding: 0; border: 0; border-radius: 999px; background: rgba(0,0,0,.5); backdrop-filter: blur(8px); color: #FFFFFF; font-size: 13px; font-weight: 700; }
   .consent-btn[aria-expanded="true"] { background: #FFFFFF; color: var(--ink); }
   .consent .tip { right: calc(100% + 8px); top: 8px; }
   .consent-card { position: relative; width: 320px; background: var(--card); color: var(--ink-2); border-radius: 20px; padding: 16px; box-shadow: var(--shadow-lg); display: flex; flex-direction: column; gap: 10px; font-size: 13px; line-height: 1.45; animation: pop .15s ease-out; }
@@ -275,13 +274,8 @@
   .add-topic .wand:disabled { color: var(--muted); }
   .rewrote { margin-top: 8px; display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--ink-2); }
   .agenda-err { margin-top: 8px; font-size: 13px; }
-  /* Timebox chip on an item, the two ways to start an agenda, and drafting with the agent. Drafted
+  /* The two ways to start an agenda, and drafting with the agent. Drafted
      items are ordinary .agenda-item rows; only the transient confirmation says where they came from. */
-  .agenda-time { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px 0 8px; border: 0; border-radius: 999px; background: var(--card); color: var(--ink-2); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
-  .agenda-time:hover { color: var(--ink); box-shadow: inset 0 0 0 1px var(--line-2); }
-  .agenda-time[data-empty="true"] { width: 28px; padding: 0; justify-content: center; background: transparent; color: var(--muted); }
-  .agenda-time-edit { flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
-  .agenda-time-edit input { width: 54px; height: 30px; border: 1.5px solid var(--ink); border-radius: 8px; padding: 0 6px; background: var(--card); font-size: 13px; text-align: right; outline: none; }
   .agenda-item .menu-item:disabled:hover { background: transparent; }
   .agenda-start { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 10px; }
   .agenda-choice { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; padding: 14px; border: 1.5px dashed var(--line-2); border-radius: 14px; background: transparent; text-align: left; transition: border-color .15s, background .15s; }
