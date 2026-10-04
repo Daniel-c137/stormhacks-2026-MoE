@@ -401,6 +401,47 @@ async def test_past_decisions_found_in_memory_are_offered_even_without_shared_wo
     assert "d-beta" in call.prompt
 
 
+async def test_an_older_meetings_write_up_never_retires_a_newer_meetings_decision(
+    api, store, memory
+):
+    newer = await ended(api, "Refund follow-up")  # started now, written up first
+    held_id = f"{newer['id']}-decision-1"
+    older = await api.create("Refund sync")
+    started = datetime.fromisoformat(newer["started_at"]) - timedelta(days=2)
+    stored = await store.meeting(older["id"])
+    await store.update_meeting(stored.model_copy(update={"started_at": started}))
+    llm = MockLLM(
+        structured={
+            ReportExtraction: EXTRACTION,
+            DecisionVerdicts: DecisionVerdicts(
+                verdicts=[
+                    DecisionVerdict(
+                        decision_id=f"{older['id']}-decision-1",
+                        verdict="contradicts",
+                        past_decision_id=held_id,
+                        reason="Backwards in time.",
+                        confidence=0.95,
+                    )
+                ]
+            ),
+        }
+    )
+    api.use_llm(llm)
+    assert any(  # memory would offer the newer decision if it were allowed
+        h.chunk.ref_id == held_id for h in await memory.search(TEAM.id, "waitlist email", k=50)
+    )
+
+    await api.ingest(older["id"])
+    await api.end(older["id"])
+    await api.drain()
+
+    assert await api.status(older["id"]) == "needs_review"
+    decisions = {d["id"]: d for d in (await api.get("/decisions")).json()}
+    assert (decisions[held_id]["status"], decisions[held_id]["relation"]) == ("active", None)
+    assert decisions[f"{older['id']}-decision-1"]["relation"] is None
+    assert calls_for(llm, DecisionVerdicts) == []
+
+
 async def test_without_memory_only_past_decisions_sharing_words_are_offered(api, store):
     await past_meeting(
         store, "Launch planning", past_decision("d-beta", "Announce the beta to everyone")
