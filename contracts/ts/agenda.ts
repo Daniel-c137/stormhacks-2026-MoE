@@ -20,6 +20,12 @@ export interface Agenda {
   updated_at?: string | null; // ISO 8601; last human edit
 }
 
+/** Proposed items, not saved; a person adds the ones they want. */
+export interface AgendaSuggestions {
+  items: AgendaItem[];
+  unavailable: string[]; // sources that were missing or failed; never papered over
+}
+
 /** A reminder that an agenda item has not come up yet. */
 export interface AgendaNudge {
   meeting_id: string;

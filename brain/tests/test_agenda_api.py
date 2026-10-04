@@ -5,7 +5,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import anyio
 import pytest
-from api_support import ALEX, OUTSIDER, SARAH, create
+from api_support import ALEX, OUTSIDER, SARAH, TEAM, create
 from fastapi.testclient import TestClient
 
 from brain.agent.agenda import AgendaRewrite, AgendaSuggestionDraft, SuggestedItem
@@ -80,14 +80,18 @@ def test_new_items_get_ids_and_the_person_who_added_them_in_the_order_sent(clien
 
 
 def test_a_teammate_reorders_renames_removes_and_adds_items(client_as):
-    alex, sarah = client_as(ALEX), client_as(SARAH)
-    meeting = create(alex)
+    # client_as switches who the app's requests are made as, so each call names its person.
+    meeting = create(client_as(ALEX))
     first, second, third = put(
-        alex, meeting["id"], {"title": "One", "minutes": 5}, {"title": "Two"}, {"title": "Three"}
+        client_as(ALEX),
+        meeting["id"],
+        {"title": "One", "minutes": 5},
+        {"title": "Two"},
+        {"title": "Three"},
     ).json()["items"]
 
     response = put(
-        sarah,
+        client_as(SARAH),
         meeting["id"],
         {"id": third["id"], "title": "Three, renamed", "minutes": 20},
         {"title": "Four"},
@@ -95,7 +99,7 @@ def test_a_teammate_reorders_renames_removes_and_adds_items(client_as):
     )
 
     assert response.status_code == 200, response.text
-    items = saved(alex, meeting["id"])
+    items = saved(client_as(ALEX), meeting["id"])
     assert [i["title"] for i in items] == ["Three, renamed", "Four", "One"]
     assert items[0]["id"] == third["id"] and items[0]["minutes"] == 20
     assert items[2]["id"] == first["id"] and items[2]["minutes"] is None
@@ -185,13 +189,14 @@ def test_the_same_item_twice_is_rejected(client_as):
     assert response.status_code == 422
 
 
-def test_a_scheduled_meeting_can_have_its_agenda_set_in_the_lobby(client_as):
-    alex = client_as(ALEX)
-    start = (datetime.now(UTC) + timedelta(days=1)).isoformat()
-    meeting = alex.post("/meetings", json={"title": "Planning", "scheduled_start": start}).json()
-    assert meeting["status"] == "scheduled"
+def test_a_scheduled_meeting_can_have_its_agenda_set_in_the_lobby(client_as, store):
+    start = datetime.now(UTC) + timedelta(days=1)
+    meeting = anyio.run(
+        lambda: store.create_meeting(TEAM.id, "Planning", ALEX.id, scheduled_start=start)
+    )
+    assert meeting.status == "scheduled"
 
-    response = put(alex, meeting["id"], {"title": "Roadmap", "minutes": 30})
+    response = put(client_as(SARAH), meeting.id, {"title": "Roadmap", "minutes": 30})
 
     assert response.status_code == 200, response.text
 
@@ -205,7 +210,7 @@ def test_the_agenda_is_read_only_once_the_meeting_has_ended(client_as):
     response = put(client_as(SARAH), meeting["id"], {"title": "Too late"})
 
     assert response.status_code == 409
-    assert [i["title"] for i in saved(alex, meeting["id"])] == ["One"]
+    assert [i["title"] for i in saved(client_as(ALEX), meeting["id"])] == ["One"]
 
 
 def test_another_team_can_neither_read_nor_edit_the_agenda(client_as):
@@ -216,7 +221,7 @@ def test_another_team_can_neither_read_nor_edit_the_agenda(client_as):
 
     assert agenda(olga, meeting["id"]).status_code == 404
     assert put(olga, meeting["id"], {"title": "Hijack"}).status_code == 404
-    assert [i["title"] for i in saved(alex, meeting["id"])] == ["Private to the team"]
+    assert [i["title"] for i in saved(client_as(ALEX), meeting["id"])] == ["Private to the team"]
 
 
 def test_an_unknown_meeting_has_no_agenda(client_as):
@@ -406,9 +411,9 @@ def test_suggestions_come_from_earlier_reports_and_tasks_and_cite_them(app, clie
 
 
 def test_only_open_and_overdue_work_and_flagged_decisions_are_offered(app, client_as, store):
+    earlier_meeting(client_as(OUTSIDER), store, "Other team's sync")
     alex = client_as(ALEX)
     earlier_meeting(alex, store)
-    earlier_meeting(client_as(OUTSIDER), store, "Other team's sync")
     meeting = create(alex)
     llm = MockLLM(structured={AgendaSuggestionDraft: AgendaSuggestionDraft(items=[])})
     use_llm(app, llm)

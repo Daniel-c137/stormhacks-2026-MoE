@@ -3,7 +3,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 from contracts import (
-    Agenda,
     Answer,
     AskRequest,
     CreateMeetingRequest,
@@ -105,15 +104,4 @@ async def ask_in_meeting(
     meeting_id: str, body: AskRequest, user: Person = Depends(current_user)
 ) -> Answer:
     """Typed question. Private answers return only to the asker; public ones also reach the room."""
-    not_implemented()
-
-
-@router.get("/{meeting_id}/agenda")
-async def get_agenda(meeting_id: str, user: Person = Depends(current_user)) -> Agenda:
-    not_implemented()
-
-
-@router.post("/{meeting_id}/agenda")
-async def generate_agenda(meeting_id: str, user: Person = Depends(current_user)) -> Agenda:
-    """Build the agenda from previous meetings and unfinished GitHub/Jira work."""
     not_implemented()

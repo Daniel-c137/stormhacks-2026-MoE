@@ -1,6 +1,6 @@
 """Shared contract. contracts/ts mirrors these modules; change both in the same commit."""
 
-from .agenda import Agenda, AgendaItem, AgendaNudge
+from .agenda import Agenda, AgendaItem, AgendaNudge, AgendaSuggestions
 from .agent import (
     AgentState,
     Answer,
@@ -53,6 +53,7 @@ __all__ = [
     "AgendaNudge",
     "AgendaRewriteRequest",
     "AgendaRewriteResponse",
+    "AgendaSuggestions",
     "AgendaUpdate",
     "AgentState",
     "Answer",

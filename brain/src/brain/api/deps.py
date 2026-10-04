@@ -7,6 +7,7 @@ from fastapi import Depends, Header, HTTPException
 from contracts import Meeting, Person, Team
 
 from ..config import Settings
+from ..llm import LLM, LLMUnavailable, make_llm
 from ..store import NotFound, Store
 
 
@@ -22,6 +23,14 @@ def get_settings() -> Settings:
 async def get_store() -> Store:
     """The Supabase store. Until it exists, tests and local runs override this dependency."""
     not_implemented()
+
+
+async def get_llm(settings: Settings = Depends(get_settings)) -> LLM:
+    """Gemini. Unconfigured is a clear 503, never a silent mock; tests override this."""
+    try:
+        return make_llm(settings)
+    except LLMUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e)) from None
 
 
 async def current_user(authorization: str = Header()) -> Person:
