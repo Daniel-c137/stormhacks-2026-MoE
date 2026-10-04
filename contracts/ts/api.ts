@@ -1,6 +1,6 @@
 // HTTP request and response bodies. Board -> brain, and realtime -> brain (internal).
 import type { Agenda, AgendaNudge } from "./agenda";
-import type { Answer, Invocation, Visibility } from "./agent";
+import type { AgentState, Answer, CodeSnippet, FactCheck, Invocation, Visibility } from "./agent";
 import type { Meeting } from "./meeting";
 import type { TranscriptSegment } from "./transcript";
 
@@ -67,6 +67,22 @@ export interface AgendaTrackRequest {
 export interface AgendaTrackResponse {
   agenda: Agenda;
   nudges?: AgendaNudge[];
+}
+
+/** realtime -> brain on a timer, never per utterance. `now` is seconds from the meeting start;
+ * omitted, the brain takes it from started_at. */
+export interface FactCheckRequest {
+  now?: number | null;
+}
+
+/** The worker publishes each check on Topic.FACT_CHECK: a public one to the room, a private one
+ * only to its recipient_id. `agent_state`, set only when a check raises the hand, goes on
+ * Topic.AGENT_STATE; the hand is a visual cue and nothing is spoken. `snippets` are the code the
+ * checks' snippet_ids name, for whoever sees those checks. */
+export interface FactCheckResponse {
+  checks?: FactCheck[];
+  agent_state?: AgentState | null;
+  snippets?: CodeSnippet[];
 }
 
 /** Only the fields that are set change. */

@@ -16,6 +16,7 @@ from ..agent.ask import (
     Question,
     ToolOrchestrator,
 )
+from ..agent.factcheck import FactChecker
 from ..agent.pipeline import PipelineRunner, PostMeetingPipeline, ReportPipeline
 from ..auth import AuthNotConfigured, InvalidToken, KeysUnavailable, TokenVerifier
 from ..config import Settings
@@ -89,6 +90,18 @@ def get_orchestrator(
 ) -> ToolOrchestrator:
     """The agent for deliberate questions. Read-only; GitHub and Jira when configured."""
     return ToolOrchestrator(llm, store, settings=settings, memory=memory)
+
+
+def get_fact_checker(
+    store: Store = Depends(get_store),
+    settings: Settings = Depends(get_settings),
+    make_llm: Callable[[], LLM] = Depends(get_llm_factory),
+    memory: MeetingMemory | None = Depends(get_memory),
+) -> FactChecker:
+    """Fact-checks for the worker's tick. The model is made only once a claim needs checking, so
+    a quiet team never needs Gemini. Read-only; GitHub and Jira when configured. No code
+    evidence until code search is wired in. Tests override it."""
+    return FactChecker(make_llm, store, settings=settings, memory=memory)
 
 
 def get_pipeline(

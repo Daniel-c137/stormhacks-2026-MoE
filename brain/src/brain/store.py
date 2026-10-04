@@ -11,6 +11,7 @@ from contracts import (
     Agenda,
     ChatMessage,
     Decision,
+    FactCheck,
     GitHubSettings,
     JiraSettings,
     Meeting,
@@ -31,6 +32,15 @@ class NotFound(LookupError):
 
 class Conflict(Exception):
     """The row is not in the state the write expected, e.g. another call already ended it."""
+
+
+class FactCheckState(BaseModel):
+    """Where a live meeting's fact-checks stand. Times are seconds from the meeting start."""
+
+    meeting_id: str
+    checked_until: float | None = None  # transcript checked so far; None before any
+    checked_at: float | None = None  # the latest model check, for the rate limit
+    hand_raised_at: float | None = None  # the latest raised hand, for interrupt_minutes
 
 
 class Store(Protocol):
@@ -170,6 +180,25 @@ class Store(Protocol):
         through and the others get Conflict. NotFound when no agenda is saved."""
         ...
 
+    # fact-checks
+
+    async def add_fact_check(self, meeting_id: str, check: FactCheck) -> None:
+        """Public checks only (ValueError otherwise); an id already saved is ignored."""
+        ...
+
+    async def fact_checks(self, meeting_id: str) -> list[FactCheck]:
+        """In the order they were added."""
+        ...
+
+    async def fact_check_state(self, meeting_id: str) -> FactCheckState | None: ...
+    async def save_fact_check_state_if(
+        self, state: FactCheckState, *, checked_until: float | None
+    ) -> FactCheckState:
+        """Saves the state only if the saved one is still checked up to `checked_until` (None
+        when none is saved): an atomic compare-and-set, so of overlapping ticks only one gets
+        through and the others get Conflict."""
+        ...
+
     # reports, tasks and decisions
 
     async def save_report(self, report: Report) -> None:
@@ -237,6 +266,8 @@ class InMemoryStore:
         self._segments: dict[str, dict[str, TranscriptSegment]] = {}
         self._chat: dict[str, dict[str, ChatMessage]] = {}
         self._agendas: dict[str, Agenda] = {}
+        self._fact_checks: dict[str, dict[str, FactCheck]] = {}
+        self._fact_check_states: dict[str, FactCheckState] = {}
         self._reports: dict[str, Report] = {}
         self._progress: dict[str, ReportProgress] = {}
         self._tasks: dict[str, TaskDraft] = {}
@@ -462,6 +493,32 @@ class InMemoryStore:
             raise Conflict(f"agenda for meeting {agenda.meeting_id} was tracked meanwhile")
         self._agendas[agenda.meeting_id] = _copy(agenda)
         return _copy(agenda)
+
+    # fact-checks
+
+    async def add_fact_check(self, meeting_id: str, check: FactCheck) -> None:
+        if check.visibility != "public" or check.recipient_id is not None:
+            raise ValueError("Private fact-checks are never stored")
+        self._meeting(meeting_id)
+        self._fact_checks.setdefault(meeting_id, {}).setdefault(check.id, _copy(check))
+
+    async def fact_checks(self, meeting_id: str) -> list[FactCheck]:
+        return [_copy(c) for c in self._fact_checks.get(meeting_id, {}).values()]
+
+    async def fact_check_state(self, meeting_id: str) -> FactCheckState | None:
+        saved = self._fact_check_states.get(meeting_id)
+        return _copy(saved) if saved else None
+
+    async def save_fact_check_state_if(
+        self, state: FactCheckState, *, checked_until: float | None
+    ) -> FactCheckState:
+        # No await between the check and the write, so this is atomic on the event loop.
+        self._meeting(state.meeting_id)
+        saved = self._fact_check_states.get(state.meeting_id)
+        if (saved.checked_until if saved else None) != checked_until:
+            raise Conflict(f"fact-checks of meeting {state.meeting_id} moved on meanwhile")
+        self._fact_check_states[state.meeting_id] = _copy(state)
+        return _copy(state)
 
     # reports, tasks and decisions
 

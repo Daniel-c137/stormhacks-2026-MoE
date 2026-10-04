@@ -97,6 +97,8 @@ class ReportPipeline:
                     meeting.team_id, meeting_id, transcript.segments, report
                 )
             progress = await self._at(meeting_id, SAVE)
+            # The public fact-checks from the live meeting; private ones were never stored.
+            report.fact_checks = await self.store.fact_checks(meeting_id)
             await self.store.save_report(report)
             await apply_links(self.store, links)
             await self.store.transition_status(meeting_id, {"processing"}, "needs_review")

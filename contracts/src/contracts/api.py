@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from .agenda import Agenda, AgendaNudge
-from .agent import Answer, Invocation, Visibility
+from .agent import AgentState, Answer, CodeSnippet, FactCheck, Invocation, Visibility
 from .meeting import Meeting
 from .transcript import TranscriptSegment
 
@@ -81,6 +81,24 @@ class AgendaTrackResponse(BaseModel):
 
     agenda: Agenda
     nudges: list[AgendaNudge] = []
+
+
+class FactCheckRequest(BaseModel):
+    """realtime -> brain on a timer, never per utterance. `now` is seconds from the meeting
+    start; omitted, the brain takes it from started_at."""
+
+    now: float | None = Field(default=None, ge=0)
+
+
+class FactCheckResponse(BaseModel):
+    """The worker publishes each check on Topic.FACT_CHECK: a public one to the room, a private
+    one only to its recipient_id. `agent_state`, set only when a check raises the hand, goes on
+    Topic.AGENT_STATE; the hand is a visual cue and nothing is spoken. `snippets` are the code
+    the checks' snippet_ids name, for whoever sees those checks."""
+
+    checks: list[FactCheck] = []
+    agent_state: AgentState | None = None
+    snippets: list[CodeSnippet] = []
 
 
 class ProfileUpdate(BaseModel):

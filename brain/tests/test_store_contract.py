@@ -814,15 +814,8 @@ async def test_an_agenda_for_a_missing_meeting_is_refused(store):
 
 
 def fact_check(claim: str, **fields) -> FactCheck:
-    return FactCheck(
-        id=new_id(),
-        claim=claim,
-        speaker_name="Sarah Kim",
-        verdict="contradicted",
-        confidence=0.875,
-        severity="high",
-        **fields,
-    )
+    defaults = {"verdict": "contradicted", "confidence": 0.875, "severity": "high"}
+    return FactCheck(id=new_id(), claim=claim, speaker_name="Sarah Kim", **(defaults | fields))
 
 
 async def test_public_fact_checks_are_kept_once_in_the_order_they_were_added(store):

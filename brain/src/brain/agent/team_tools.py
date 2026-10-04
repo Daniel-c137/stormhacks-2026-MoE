@@ -9,7 +9,7 @@ import anyio
 from pydantic import BaseModel
 
 from brain.config import Settings
-from brain.github import GitHubItem, GitHubReader
+from brain.github import GitHubItem, GitHubReader, GitHubRelease
 from brain.integrations import ToolRefused
 from brain.jira import JiraConfig, JiraIssue, JiraReader, root_cause
 from brain.memory import MeetingMemory
@@ -129,7 +129,19 @@ SPECS: list[tuple[ToolSpec, str]] = [
         ),
         "GitHub",
     ),
+    (
+        ToolSpec(
+            name="github_releases",
+            description="The team's GitHub repository's latest releases, newest first, with "
+            "their publish dates. A pull request merged after the latest release is merged but "
+            "not released yet.",
+            parameters={"type": "object", "properties": {}},
+        ),
+        "GitHub",
+    ),
 ]
+
+RELEASE_LIMIT = 5
 
 SOURCE_NAMES = {spec.name: name for spec, name in SPECS}
 
@@ -211,6 +223,7 @@ class TeamToolbox:
             "jira_issue": self.jira_issue,
             "github_search": self.github_search,
             "github_read": self.github_read,
+            "github_releases": self.github_releases,
         }
 
     def specs(self) -> list[ToolSpec]:
@@ -347,6 +360,13 @@ class TeamToolbox:
         item = await self.github.read(number, "pr" if kind == "pr" else "issue")
         return [github_finding(self.github.full_name, item)]
 
+    async def github_releases(self, **_: Any) -> list[Finding]:
+        assert isinstance(self.github, GitHubReader)
+        releases = await self.github.releases(RELEASE_LIMIT)
+        return [
+            release_finding(self.github.full_name, r, latest=i == 0) for i, r in enumerate(releases)
+        ]
+
     # helpers
 
     async def meeting(self, meeting_id: str) -> Meeting | None:
@@ -396,9 +416,26 @@ def github_finding(repo: str, item: GitHubItem) -> Finding:
     state = item.state or "unknown"
     if item.merged:
         state = "merged"
+        if item.merged_at:
+            state += f" {item.merged_at.date().isoformat()}"
     noun = "Pull request" if item.kind == "pr" else "Issue"
     text = f"{noun} {label}: {item.title} ({state})"
     if item.body:
         text += f". {item.body}"
     kind = "github_pr" if item.kind == "pr" else "github_issue"
-    return Finding(text=text, source=Source(kind=kind, label=label, url=item.url))
+    when = item.merged_at.date() if item.merged_at else None
+    return Finding(text=text, source=Source(kind=kind, label=label, url=item.url), when=when)
+
+
+def release_finding(repo: str, release: GitHubRelease, *, latest: bool) -> Finding:
+    published = release.published_at.date() if release.published_at else None
+    text = f"Release {release.tag}"
+    if release.name and release.name != release.tag:
+        text += f" ({release.name})"
+    text += f", published {published.isoformat()}" if published else ", publish date unknown"
+    if latest:
+        text += ". The latest release"
+    if release.body:
+        text += f". {release.body}"
+    source = Source(kind="github_release", label=f"{repo}@{release.tag}", url=release.url)
+    return Finding(text=text, source=source, when=published)
