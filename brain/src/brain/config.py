@@ -20,17 +20,17 @@ class Settings(BaseSettings):
     # Sign-up (#128): only an email the admin invited, a member of this team with no login yet,
     # creates an account. Unset, there is no sign-up.
     signup_team_id: str | None = None
-    # Google sign-in: an OAuth client from Google Cloud ("Web application"), with
-    # <brain>/auth/google/callback as an authorised redirect URI.
+    # Google sign-in needs all three: an OAuth client from Google Cloud ("Web application"), and
+    # the public callback URL Google sends the browser to, exactly as registered with Google:
+    # https://<domain>/api/auth/google/callback in production. The brain can't build it itself
+    # (behind the /api proxy it sees its internal address); its scheme also decides whether the
+    # sign-in cookie is Secure.
     google_client_id: str | None = None
     google_client_secret: str | None = None
-    # The public callback URL Google sends the browser to, exactly as registered with Google,
-    # e.g. https://<board>/api/auth/google/callback when the brain is served at /api. Unset, it
-    # is this brain's own /auth/google/callback as the request reached it (fine locally).
     google_redirect_url: str | None = None
     # Where the board is served, for the Google callback to send the browser back to its /login.
-    # Unset, it's /login on the brain's own site: right when one domain serves both (production,
-    # Caddy at /api). Set it when they're on different origins, e.g. http://localhost:3000 locally.
+    # Unset, it's /login on GOOGLE_REDIRECT_URL's site: right when one origin serves both (Caddy
+    # at /api in production, the board's /api rewrite locally). Set it only when they differ.
     board_url: str | None = None
 
     gemini_api_key: str | None = None

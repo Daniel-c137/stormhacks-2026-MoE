@@ -3,10 +3,10 @@ Accounts come from `brain add-user`, an admin (POST /team/accounts), or an invit
 up (#128): a member of SIGNUP_TEAM_ID with no login yet. There is no open sign-up."""
 
 import secrets
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import httpx
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import RedirectResponse
 
@@ -67,7 +67,19 @@ SIGNUP_NOT_CONFIGURED = "Sign-up isn't configured: set SIGNUP_TEAM_ID"
 
 
 def google_configured(settings: Settings) -> bool:
-    return bool(settings.google_client_id and settings.google_client_secret)
+    """A Google OAuth client and the public callback URL registered with it. Behind the board's
+    /api rewrite or Caddy the brain sees only its internal address, so it can't build that URL
+    itself."""
+    return bool(
+        settings.google_client_id
+        and settings.google_client_secret
+        and public_url(settings.google_redirect_url)
+    )
+
+
+def public_url(url: str | None) -> bool:
+    parts = urlsplit(url or "")
+    return parts.scheme in ("http", "https") and bool(parts.netloc)
 
 
 def password_problem(password: str) -> str | None:
@@ -192,7 +204,6 @@ async def sign_up(
 
 @router.get("/google")
 async def google_sign_in(
-    request: Request,
     next: str | None = None,
     settings: Settings = Depends(get_settings),
 ) -> RedirectResponse:
@@ -202,7 +213,7 @@ async def google_sign_in(
     if secret is None or not google_configured(settings):
         raise HTTPException(status_code=503, detail="Google sign-in isn't configured")
     flow = new_flow(next)
-    redirect_uri = callback_url(request, settings)
+    redirect_uri = settings.google_redirect_url or ""
     response = RedirectResponse(
         authorize_url(settings.google_client_id or "", redirect_uri, flow), status_code=302
     )
@@ -213,14 +224,13 @@ async def google_sign_in(
         path=FLOW_COOKIE_PATH,
         httponly=True,
         samesite="lax",
-        secure=request.url.scheme == "https",
+        secure=urlsplit(redirect_uri).scheme == "https",  # the public site's, not this hop's
     )
     return response
 
 
 @router.get("/google/callback", name="google_callback")
 async def google_callback(
-    request: Request,
     code: str | None = None,
     state: str | None = None,
     error: str | None = None,
@@ -256,7 +266,7 @@ async def google_callback(
                 flow,
                 client_id=settings.google_client_id or "",
                 client_secret=settings.google_client_secret or "",
-                redirect_uri=callback_url(request, settings),
+                redirect_uri=settings.google_redirect_url or "",
                 keys=keys,
                 http=http,
             )
@@ -268,12 +278,6 @@ async def google_callback(
     token, expires_at = issue_token(person.id, settings)
     session = LoginResponse(token=token, expires_at=expires_at, person=person)
     return back(google=codes.issue(session), next=flow.next)
-
-
-def callback_url(request: Request, settings: Settings) -> str:
-    """The redirect URI registered with Google: GOOGLE_REDIRECT_URL behind a proxy, else this
-    brain's own callback as the request reached it."""
-    return settings.google_redirect_url or str(request.url_for("google_callback"))
 
 
 async def google_person(store: Store, settings: Settings, email: str) -> Person | None:

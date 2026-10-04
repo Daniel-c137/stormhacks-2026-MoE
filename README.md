@@ -104,6 +104,8 @@ uv run brain set-admin --email <email>
 uv run brain set-admin --email <email> --revoke
 ```
 
+Google sign-in is on when `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `GOOGLE_REDIRECT_URL` are all set. In production `GOOGLE_REDIRECT_URL` is `https://<domain>/api/auth/google/callback`, and it must match the redirect URI registered for the OAuth client in Google Cloud; locally it's `http://localhost:3000/api/auth/google/callback`, through the board's `/api` rewrite. The brain can't work this URL out itself behind the proxy, and an `https` URL makes the sign-in cookie Secure. The one-time codes that hand a Google sign-in to the board are kept in the brain's memory, so run a single brain process.
+
 The demo seed loads the DropSubs team, its settings and its past meetings (written up by the real models) and gives each person a login with their seeded email; `danial@dropsubs.example` is the team's admin. `WORLD_SEED_PASSWORD` sets one demo password for everyone; otherwise each person gets a generated one, printed once. Running it again skips what's already there.
 
 ```sh

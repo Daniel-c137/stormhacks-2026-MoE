@@ -32,7 +32,8 @@ class SignupRequest(BaseModel):
 
 class AuthOptions(BaseModel):
     """GET /auth/options: what the sign-in page can offer. signup: SIGNUP_TEAM_ID is set;
-    google: the brain has a Google OAuth client (GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)."""
+    google: the brain has a Google OAuth client and its public callback (GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URL)."""
 
     signup: bool
     google: bool
