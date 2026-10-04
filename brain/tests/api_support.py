@@ -1,6 +1,6 @@
 """A two-team world and an app wired to it, for HTTP tests of the brain's API.
 
-Auth is overridden; Supabase session resolution is its own slice. The store is the real
+Auth is overridden by client_as; test_auth.py covers real Supabase sessions. The store is the real
 in-memory store, or with BRAIN_TEST_STORE=postgres a PostgresStore on a fresh pgserver database
 with the migrations applied. LiveKit tokens are really signed.
 """

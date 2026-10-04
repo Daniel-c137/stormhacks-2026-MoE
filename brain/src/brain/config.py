@@ -12,6 +12,8 @@ class Settings(BaseSettings):
 
     supabase_url: str | None = None
     supabase_service_role_key: str | None = None
+    supabase_jwt_secret: str | None = None  # legacy HS256 secret; asymmetric keys use the JWKS
+    supabase_jwt_audience: str = "authenticated"
 
     gemini_api_key: str | None = None
     gemini_model: str | None = None
