@@ -16,6 +16,22 @@ type How = "invite" | "password";
 /** The sign-in page opened on Create account, to send to someone invited. */
 const signUpLink = () => `${window.location.origin}/login?mode=signup`;
 
+/** Copies `text` through a selection, for when the Clipboard API is refused. */
+function copySelected(text: string): boolean {
+  const box = document.createElement("textarea");
+  box.value = text;
+  box.setAttribute("readonly", "");
+  box.style.position = "fixed";
+  box.style.opacity = "0";
+  document.body.appendChild(box);
+  box.select();
+  try {
+    return document.execCommand("copy");
+  } finally {
+    box.remove();
+  }
+}
+
 /** Admins only: the team's members and adding a person (POST /team/accounts), invited or with a
  * generated password. The password shows here once and is never sent anywhere else. */
 export function TeamAccounts() {
@@ -64,7 +80,10 @@ export function TeamAccounts() {
       setCopied(true);
     } catch {
       // The Clipboard API can be refused (an embedded or unfocused page); copy the selected text.
-      if (!created.password) return setProblem(`Couldn't copy. The link is ${signUpLink()}`);
+      if (!created.password) {
+        if (copySelected(signUpLink())) return setCopied(true);
+        return setProblem(`Couldn't copy. The link is ${signUpLink()}`);
+      }
       const code = document.getElementById("new-password");
       const selection = window.getSelection();
       if (code && selection) {

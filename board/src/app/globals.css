@@ -735,6 +735,8 @@
     .room-notes, .room-notes[data-chat="false"] { top: 76px; right: 12px; width: min(380px, calc(100% - 24px)); }
     .at-label { display: none; }
     .task-fields, .two, .srow, .sched-grid, .member-add { grid-template-columns: minmax(0,1fr); }
+    .member-add .seg button { flex: 1 1 auto; min-width: 0; padding: 0 8px; }
+    .member-add .seg svg { display: none; }
     .rep-wrap, .settings-body { padding-left: 16px; padding-right: 16px; }
     .conn-row:not(.conn-edit) { display: grid; grid-template-columns: auto minmax(0,1fr) auto; grid-template-areas: "icon name more" "icon state more"; column-gap: 10px; row-gap: 2px; padding: 8px 0; }
     .conn-row > .conn-icon { grid-area: icon; }
