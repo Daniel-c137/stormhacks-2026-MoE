@@ -239,6 +239,57 @@ async def test_a_profile_update_is_saved(store):
         await store.update_person(person("Nobody Here"))
 
 
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 64
+
+
+async def test_a_saved_photo_is_served_from_the_persons_photo_path(store):
+    _, alex, *_ = await two_teams(store)
+
+    saved = await store.save_photo(alex.id, "image/png", PNG)
+
+    assert saved.photo_url is not None
+    assert saved.photo_url.split("?")[0] == f"/people/{alex.id}/photo"
+    assert saved.name == alex.name
+    assert await store.person(alex.id) == saved
+    assert await store.photo(alex.id) == ("image/png", PNG)
+
+
+async def test_a_new_photo_replaces_the_old_one_under_a_new_url(store):
+    _, alex, *_ = await two_teams(store)
+    first = await store.save_photo(alex.id, "image/png", PNG)
+
+    second = await store.save_photo(alex.id, "image/jpeg", JPEG)
+
+    assert second.photo_url != first.photo_url  # so a cached old photo is not shown
+    assert await store.photo(alex.id) == ("image/jpeg", JPEG)
+
+
+async def test_a_deleted_photo_is_gone(store):
+    _, alex, sarah, *_ = await two_teams(store)
+    await store.save_photo(alex.id, "image/png", PNG)
+
+    cleared = await store.delete_photo(alex.id)
+
+    assert cleared.photo_url is None
+    assert (await store.person(alex.id)).photo_url is None
+    with pytest.raises(NotFound):
+        await store.photo(alex.id)
+    assert (await store.delete_photo(sarah.id)).photo_url is None  # nothing to delete is fine
+
+
+async def test_photos_need_an_existing_person(store):
+    _, alex, *_ = await two_teams(store)
+
+    with pytest.raises(NotFound):
+        await store.photo(alex.id)  # no photo yet
+    for missing in (store.photo(new_id()), store.delete_photo(new_id())):
+        with pytest.raises(NotFound):
+            await missing
+    with pytest.raises(NotFound):
+        await store.save_photo(new_id(), "image/png", PNG)
+
+
 async def test_member_search_ignores_case_and_covers_name_email_and_title(store):
     team, alex, sarah, *_ = await two_teams(store)
 

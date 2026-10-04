@@ -1,6 +1,8 @@
 import socket
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import pytest
@@ -8,6 +10,8 @@ import uvicorn
 from api_support import app, client_as, settings, store, worker  # noqa: F401  (shared fixtures)
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from memory_support import memory_pool  # noqa: F401  (shared fixtures)
+from pg_support import pg_dsn, pg_server  # noqa: F401  (shared fixtures)
 
 
 @pytest.fixture
@@ -15,17 +19,44 @@ def anyio_backend():
     return "asyncio"
 
 
-class FakeJira:
-    """Stand-in for the Jira MCP server's createJiraIssue and searchJiraIssuesUsingJql. A summary
-    starting with FAIL is rejected the way Jira rejects an invalid field. Searches return
-    `issues` (in Atlassian's shape) or fail with `search_error`."""
+# The people a Jira site knows about. Names match the people in the test meetings.
+JIRA_ACCOUNTS: list[dict[str, str]] = [
+    {"accountId": "acc-alice", "displayName": "Alice Moreau", "emailAddress": "alice@dropsubs.dev"},
+    {"accountId": "acc-bob", "displayName": "Bob Okafor", "emailAddress": "bob@dropsubs.dev"},
+]
 
-    def __init__(self, first_number: int = 117):
+
+class FakeJira:
+    """Stand-in for the Jira MCP server's createJiraIssue, lookupJiraAccountId and
+    searchJiraIssuesUsingJql. A summary starting with FAIL is rejected the way Jira rejects an
+    invalid field. Searches return `issues` (in Atlassian's shape) or fail with `search_error`.
+    Lookups match any account whose name or email contains the search string; set
+    `lookup_error` to make the lookup tool fail. Lookups answer {"users": [...]}, the shape the
+    brain expects (unverified against Atlassian's server)."""
+
+    def __init__(self, first_number: int = 117, accounts: list[dict[str, str]] | None = None):
         self.created: list[dict[str, Any]] = []
+        self.accounts = list(JIRA_ACCOUNTS if accounts is None else accounts)
+        self.lookups: list[str] = []
+        self.lookup_error: str | None = None
         self.issues: list[dict[str, Any]] = []
         self.searches: list[dict[str, Any]] = []
         self.search_error: str | None = None
         self.server = MCPServer("jira")
+
+        @self.server.tool()
+        def lookupJiraAccountId(cloudId: str, searchString: str) -> dict[str, Any]:
+            self.lookups.append(searchString)
+            if self.lookup_error:
+                raise ToolError(self.lookup_error)
+            needle = searchString.strip().lower()
+            users = [
+                account
+                for account in self.accounts
+                if needle in account.get("displayName", "").lower()
+                or needle in account.get("emailAddress", "").lower()
+            ]
+            return {"users": users}
 
         @self.server.tool()
         def searchJiraIssuesUsingJql(
@@ -75,28 +106,37 @@ def fake_jira() -> FakeJira:
     return FakeJira()
 
 
+@contextmanager
+def serve_mcp(server: MCPServer) -> Iterator[str]:
+    """Serve an in-process MCP server over streamable HTTP on localhost; yields its URL."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    http = uvicorn.Server(
+        uvicorn.Config(
+            server.streamable_http_app(), host="127.0.0.1", port=port, log_level="warning"
+        )
+    )
+    thread = threading.Thread(target=http.run, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 10
+    while not http.started:
+        if time.monotonic() > deadline:
+            raise RuntimeError(f"fake MCP server {server.name} did not start")
+        time.sleep(0.02)
+    try:
+        yield f"http://127.0.0.1:{port}/mcp"
+    finally:
+        http.should_exit = True
+        thread.join(timeout=10)
+
+
 @pytest.fixture
 def jira_over_http():
     """FakeJira served over streamable HTTP on localhost: (fake, url)."""
     jira = FakeJira()
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        port = s.getsockname()[1]
-    server = uvicorn.Server(
-        uvicorn.Config(
-            jira.server.streamable_http_app(), host="127.0.0.1", port=port, log_level="warning"
-        )
-    )
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    deadline = time.monotonic() + 10
-    while not server.started:
-        if time.monotonic() > deadline:
-            raise RuntimeError("fake Jira MCP server did not start")
-        time.sleep(0.02)
-    yield jira, f"http://127.0.0.1:{port}/mcp"
-    server.should_exit = True
-    thread.join(timeout=10)
+    with serve_mcp(jira.server) as url:
+        yield jira, url
 
 
 @pytest.fixture

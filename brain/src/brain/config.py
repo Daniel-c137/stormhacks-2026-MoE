@@ -12,6 +12,8 @@ class Settings(BaseSettings):
 
     supabase_url: str | None = None
     supabase_service_role_key: str | None = None
+    supabase_jwt_secret: str | None = None  # legacy HS256 secret; asymmetric keys use the JWKS
+    supabase_jwt_audience: str = "authenticated"
 
     gemini_api_key: str | None = None
     gemini_model: str | None = None
@@ -20,6 +22,8 @@ class Settings(BaseSettings):
     gemini_max_delay: float = 4.0  # seconds between retries on the same model
     gemini_embedding_model: str | None = None
     gemini_embedding_dim: int | None = None
+    # comma-separated; one call never mixes models, and memory search only compares like with like
+    gemini_embedding_fallback_models: str | None = None
 
     livekit_url: str | None = None
     livekit_api_key: str | None = None
@@ -34,5 +38,9 @@ class Settings(BaseSettings):
     jira_email: str | None = None
     jira_api_token: str | None = None
     jira_project_key: str | None = None
+    connector_timeout: float = 5.0  # seconds to reach an MCP server and list its tools
+
+    elevenlabs_api_key: str | None = None
+    elevenlabs_api_url: str = "https://api.elevenlabs.io"
 
     brain_internal_token: str | None = None
