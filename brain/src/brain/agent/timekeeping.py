@@ -391,26 +391,43 @@ class ClassificationFailed(Exception):
         self.error = error
 
 
-def empty_agenda(meeting_id: str) -> Agenda:
-    return Agenda(meeting_id=meeting_id, items=[], generated_at=datetime.now(UTC))
-
-
 async def track_agenda(
     store: Store, make_llm: Callable[[], LLM], meeting: Meeting, now: float
 ) -> AgendaTrackResponse:
-    """One tick at `now` seconds from the meeting start. The caller serialises ticks per meeting.
+    """One tick at `now` seconds from the meeting start, against everyone's agenda: each person
+    has their own, tracked on its own (its own tracked point, current item, talk time and
+    nudges), with one model call per agenda that has something new to label. The caller
+    serialises ticks per meeting. Each nudge names the agenda's owner, so it goes only to them.
+    Raises ClassificationFailed when the model failed for any agenda (the others are still
+    tracked and saved), and Conflict when an agenda kept changing under SAVE_ATTEMPTS saves."""
+    agendas: list[Agenda] = []
+    nudges: list[AgendaNudge] = []
+    failure: LLMError | None = None
+    for agenda in await store.agendas(meeting.id):
+        tracked, due, failed = await track_one(store, make_llm, meeting, agenda, now)
+        agendas.append(tracked)
+        nudges += [n.model_copy(update={"person_id": agenda.person_id}) for n in due]
+        failure = failure or failed
+    response = AgendaTrackResponse(agendas=agendas, nudges=nudges)
+    if failure is not None:
+        raise ClassificationFailed(response, failure) from failure
+    return response
 
-    The captions to track are the final segments that ended after the tracked point and have
-    settled. The model is made and asked only when they hold MIN_TALK_S of talk or the oldest
-    has waited MAX_WAIT_S; the tracked point then moves to the end of the last of them. A tick
-    with nothing to ask about tracks nothing and saves nothing (but for a nudge that is due).
-    The result is saved with a compare-and-set on the agenda's revision; when someone else saved
-    first (a lobby edit, another replica's tick), it is applied again to what they saved,
-    without asking the model again. Raises ClassificationFailed when the model fails, and
-    Conflict when the agenda kept changing under SAVE_ATTEMPTS saves."""
-    agenda = await store.agenda(meeting.id)
-    if agenda is None or not agenda.items:
-        return AgendaTrackResponse(agenda=agenda or empty_agenda(meeting.id), nudges=[])
+
+async def track_one(
+    store: Store, make_llm: Callable[[], LLM], meeting: Meeting, agenda: Agenda, now: float
+) -> tuple[Agenda, list[AgendaNudge], LLMError | None]:
+    """One person's agenda for this tick: (the agenda after it, its nudges, a model failure).
+
+    The captions to track are the final segments that ended after the agenda's tracked point
+    and have settled. The model is made and asked only when they hold MIN_TALK_S of talk or the
+    oldest has waited MAX_WAIT_S; the tracked point then moves to the end of the last of them.
+    A tick with nothing to ask about tracks nothing and saves nothing (but for a nudge that is
+    due). The result is saved with a compare-and-set on the agenda's revision; when someone else
+    saved first (an edit, another replica's tick), it is applied again to what they saved,
+    without asking the model again."""
+    if not agenda.items:
+        return agenda, [], None
 
     since = agenda.tracked_until
     settled = now - SETTLE_S
@@ -456,26 +473,30 @@ async def track_agenda(
                     ends_on=next((i for i in reversed(said.about) if i is not None), None),
                 )
 
-    response = await save(store, meeting, now, since, stretch)
-    if failure is not None:
-        raise ClassificationFailed(response, failure) from failure
-    return response
+    saved, nudges = await save(store, meeting, agenda, now, since, stretch)
+    return saved, nudges, failure
 
 
 async def save(
-    store: Store, meeting: Meeting, now: float, since: float | None, stretch: Stretch | None
-) -> AgendaTrackResponse:
-    """Applies the stretch (if any) and the nudge rules to the latest agenda and saves it if that
-    changed anything."""
+    store: Store,
+    meeting: Meeting,
+    agenda: Agenda,
+    now: float,
+    since: float | None,
+    stretch: Stretch | None,
+) -> tuple[Agenda, list[AgendaNudge]]:
+    """Applies the stretch (if any) and the nudge rules to the person's latest agenda and saves
+    it if that changed anything."""
+    person = agenda.person_id or ""
     for _ in range(SAVE_ATTEMPTS):
-        latest = await store.agenda(meeting.id)
+        latest = await store.agenda(meeting.id, person)
         if latest is None or latest.tracked_until != since:  # another tick tracked it first
-            return AgendaTrackResponse(agenda=latest or empty_agenda(meeting.id), nudges=[])
+            return latest or agenda, []
         updated, nudges = nudge(advance(latest, stretch) if stretch else latest, meeting, now)
         if updated == latest:
-            return AgendaTrackResponse(agenda=latest, nudges=[])
+            return latest, []
         try:
-            return AgendaTrackResponse(agenda=await store.save_agenda_if(updated), nudges=nudges)
+            return await store.save_agenda_if(updated), nudges
         except Conflict:
             continue  # saved meanwhile: apply the same stretch to what was saved
-    raise Conflict(f"the agenda of meeting {meeting.id} kept changing")
+    raise Conflict(f"{person}'s agenda for meeting {meeting.id} kept changing")

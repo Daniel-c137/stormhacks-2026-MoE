@@ -159,9 +159,10 @@ class AgendaTrackRequest(BaseModel):
 
 
 class AgendaTrackResponse(BaseModel):
-    """The worker publishes `agenda` on Topic.AGENDA and each nudge on Topic.AGENDA_NUDGE."""
+    """Everyone's agenda after the tick. The worker sends each agenda (Topic.AGENDA) and each
+    nudge (Topic.AGENDA_NUDGE) only to its owner, `person_id`: agendas are personal."""
 
-    agenda: Agenda
+    agendas: list[Agenda] = []
     nudges: list[AgendaNudge] = []
 
 
