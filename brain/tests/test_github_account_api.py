@@ -212,6 +212,50 @@ def test_github_out_of_reach_is_a_502(client_as, store, github, repos, trouble):
     assert account(store) is None
 
 
+@pytest.mark.parametrize("part", ["issues", "pull_requests", "contents"])
+def test_github_failing_while_a_repository_is_checked_is_a_502(
+    client_as, store, github, repos, part
+):
+    github.failing_parts = {part}
+
+    response = connect(client_as(ALEX))
+
+    assert response.status_code == 502, response.text
+    assert account(store) is None
+
+
+def test_github_failing_while_an_added_repository_is_checked_is_a_502(client_as, github, repos):
+    alex = client_as(ALEX)
+    connect(alex)
+    github.allow("acme/secret")
+    github.failing_parts = {"issues"}
+
+    response = alex.put(
+        "/settings/connectors", json={"github": [{"path": REPO}, {"path": "acme/secret"}]}
+    )
+
+    assert response.status_code == 502, response.text
+
+
+def test_a_rate_limit_is_a_502_and_not_a_rejected_token(client_as, store, github, repos):
+    github.rate_limited = True
+
+    response = connect(client_as(ALEX))
+
+    assert response.status_code == 502, response.text
+    assert "rate limit" in response.json()["detail"]
+    assert account(store) is None
+
+
+def test_a_repository_with_issues_turned_off_is_readable(client_as, store, github, repos):
+    github.issues_off.add(REPO.casefold())
+
+    response = connect(client_as(ALEX))
+
+    assert response.status_code == 200, response.text
+    assert account(store).login == LOGIN
+
+
 def test_an_admin_disconnects_github(client_as, store, github, repos):
     alex = client_as(ALEX)
     connect(alex)

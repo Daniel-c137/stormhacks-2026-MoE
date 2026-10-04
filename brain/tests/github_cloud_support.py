@@ -31,7 +31,9 @@ class FakeGitHubApi:
     for answers 403 the way GitHub does, a repository it cannot see 404. Only
     https://api.github.com can be reached. A request without the token answers 401.
 
-    To stage trouble: `down` (no connection), `failing` (every answer is a 502)."""
+    To stage trouble: `down` (no connection), `failing` (every answer is a 502), `failing_parts`
+    (those parts of every repository answer 503), `rate_limited` (every answer is GitHub's
+    rate-limit 403). `issues_off` holds repositories with Issues turned off (their issues: 410)."""
 
     def __init__(self, *, tokens: dict[str, str] | None = None):
         self.tokens = {TOKEN: LOGIN} if tokens is None else tokens
@@ -39,6 +41,9 @@ class FakeGitHubApi:
         self.empty: set[str] = set()  # repositories with no commits: their root is a 404
         self.down = False
         self.failing = False
+        self.failing_parts: set[str] = set()
+        self.rate_limited = False
+        self.issues_off: set[str] = set()
         self.requests: list[httpx.Request] = []
         self.transport = httpx.MockTransport(self.handle)
 
@@ -51,6 +56,12 @@ class FakeGitHubApi:
             raise httpx.ConnectError("no route to host", request=request)
         if self.failing:
             return httpx.Response(502, json={"message": "Server Error"})
+        if self.rate_limited:
+            return httpx.Response(
+                403,
+                headers={"x-ratelimit-remaining": "0"},
+                json={"message": "API rate limit exceeded for user ID 1."},
+            )
         scheme, _, token = request.headers.get("authorization", "").partition(" ")
         if scheme != "Bearer" or token not in self.tokens:
             return httpx.Response(401, json={"message": "Bad credentials"})
@@ -75,6 +86,10 @@ class FakeGitHubApi:
         }.get(tuple(rest))
         if needs is None:
             return httpx.Response(404, json={"message": "Not Found"})
+        if needs in self.failing_parts:
+            return httpx.Response(503, json={"message": "Service Unavailable"})
+        if needs == "issues" and repo in self.issues_off:
+            return httpx.Response(410, json={"message": "Issues are disabled for this repo"})
         if needs not in allowed:
             return httpx.Response(
                 403, json={"message": "Resource not accessible by personal access token"}
