@@ -1,0 +1,482 @@
+[
+  {
+    "issue_number": 9,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/9",
+    "id": 47751796778,
+    "user": {
+      "login": "danial-dropsubs",
+      "id": 164859128,
+      "type": "User",
+      "html_url": "https://github.com/danial-dropsubs"
+    },
+    "body": "Moving the beta from Aug 17 to **Aug 24**: invite flow isn't ready.",
+    "created_at": "2026-08-15T00:00:00Z",
+    "updated_at": "2026-08-15T00:00:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/9#issuecomment-0",
+    "author_association": "MEMBER"
+  },
+  {
+    "issue_number": 10,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/10",
+    "id": 66315690682,
+    "user": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "body": "Redirect URI mismatch after consent. PR coming.",
+    "created_at": "2026-08-21T16:40:00Z",
+    "updated_at": "2026-08-21T16:40:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/10#issuecomment-0",
+    "author_association": "MEMBER"
+  },
+  {
+    "issue_number": 14,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/14",
+    "id": 55248434785,
+    "user": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "body": "I think this is fixed on staging (build 112).",
+    "created_at": "2026-08-21T17:20:00Z",
+    "updated_at": "2026-08-21T17:20:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/14#issuecomment-0",
+    "author_association": "MEMBER"
+  },
+  {
+    "issue_number": 14,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/14",
+    "id": 5958735372,
+    "user": {
+      "login": "danial-dropsubs",
+      "id": 164859128,
+      "type": "User",
+      "html_url": "https://github.com/danial-dropsubs"
+    },
+    "body": "Retested staging build 112 on my phone: still crashes right after sign-in.",
+    "created_at": "2026-08-25T22:45:00Z",
+    "updated_at": "2026-08-25T22:45:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/14#issuecomment-1",
+    "author_association": "MEMBER"
+  },
+  {
+    "issue_number": 14,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/14",
+    "id": 65356144261,
+    "user": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "body": "Root cause was a keychain race. Fixed in #28.",
+    "created_at": "2026-09-04T18:00:00Z",
+    "updated_at": "2026-09-04T18:00:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/14#issuecomment-2",
+    "author_association": "MEMBER"
+  },
+  {
+    "issue_number": 23,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/23",
+    "id": 55192549553,
+    "user": {
+      "login": "danial-dropsubs",
+      "id": 164859128,
+      "type": "User",
+      "html_url": "https://github.com/danial-dropsubs"
+    },
+    "body": "Interview 1: loves the list, wants it to cancel Adobe for her.",
+    "created_at": "2026-08-28T00:10:00Z",
+    "updated_at": "2026-08-28T00:10:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/23#issuecomment-0",
+    "author_association": "MEMBER"
+  },
+  {
+    "issue_number": 23,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/23",
+    "id": 57279857443,
+    "user": {
+      "login": "danial-dropsubs",
+      "id": 164859128,
+      "type": "User",
+      "html_url": "https://github.com/danial-dropsubs"
+    },
+    "body": "Interview 2: confused that Outlook sign-in loops.",
+    "created_at": "2026-08-28T00:20:00Z",
+    "updated_at": "2026-08-28T00:20:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/23#issuecomment-1",
+    "author_association": "MEMBER"
+  },
+  {
+    "issue_number": 23,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/23",
+    "id": 42051252619,
+    "user": {
+      "login": "danial-dropsubs",
+      "id": 164859128,
+      "type": "User",
+      "html_url": "https://github.com/danial-dropsubs"
+    },
+    "body": "In-app: 'Which emails do you read?' x6. We should explain this on onboarding.",
+    "created_at": "2026-08-28T16:05:00Z",
+    "updated_at": "2026-08-28T16:05:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/23#issuecomment-2",
+    "author_association": "MEMBER"
+  },
+  {
+    "issue_number": 23,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/23",
+    "id": 40093795940,
+    "user": {
+      "login": "danial-dropsubs",
+      "id": 164859128,
+      "type": "User",
+      "html_url": "https://github.com/danial-dropsubs"
+    },
+    "body": "In-app: 'Show prices in CAD' x3.",
+    "created_at": "2026-08-28T18:00:00Z",
+    "updated_at": "2026-08-28T18:00:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/23#issuecomment-3",
+    "author_association": "MEMBER"
+  },
+  {
+    "issue_number": 23,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/23",
+    "id": 3982610386,
+    "user": {
+      "login": "danial-dropsubs",
+      "id": 164859128,
+      "type": "User",
+      "html_url": "https://github.com/danial-dropsubs"
+    },
+    "body": "Interview 3: would pay a fee if it actually cancels the hard ones.",
+    "created_at": "2026-08-28T23:30:00Z",
+    "updated_at": "2026-08-28T23:30:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/23#issuecomment-4",
+    "author_association": "MEMBER"
+  },
+  {
+    "issue_number": 29,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/29",
+    "id": 52028488946,
+    "user": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "body": "On track to submit Friday (Sep 25).",
+    "created_at": "2026-09-23T16:50:00Z",
+    "updated_at": "2026-09-23T16:50:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/29#issuecomment-0",
+    "author_association": "MEMBER"
+  },
+  {
+    "issue_number": 29,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/29",
+    "id": 43280230374,
+    "user": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "body": "Didn't make it today, screenshots and review notes still pending.",
+    "created_at": "2026-09-26T01:30:00Z",
+    "updated_at": "2026-09-26T01:30:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/29#issuecomment-1",
+    "author_association": "MEMBER"
+  },
+  {
+    "issue_number": 29,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/29",
+    "id": 43419188544,
+    "user": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "body": "New target: submit **Fri Oct 2**.",
+    "created_at": "2026-09-28T17:14:00Z",
+    "updated_at": "2026-09-28T17:14:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/29#issuecomment-2",
+    "author_association": "MEMBER"
+  },
+  {
+    "issue_number": 29,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/29",
+    "id": 61498242432,
+    "user": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "body": "Slipping again to **Wed Oct 7**. Apple requires apps that let you create an account to also let you delete it in the app (App Review Guideline 5.1.1(v)). We don't have that yet, see #51.",
+    "created_at": "2026-10-02T17:36:00Z",
+    "updated_at": "2026-10-02T17:36:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/29#issuecomment-3",
+    "author_association": "MEMBER"
+  },
+  {
+    "issue_number": 36,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/36",
+    "id": 68646316542,
+    "user": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "body": "Moved the job from midnight to 6am in #40.",
+    "created_at": "2026-09-25T23:00:00Z",
+    "updated_at": "2026-09-25T23:00:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/36#issuecomment-0",
+    "author_association": "MEMBER"
+  },
+  {
+    "issue_number": 36,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/36",
+    "id": 4120982619,
+    "user": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "body": "Might already be fixed on staging.",
+    "created_at": "2026-09-30T16:45:00Z",
+    "updated_at": "2026-09-30T16:45:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/36#issuecomment-1",
+    "author_association": "MEMBER"
+  },
+  {
+    "issue_number": 36,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/36",
+    "id": 17538374954,
+    "user": {
+      "login": "danial-dropsubs",
+      "id": 164859128,
+      "type": "User",
+      "html_url": "https://github.com/danial-dropsubs"
+    },
+    "body": "Tested staging with my own inbox: the Spotify warning arrived this morning, after yesterday's charge. **Not fixed.**",
+    "created_at": "2026-10-01T15:30:00Z",
+    "updated_at": "2026-10-01T15:30:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/36#issuecomment-2",
+    "author_association": "MEMBER"
+  },
+  {
+    "issue_number": 37,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/37",
+    "id": 28047615068,
+    "user": {
+      "login": "danial-dropsubs",
+      "id": 164859128,
+      "type": "User",
+      "html_url": "https://github.com/danial-dropsubs"
+    },
+    "body": "Interview 1: 'Connect my bank account directly, not just my email.'",
+    "created_at": "2026-09-23T15:35:00Z",
+    "updated_at": "2026-09-23T15:35:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/37#issuecomment-0",
+    "author_association": "MEMBER"
+  },
+  {
+    "issue_number": 37,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/37",
+    "id": 21502674104,
+    "user": {
+      "login": "danial-dropsubs",
+      "id": 164859128,
+      "type": "User",
+      "html_url": "https://github.com/danial-dropsubs"
+    },
+    "body": "Interview 2: 'The fee feels high.'",
+    "created_at": "2026-09-23T15:40:00Z",
+    "updated_at": "2026-09-23T15:40:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/37#issuecomment-1",
+    "author_association": "MEMBER"
+  },
+  {
+    "issue_number": 37,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/37",
+    "id": 155125094,
+    "user": {
+      "login": "danial-dropsubs",
+      "id": 164859128,
+      "type": "User",
+      "html_url": "https://github.com/danial-dropsubs"
+    },
+    "body": "Interview 3: 'Connect my bank, I don't keep receipts.'",
+    "created_at": "2026-09-23T15:45:00Z",
+    "updated_at": "2026-09-23T15:45:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/37#issuecomment-2",
+    "author_association": "MEMBER"
+  },
+  {
+    "issue_number": 37,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/37",
+    "id": 10699415851,
+    "user": {
+      "login": "danial-dropsubs",
+      "id": 164859128,
+      "type": "User",
+      "html_url": "https://github.com/danial-dropsubs"
+    },
+    "body": "Interview 4: 'Handle the hard ones, like gyms and phone plans.'",
+    "created_at": "2026-09-24T16:00:00Z",
+    "updated_at": "2026-09-24T16:00:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/37#issuecomment-3",
+    "author_association": "MEMBER"
+  },
+  {
+    "issue_number": 37,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/37",
+    "id": 59186717597,
+    "user": {
+      "login": "danial-dropsubs",
+      "id": 164859128,
+      "type": "User",
+      "html_url": "https://github.com/danial-dropsubs"
+    },
+    "body": "Interview 5: 'Support Canadian bank emails (RBC, TD).'",
+    "created_at": "2026-09-24T16:30:00Z",
+    "updated_at": "2026-09-24T16:30:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/37#issuecomment-4",
+    "author_association": "MEMBER"
+  },
+  {
+    "issue_number": 37,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/37",
+    "id": 61963073371,
+    "user": {
+      "login": "danial-dropsubs",
+      "id": 164859128,
+      "type": "User",
+      "html_url": "https://github.com/danial-dropsubs"
+    },
+    "body": "Interview 6: 'Bank connection would make me trust it.'",
+    "created_at": "2026-09-24T17:00:00Z",
+    "updated_at": "2026-09-24T17:00:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/37#issuecomment-5",
+    "author_association": "MEMBER"
+  },
+  {
+    "issue_number": 37,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/37",
+    "id": 35871113999,
+    "user": {
+      "login": "danial-dropsubs",
+      "id": 164859128,
+      "type": "User",
+      "html_url": "https://github.com/danial-dropsubs"
+    },
+    "body": "In-app tally (412 responses): connect a bank account 28%, fee too high 17%, gyms/phone plans 15%, Canadian bank emails 11%, other 29%.",
+    "created_at": "2026-09-26T00:00:00Z",
+    "updated_at": "2026-09-26T00:00:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/37#issuecomment-6",
+    "author_association": "MEMBER"
+  },
+  {
+    "issue_number": 37,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/37",
+    "id": 20997009802,
+    "user": {
+      "login": "danial-dropsubs",
+      "id": 164859128,
+      "type": "User",
+      "html_url": "https://github.com/danial-dropsubs"
+    },
+    "body": "Summary: **connecting a bank account is the top request** - 3 of 6 interviews and 28% of in-app feedback. See #31.",
+    "created_at": "2026-09-26T00:05:00Z",
+    "updated_at": "2026-09-26T00:05:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/37#issuecomment-7",
+    "author_association": "MEMBER"
+  },
+  {
+    "issue_number": 42,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/42",
+    "id": 63442785559,
+    "user": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "body": "I'll take the gym thing.",
+    "created_at": "2026-09-28T18:00:00Z",
+    "updated_at": "2026-09-28T18:00:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/42#issuecomment-0",
+    "author_association": "MEMBER"
+  },
+  {
+    "issue_number": 42,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/42",
+    "id": 44356911823,
+    "user": {
+      "login": "hossein-dropsubs",
+      "id": 99392202,
+      "type": "User",
+      "html_url": "https://github.com/hossein-dropsubs"
+    },
+    "body": "Fixed in #48: the AI now states terms only from the provider's own terms or emails, and otherwise says it isn't sure.",
+    "created_at": "2026-10-02T16:40:00Z",
+    "updated_at": "2026-10-02T16:40:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/42#issuecomment-1",
+    "author_association": "MEMBER"
+  },
+  {
+    "issue_number": 43,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/43",
+    "id": 20553389398,
+    "user": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "body": "Found it. Inbox sync appends a page of emails *before* checking whether the provider sent the same page token again, so a repeated last page gets added twice. PR #46.",
+    "created_at": "2026-09-30T16:30:00Z",
+    "updated_at": "2026-09-30T16:30:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/43#issuecomment-0",
+    "author_association": "MEMBER"
+  },
+  {
+    "issue_number": 43,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/43",
+    "id": 53560255822,
+    "user": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "body": "Fix merged. 14 users were double-charged and need refunds (DS-105).",
+    "created_at": "2026-10-02T16:35:00Z",
+    "updated_at": "2026-10-02T16:35:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/43#issuecomment-1",
+    "author_association": "MEMBER"
+  },
+  {
+    "issue_number": 49,
+    "issue_url": "https://api.github.com/repos/dropsubs/dropsubs/issues/49",
+    "id": 38932674835,
+    "user": {
+      "login": "hossein-dropsubs",
+      "id": 99392202,
+      "type": "User",
+      "html_url": "https://github.com/hossein-dropsubs"
+    },
+    "body": "Fix up in #50: the cancel service itself requires a real Approve tap, whatever any email says.",
+    "created_at": "2026-10-02T16:50:00Z",
+    "updated_at": "2026-10-02T16:50:00Z",
+    "html_url": "https://github.com/dropsubs/dropsubs/issues/49#issuecomment-0",
+    "author_association": "MEMBER"
+  }
+]

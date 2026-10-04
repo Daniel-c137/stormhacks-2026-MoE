@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from brain.config import Settings
 from brain.llm import LLM
 from brain.memory import MeetingMemory
+from brain.report.decisions import terms
 from brain.report.extraction import clock, speaker
 from brain.store import Store
 from contracts import (
@@ -220,7 +221,7 @@ class ToolOrchestrator:
                 for s in recent
             ]
             groups.insert(0, said)
-        evidence, omitted = number(groups, self.max_evidence)
+        evidence, omitted = number(groups, self.max_evidence, newest_first=meeting is not None)
         if omitted:
             unavailable.append(OMITTED.format(limit=self.max_evidence))
 
@@ -280,10 +281,13 @@ def recent_segments(question: Question, meeting: Meeting | None) -> list[Transcr
     return final[-MAX_RECENT_SEGMENTS:]
 
 
-def number(groups: list[list[Finding]], limit: int) -> tuple[list[Evidence], int]:
+def number(
+    groups: list[list[Finding]], limit: int, *, newest_first: bool = False
+) -> tuple[list[Evidence], int]:
     """e1, e2, ... in group order without repeats, and how many were left out. Over the limit,
     every group keeps an equal share of its first findings (round robin), so one long result
-    cannot crowd out the others."""
+    cannot crowd out the others. With newest_first the first group is the transcript, oldest
+    first, and keeps its last findings instead."""
     seen: set[tuple[str, str]] = set()
     unique: list[list[Finding]] = []
     for group in groups:
@@ -295,6 +299,7 @@ def number(groups: list[list[Finding]], limit: int) -> tuple[list[Evidence], int
                 kept.append(finding)
         unique.append(kept)
 
+    total = sum(len(g) for g in unique)
     shares = [0] * len(unique)
     room = limit
     while room > 0 and any(share < len(g) for share, g in zip(shares, unique, strict=True)):
@@ -303,9 +308,34 @@ def number(groups: list[list[Finding]], limit: int) -> tuple[list[Evidence], int
                 shares[i] += 1
                 room -= 1
 
+    if newest_first and unique:
+        unique[0] = unique[0][len(unique[0]) - shares[0] :]
+        shares[0] = len(unique[0])
     kept = [f for share, group in zip(shares, unique, strict=True) for f in group[:share]]
     evidence = [Evidence(id=f"e{i}", finding=f) for i, f in enumerate(kept, start=1)]
-    return evidence, sum(len(g) for g in unique) - len(kept)
+    return evidence, total - len(kept)
+
+
+FIGURES = re.compile(r"[\w.]*\d[\w.]*")
+NEGATIONS = re.compile(r"\b(?:not|no|never|none|nothing|nobody|neither|nor|cannot)\b|n't\b")
+
+
+def backed_by(text: str, history: Sequence[AskTurn]) -> bool:
+    """Whether the answer restates what the agent itself said earlier: nearly all its words, and
+    every figure (version, date, count) and negation, were in the agent's earlier turns. The
+    asker's own turns never count, so a premise in a question cannot back an answer."""
+    said = " ".join(turn.text for turn in history if turn.role == "agent").casefold()
+    answer = text.casefold()
+    words, known = terms(answer), terms(said)
+    if not (words and known) or len(words & known) < 0.8 * len(words):
+        return False
+    return figures(answer) <= figures(said) and set(NEGATIONS.findall(answer)) <= set(
+        NEGATIONS.findall(said)
+    )
+
+
+def figures(text: str) -> set[str]:
+    return {f.strip(".") for f in FIGURES.findall(text)}
 
 
 MARKERS = re.compile(r"\s*\[\s*e\d+(?:\s*,\s*e\d+)*\s*\]", re.IGNORECASE)
@@ -325,7 +355,9 @@ def finish(
 
     text = MARKERS.sub("", draft.text).strip()
     inference = MARKERS.sub("", draft.inference or "").strip()
-    from_conversation = not valid and draft.from_conversation and bool(question.history)
+    from_conversation = (
+        not evidence and draft.from_conversation and backed_by(text, question.history)
+    )
     if not valid and not from_conversation:
         text, inference = UNVERIFIED, ""  # nothing it says is backed by a source
     if not text:
@@ -394,13 +426,15 @@ def render_context(
     question: Question, meeting: Meeting | None, members: list[Person], today: date
 ) -> list[str]:
     agent = get_identity().agent_name
-    where = f'in the meeting "{meeting.title}"' if meeting else "on Home, outside any meeting"
+    where = (
+        f'in the meeting "{oneline(meeting.title)}"' if meeting else "on Home, outside any meeting"
+    )
     lines = [
         f"Today: {today.isoformat()} ({today:%A})",
-        f"Asked by: {question.asker_name} (id {question.asker_id}), {where}",
+        f"Asked by: {oneline(question.asker_name)} (id {oneline(question.asker_id)}), {where}",
         "",
         "Team members (id: name):",
-        *(f"- {p.id}: {p.name}" for p in members),
+        *(f"- {oneline(p.id)}: {oneline(p.name)}" for p in members),
     ]
     history = question.history[-MAX_HISTORY_TURNS:]
     if history:
@@ -423,7 +457,7 @@ def render_plan_prompt(
     if recent:
         lines += ["", "Recent transcript of this meeting ([time] speaker: text):"]
         lines += fenced(f"[{clock(s.t_start)}] {speaker(s, agent)}: {clip(s.text)}" for s in recent)
-    lines += ["", f"Question: {unfence(question.text)}", "", f"Tools (at most {max_calls} calls):"]
+    lines += ["", f"Question: {oneline(question.text)}", "", f"Tools (at most {max_calls} calls):"]
     lines += [render_tool(spec, toolbox.unavailable(spec.name)) for spec in toolbox.specs()]
     return "\n".join(lines)
 
@@ -431,13 +465,13 @@ def render_plan_prompt(
 def render_tool(spec: ToolSpec, unavailable: str | None) -> str:
     arguments = ", ".join(spec.parameters.get("properties", {}))
     line = f"- {spec.name}({arguments}): {spec.description}"
-    return line + (f" [not configured: {unavailable}]" if unavailable else "")
+    return line + (f" [not configured: {oneline(unavailable)}]" if unavailable else "")
 
 
 def render_answer_prompt(
     context: list[str], question: Question, evidence: list[Evidence], unavailable: list[str]
 ) -> str:
-    lines = [*context, "", f"Question: {unfence(question.text)}", ""]
+    lines = [*context, "", f"Question: {oneline(question.text)}", ""]
     if evidence:
         lines.append("Evidence ([id] source: content):")
         lines += fenced(
@@ -448,7 +482,7 @@ def render_answer_prompt(
     else:
         lines.append("Evidence: none was looked up; only the conversation above can answer.")
     if unavailable:
-        lines += ["", "Unavailable sources:", *(f"- {reason}" for reason in unavailable)]
+        lines += ["", "Unavailable sources:", *(f"- {oneline(reason)}" for reason in unavailable)]
     return "\n".join(lines)
 
 
@@ -458,7 +492,12 @@ def dated(finding: Finding) -> str:
 
 def fenced(lines: Iterable[str]) -> list[str]:
     """Quoted data between the markers, with any marker-like text inside it defused."""
-    return [BEGIN_DATA, *(unfence(line) for line in lines), END_DATA]
+    return [BEGIN_DATA, *(oneline(line) for line in lines), END_DATA]
+
+
+def oneline(text: str) -> str:
+    """Text from people or upstream errors as one defused line, so it cannot start its own."""
+    return unfence(" ".join(text.split()))
 
 
 def unfence(text: str) -> str:
