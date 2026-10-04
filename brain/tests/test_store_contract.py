@@ -25,9 +25,10 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import UTC, date, datetime, timedelta
 from uuid import uuid4
 
+import anyio
 import pytest
 
-from brain.store import InMemoryStore, NotFound, Store
+from brain.store import Conflict, InMemoryStore, NotFound, Store
 from contracts import (
     AGENT_PARTICIPANT_ID,
     Agenda,
@@ -105,11 +106,9 @@ async def ended_meeting(store: Store, team: Team, host: Person, title: str, star
     meeting = await store.create_meeting(
         team.id, title, host.id, scheduled_start=start, duration_min=30
     )
-    meeting = await store.start_meeting(meeting.id, start)
-    meeting = await store.set_status(meeting.id, "processing")
-    return await store.update_meeting(
-        meeting.model_copy(update={"ended_at": start + timedelta(minutes=30)})
-    )
+    await store.start_meeting(meeting.id, start)
+    end = start + timedelta(minutes=30)
+    return await store.transition_status(meeting.id, {"live"}, "processing", at=end)
 
 
 def segment(
@@ -356,6 +355,63 @@ async def test_starting_a_scheduled_meeting_makes_it_live_once(store):
         await store.start_meeting(new_id(), at(0))
 
 
+async def test_ending_a_live_meeting_records_when_and_happens_once(store):
+    team, alex, *_ = await two_teams(store)
+    meeting = await store.create_meeting(team.id, "Standup", alex.id)
+
+    ended = await store.transition_status(meeting.id, {"live"}, "processing", at=at(30))
+
+    assert (ended.status, ended.ended_at) == ("processing", at(30))
+    assert ended.started_at == meeting.started_at
+    assert await store.meeting(meeting.id) == ended
+    with pytest.raises(Conflict):
+        await store.transition_status(meeting.id, {"live"}, "processing", at=at(31))
+    assert await store.meeting(meeting.id) == ended
+
+
+async def test_ending_without_a_time_records_now(store):
+    team, alex, *_ = await two_teams(store)
+    meeting = await store.create_meeting(team.id, "Standup", alex.id)
+    before = datetime.now(UTC)
+
+    ended = await store.transition_status(meeting.id, {"live"}, "processing")
+
+    assert before <= ended.ended_at <= datetime.now(UTC)
+
+
+async def test_overlapping_ends_let_exactly_one_through(store):
+    team, alex, *_ = await two_teams(store)
+    meeting = await store.create_meeting(team.id, "Standup", alex.id)
+    outcomes: list[str] = []
+
+    async def end() -> None:
+        try:
+            await store.transition_status(meeting.id, {"live"}, "processing", at=at(30))
+            outcomes.append("ended")
+        except Conflict:
+            outcomes.append("conflict")
+
+    async with anyio.create_task_group() as tg:
+        for _ in range(5):
+            tg.start_soon(end)
+
+    assert sorted(outcomes) == ["conflict"] * 4 + ["ended"]
+
+
+async def test_a_transition_from_an_unexpected_status_is_refused(store):
+    team, alex, *_ = await two_teams(store)
+    meeting = await store.create_meeting(team.id, "Planning", alex.id, scheduled_start=at(60))
+
+    with pytest.raises(Conflict):
+        await store.transition_status(meeting.id, {"live"}, "processing")
+    assert await store.meeting(meeting.id) == meeting
+
+    reviewed = await store.transition_status(meeting.id, {"scheduled", "live"}, "live", at=at(61))
+    assert (reviewed.status, reviewed.started_at, reviewed.ended_at) == ("live", at(61), None)
+    with pytest.raises(NotFound):
+        await store.transition_status(new_id(), {"live"}, "processing")
+
+
 async def test_meetings_are_found_by_id_and_by_code(store):
     team, alex, *_ = await two_teams(store)
     first = await store.create_meeting(team.id, "Standup", alex.id)
@@ -405,6 +461,18 @@ async def test_participants_are_added_once(store):
         await store.add_participant(new_id(), alex.id)
 
 
+async def test_overlapping_joins_keep_every_participant(store):
+    team = await team_with(store, *(person(f"Dev Number{i}") for i in range(6)))
+    host, *others = await store.members(team.id)
+    meeting = await store.create_meeting(team.id, "Standup", host.id)
+
+    async with anyio.create_task_group() as tg:
+        for p in others:
+            tg.start_soon(store.add_participant, meeting.id, p.id)
+
+    assert sorted((await store.meeting(meeting.id)).participant_ids) == sorted(p.id for p in others)
+
+
 async def test_invitees_are_replaced_without_duplicates(store):
     team, alex, sarah, *_ = await two_teams(store)
     meeting = await store.create_meeting(
@@ -449,6 +517,31 @@ async def test_segments_are_saved_once_and_read_in_time_order(store):
 
     assert await store.transcript(meeting.id) == [early, late]
     assert await store.transcript(new_id()) == []
+
+
+async def test_segments_at_the_same_time_are_ordered_by_seg_id(store):
+    team, alex, sarah, *_ = await two_teams(store)
+    meeting = await store.create_meeting(team.id, "Standup", alex.id)
+    b = segment(meeting.id, 1, alex, t=10).model_copy(update={"seg_id": "b"})
+    a = segment(meeting.id, 2, sarah, t=10).model_copy(update={"seg_id": "a"})
+
+    await store.add_segments(meeting.id, [b, a])
+
+    assert await store.transcript(meeting.id) == [a, b]
+
+
+async def test_a_seg_id_is_only_a_duplicate_within_its_own_meeting(store):
+    team, alex, *_ = await two_teams(store)
+    first = await store.create_meeting(team.id, "Standup", alex.id)
+    second = await store.create_meeting(team.id, "Retro", alex.id)
+    mine = segment(first.id, 1, alex).model_copy(update={"seg_id": "seg-1"})
+    theirs = segment(second.id, 1, alex).model_copy(update={"seg_id": "seg-1"})
+
+    await store.add_segments(first.id, [mine])
+    await store.add_segments(second.id, [theirs])
+
+    assert await store.transcript(first.id) == [mine]
+    assert await store.transcript(second.id) == [theirs]
 
 
 async def test_segments_for_a_missing_meeting_are_refused(store):
@@ -597,9 +690,11 @@ async def test_saving_a_report_makes_its_tasks_and_decisions_queryable(store):
 
     assert [t.id for t in await store.tasks(team.id)] == [t.id for t in report.tasks]
     assert [d.id for d in await store.decisions(team.id)] == [d.id for d in report.decisions]
-    assert await store.task(report.tasks[0].id) == report.tasks[0]
+    assert await store.task(team.id, report.tasks[0].id) == report.tasks[0]
     with pytest.raises(NotFound):
-        await store.task(new_id())
+        await store.task(other.id, report.tasks[0].id)
+    with pytest.raises(NotFound):
+        await store.task(team.id, new_id())
 
 
 async def test_tasks_can_be_filtered_by_owner(store):
@@ -623,7 +718,7 @@ async def test_an_edited_task_is_saved_and_shows_in_the_report(store):
     )
     assert await store.update_task(edited) == edited
 
-    assert await store.task(edited.id) == edited
+    assert await store.task(team.id, edited.id) == edited
     assert (await store.report(meeting.id)).tasks == [report.tasks[0], edited]
     assert [t.id for t in await store.tasks(team.id, owner_id=sarah.id)] == [edited.id]
     with pytest.raises(NotFound):
@@ -693,7 +788,7 @@ async def test_saving_a_report_again_replaces_its_tasks_and_decisions(store):
     assert [d.text for d in await store.decisions(team.id)] == ["C"]
     assert [t.title for t in await store.tasks(team.id)] == ["Z"]
     with pytest.raises(NotFound):
-        await store.task(f"{meeting.id}-task-2")
+        await store.task(team.id, f"{meeting.id}-task-2")
 
 
 async def test_report_progress_is_none_until_saved_and_keeps_its_error(store):
