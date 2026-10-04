@@ -60,7 +60,10 @@ from teams t
 TASK = "id, meeting_id, title, description, owner_id, due, t, quote, include, key, jira_status"
 DECISION = "id, meeting_id, text, made_by, t, quote, status, relation_type, relation_decision_id"
 AGENDA = "generated_at, updated_at, current_item_id, tracked_until, revision"
-SEGMENT = "seg_id, meeting_id, speaker_id, speaker_name, text, is_final, t_start, t_end"
+SEGMENT = (
+    "seg_id, meeting_id, speaker_id, speaker_name, text, is_final, t_start, t_end,"
+    " language, original_text"
+)
 FACT_CHECK = (
     "id, claim, speaker_name, verdict, confidence, severity, snippet_ids, sources, raised_hand,"
     " visibility, recipient_id, t, created_at"
@@ -466,7 +469,7 @@ class PostgresStore:
             await cur.executemany(
                 f"insert into transcript_segments ({SEGMENT})"
                 " values (%(seg_id)s, %(meeting)s, %(speaker_id)s, %(speaker_name)s, %(text)s,"
-                " %(is_final)s, %(t_start)s, %(t_end)s)"
+                " %(is_final)s, %(t_start)s, %(t_end)s, %(language)s, %(original_text)s)"
                 " on conflict (meeting_id, seg_id) do nothing",
                 [s.model_dump() | {"meeting": meeting_id} for s in segments],
             )

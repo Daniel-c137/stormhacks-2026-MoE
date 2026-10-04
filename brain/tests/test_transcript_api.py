@@ -114,7 +114,11 @@ def test_worker_saves_final_segments_and_teammates_read_them_back(worker, client
 
     assert ingest(worker, meeting["id"], first, second).status_code == 204
 
-    assert transcript(client_as(SARAH), meeting["id"]).json() == [first, second]
+    untranslated = {"language": None, "original_text": None}  # English speech (#106)
+    assert transcript(client_as(SARAH), meeting["id"]).json() == [
+        first | untranslated,
+        second | untranslated,
+    ]
 
 
 def test_transcript_is_in_time_order_whatever_order_segments_arrive(worker, client_as):
