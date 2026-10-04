@@ -10,6 +10,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=REPO_ROOT / ".env", extra="ignore")
 
+    database_url: str | None = None  # Supabase Postgres (or any Postgres with the migrations)
     supabase_url: str | None = None
     supabase_service_role_key: str | None = None
     supabase_jwt_secret: str | None = None  # legacy HS256 secret; asymmetric keys use the JWKS
