@@ -521,6 +521,10 @@ def render_answer_prompt(
     return "\n".join(lines)
 
 
+# Everything str.splitlines() breaks at, so no quoted item can start a line of its own.
+LINE_BREAKS = re.compile(r"[\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]+")
+
+
 def render_evidence(item: Evidence) -> list[str]:
     finding = item.finding
     if finding.snippet is None:
@@ -528,7 +532,7 @@ def render_evidence(item: Evidence) -> list[str]:
     snippet = finding.snippet
     numbered = [
         f"{n:>4} | {clip_line(line)}"
-        for n, line in enumerate(snippet.code.splitlines(), start=snippet.start_line)
+        for n, line in enumerate(snippet.code.split("\n"), start=snippet.start_line)
     ]
     return [f"[{item.id}] GitHub code {finding.source.label}:", *numbered]
 
@@ -543,8 +547,9 @@ def dated(finding: Finding) -> str:
 
 
 def fenced(lines: Iterable[str]) -> list[str]:
-    """Quoted data between the markers, with any marker-like text inside it defused."""
-    return [BEGIN_DATA, *(oneline(line) for line in lines), END_DATA]
+    """Quoted data between the markers, with any marker-like text inside it defused. Each item
+    stays on its own line, keeping its spacing (code indentation, aligned line numbers)."""
+    return [BEGIN_DATA, *(unfence(LINE_BREAKS.sub(" ", line)) for line in lines), END_DATA]
 
 
 def oneline(text: str) -> str:

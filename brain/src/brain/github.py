@@ -66,7 +66,12 @@ class CodeFile(BaseModel):
     text: str
 
     def lines(self) -> list[str]:
-        return self.text.splitlines()
+        """The file's lines as GitHub numbers them: split at newlines only (a form feed is not
+        a line break), without carriage returns or the empty line after a final newline."""
+        lines = [line.removesuffix("\r") for line in self.text.split("\n")]
+        if lines and not lines[-1]:
+            lines.pop()
+        return lines
 
     def url(self, start_line: int, end_line: int) -> str:
         """The lines on GitHub; a permalink when the ref is a commit."""
