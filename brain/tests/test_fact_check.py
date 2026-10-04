@@ -28,6 +28,7 @@ from fact_check_support import (
 from pipeline_support import GatedLLM
 
 from brain.agent.ask import BEGIN_DATA, END_DATA, PlannedCall
+from brain.agent.code import code_evidence
 from brain.agent.factcheck import (
     HAND_CONFIDENCE,
     MAX_CLAIMS,
@@ -41,10 +42,12 @@ from brain.agent.factcheck import (
 )
 from brain.agent.pipeline import ReportPipeline
 from brain.agent.team_tools import TeamToolbox
+from brain.api.deps import get_fact_checker
 from brain.config import Settings
 from brain.github import GitHubReader
 from brain.llm import MockLLM
 from brain.report import ReportExtraction
+from brain.store import InMemoryStore
 from contracts import (
     AGENT_PARTICIPANT_ID,
     CodeSnippet,
@@ -609,6 +612,41 @@ async def test_without_code_search_a_code_query_finds_nothing(store, fake_jira, 
 
     assert response.checks == []
     assert "code search" in prompts(llm, FactCheckPlan)[0].lower()
+
+
+async def test_code_search_is_offered_once_through_code_query(store, fake_jira, github):
+    meeting = await live(store)
+    await say(store, meeting, (SARAH, "The refund retry limit is set to 5 retries.", 10))
+    llm = scripted(plan(), verdict())
+
+    await checker(llm, store, fake_jira, github, code=code_evidence).tick(meeting, 60)
+
+    menu = prompts(llm, FactCheckPlan)[0]
+    assert "code_query" in menu
+    assert "github_code" not in menu
+
+
+async def test_a_planned_github_code_call_is_not_run(store, fake_jira, github):
+    meeting = await live(store)
+    await say(store, meeting, (SARAH, "The refund retry limit is set to 5 retries.", 10))
+    llm = scripted(
+        plan(check("c1", PlannedCall(tool="github_code", query="refund window"))),
+        verdict(cite=()),
+    )
+
+    await checker(llm, store, fake_jira, github, code=code_evidence).tick(meeting, 60)
+
+    assert prompts(llm, FactCheckPlan)  # the claim reached the plan
+    assert "search_code" not in [tool for tool, _ in github.calls]
+
+
+def test_the_app_checks_claims_against_the_code():
+    settings = Settings(_env_file=None)
+    fact_checker = get_fact_checker(
+        store=InMemoryStore(), settings=settings, make_llm=lambda: MockLLM(), memory=None
+    )
+
+    assert fact_checker.code is code_evidence
 
 
 # merged vs released: the read tools
