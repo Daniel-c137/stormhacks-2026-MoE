@@ -60,7 +60,9 @@ pnpm --filter board dev                              # the board, http://localho
 
 With `NEXT_PUBLIC_API_URL=/api` (as in `.env.example`), `next dev` forwards `/api/*` to `BRAIN_URL`, so the board and the brain share an origin locally just as behind Caddy; the brain sends no CORS headers. Meetings need LiveKit: for a local server, `docker run --rm -p 7880:7880 -p 7881:7881 -p 7882:7882/udp livekit/livekit-server --dev --bind 0.0.0.0 --node-ip 127.0.0.1` with `LIVEKIT_URL=ws://localhost:7880`, `LIVEKIT_API_KEY=devkey` and `LIVEKIT_API_SECRET=secret` (`--node-ip` makes it advertise an address the browser can reach from outside the container).
 
-`uv run world-reset` clears the mocks' write journal. The realtime worker needs LiveKit and ElevenLabs credentials: `uv run realtime start` (its room entrypoint is still being built, so it does not join meetings yet).
+`uv run world-reset` clears the mocks' write journal.
+
+The realtime worker joins every meeting as the agent: `uv run realtime start` (or `dev` to reload on changes). It needs `LIVEKIT_*`, `ELEVENLABS_API_KEY`, `ELEVENLABS_STT_MODEL` (e.g. `scribe_v2_realtime`), `ELEVENLABS_TTS_MODEL`, `ELEVENLABS_VOICE_ID`, `BRAIN_URL` and `BRAIN_INTERNAL_TOKEN`, and exits naming whatever is missing. LiveKit dispatches it automatically to each room created while it is registered, so start it before people join; it leaves any room that is not a live meeting.
 
 ## Tests
 
@@ -75,6 +77,13 @@ Live tests call real services and spend quota. They skip unless `.env` has what 
 
 ```sh
 uv run pytest brain -m live -k <name> -rs
+```
+
+The worker's end-to-end test (`realtime/tests/test_live_join.py`) runs the brain on embedded Postgres, the worker and a synthetic participant who speaks a macOS `say` recording, against a local LiveKit server. It spends about 6 s of Scribe audio, two Gemini answers and one short spoken answer:
+
+```sh
+LIVEKIT_URL=ws://localhost:7880 LIVEKIT_API_KEY=devkey LIVEKIT_API_SECRET=secret \
+ELEVENLABS_STT_MODEL=scribe_v2_realtime uv run pytest realtime -m live -k join -s
 ```
 
 ## Teams, accounts and demo data

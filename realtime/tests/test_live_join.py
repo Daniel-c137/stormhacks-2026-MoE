@@ -165,8 +165,6 @@ def world(pg_server, tmp_path_factory) -> Iterator[World]:  # noqa: F811
         brain_env = {
             **os.environ,
             "DATABASE_URL": dsn,
-            "SUPABASE_URL": "",
-            "SUPABASE_JWT_SECRET": secrets.token_urlsafe(32),
             "BRAIN_INTERNAL_TOKEN": token,
             "GITHUB_MCP_URL": "",
             "JIRA_MCP_URL": "",
