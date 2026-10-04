@@ -14,8 +14,13 @@ dependencies = [
 [project.scripts]
 realtime = "realtime_worker.worker:main"
 
+[dependency-groups]
+# The contract tests post through the real brain app in-process.
+dev = ["moe-brain"]
+
 [tool.uv.sources]
 moe-contracts = { workspace = true }
+moe-brain = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
