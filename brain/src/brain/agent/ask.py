@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from brain.config import Settings
 from brain.llm import LLM
 from brain.memory import MeetingMemory
+from brain.report.decisions import terms
 from brain.report.extraction import clock, speaker
 from brain.store import Store
 from contracts import (
@@ -220,7 +221,7 @@ class ToolOrchestrator:
                 for s in recent
             ]
             groups.insert(0, said)
-        evidence, omitted = number(groups, self.max_evidence)
+        evidence, omitted = number(groups, self.max_evidence, newest_first=meeting is not None)
         if omitted:
             unavailable.append(OMITTED.format(limit=self.max_evidence))
 
@@ -280,10 +281,13 @@ def recent_segments(question: Question, meeting: Meeting | None) -> list[Transcr
     return final[-MAX_RECENT_SEGMENTS:]
 
 
-def number(groups: list[list[Finding]], limit: int) -> tuple[list[Evidence], int]:
+def number(
+    groups: list[list[Finding]], limit: int, *, newest_first: bool = False
+) -> tuple[list[Evidence], int]:
     """e1, e2, ... in group order without repeats, and how many were left out. Over the limit,
     every group keeps an equal share of its first findings (round robin), so one long result
-    cannot crowd out the others."""
+    cannot crowd out the others. With newest_first the first group is the transcript, oldest
+    first, and keeps its last findings instead."""
     seen: set[tuple[str, str]] = set()
     unique: list[list[Finding]] = []
     for group in groups:
@@ -295,6 +299,7 @@ def number(groups: list[list[Finding]], limit: int) -> tuple[list[Evidence], int
                 kept.append(finding)
         unique.append(kept)
 
+    total = sum(len(g) for g in unique)
     shares = [0] * len(unique)
     room = limit
     while room > 0 and any(share < len(g) for share, g in zip(shares, unique, strict=True)):
@@ -303,9 +308,19 @@ def number(groups: list[list[Finding]], limit: int) -> tuple[list[Evidence], int
                 shares[i] += 1
                 room -= 1
 
+    if newest_first and unique:
+        unique[0] = unique[0][len(unique[0]) - shares[0] :]
+        shares[0] = len(unique[0])
     kept = [f for share, group in zip(shares, unique, strict=True) for f in group[:share]]
     evidence = [Evidence(id=f"e{i}", finding=f) for i, f in enumerate(kept, start=1)]
-    return evidence, sum(len(g) for g in unique) - len(kept)
+    return evidence, total - len(kept)
+
+
+def backed_by(text: str, history: Sequence[AskTurn]) -> bool:
+    """Whether most of the answer's words were already said in the conversation."""
+    said = set().union(*(terms(turn.text) for turn in history)) if history else set()
+    words = terms(text)
+    return bool(said and words) and len(words & said) * 2 >= len(words)
 
 
 MARKERS = re.compile(r"\s*\[\s*e\d+(?:\s*,\s*e\d+)*\s*\]", re.IGNORECASE)
@@ -325,7 +340,9 @@ def finish(
 
     text = MARKERS.sub("", draft.text).strip()
     inference = MARKERS.sub("", draft.inference or "").strip()
-    from_conversation = not valid and draft.from_conversation and bool(question.history)
+    from_conversation = (
+        not evidence and draft.from_conversation and backed_by(text, question.history)
+    )
     if not valid and not from_conversation:
         text, inference = UNVERIFIED, ""  # nothing it says is backed by a source
     if not text:
@@ -394,13 +411,15 @@ def render_context(
     question: Question, meeting: Meeting | None, members: list[Person], today: date
 ) -> list[str]:
     agent = get_identity().agent_name
-    where = f'in the meeting "{meeting.title}"' if meeting else "on Home, outside any meeting"
+    where = (
+        f'in the meeting "{oneline(meeting.title)}"' if meeting else "on Home, outside any meeting"
+    )
     lines = [
         f"Today: {today.isoformat()} ({today:%A})",
-        f"Asked by: {question.asker_name} (id {question.asker_id}), {where}",
+        f"Asked by: {oneline(question.asker_name)} (id {oneline(question.asker_id)}), {where}",
         "",
         "Team members (id: name):",
-        *(f"- {p.id}: {p.name}" for p in members),
+        *(f"- {oneline(p.id)}: {oneline(p.name)}" for p in members),
     ]
     history = question.history[-MAX_HISTORY_TURNS:]
     if history:
@@ -431,7 +450,7 @@ def render_plan_prompt(
 def render_tool(spec: ToolSpec, unavailable: str | None) -> str:
     arguments = ", ".join(spec.parameters.get("properties", {}))
     line = f"- {spec.name}({arguments}): {spec.description}"
-    return line + (f" [not configured: {unavailable}]" if unavailable else "")
+    return line + (f" [not configured: {oneline(unavailable)}]" if unavailable else "")
 
 
 def render_answer_prompt(
@@ -448,7 +467,7 @@ def render_answer_prompt(
     else:
         lines.append("Evidence: none was looked up; only the conversation above can answer.")
     if unavailable:
-        lines += ["", "Unavailable sources:", *(f"- {reason}" for reason in unavailable)]
+        lines += ["", "Unavailable sources:", *(f"- {oneline(reason)}" for reason in unavailable)]
     return "\n".join(lines)
 
 
@@ -458,7 +477,12 @@ def dated(finding: Finding) -> str:
 
 def fenced(lines: Iterable[str]) -> list[str]:
     """Quoted data between the markers, with any marker-like text inside it defused."""
-    return [BEGIN_DATA, *(unfence(line) for line in lines), END_DATA]
+    return [BEGIN_DATA, *(oneline(line) for line in lines), END_DATA]
+
+
+def oneline(text: str) -> str:
+    """Text from people or upstream errors as one defused line, so it cannot start its own."""
+    return unfence(" ".join(text.split()))
 
 
 def unfence(text: str) -> str:
