@@ -1,4 +1,4 @@
-from . import agenda, auth, directory, history, internal, meetings, team
+from . import accounts, agenda, auth, directory, history, internal, meetings, team
 
 routers = [
     auth.router,
@@ -6,6 +6,7 @@ routers = [
     agenda.router,
     history.router,
     team.router,
+    accounts.router,
     internal.router,
     directory.router,
 ]

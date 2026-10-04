@@ -10,6 +10,13 @@ export interface DecisionRelation {
   decision_id: string;
 }
 
+/** One thing said on the way to a decision: a few words on what, and where it was said. */
+export interface DecisionStep {
+  text: string;
+  t: number; // seconds from the meeting start, where this part of the conversation begins
+  seg_ids: string[]; // the transcript segments it describes, in time order
+}
+
 export interface Decision {
   id: string;
   meeting_id: string;
@@ -17,6 +24,9 @@ export interface Decision {
   made_by: string;
   t: number;
   quote: string;
+  /** What was said that led to it, oldest first. Empty when none was recorded: the decision then
+   * has only its quote. */
+  chain?: DecisionStep[];
   status: DecisionStatus;
   relation?: DecisionRelation | null;
 }

@@ -6,7 +6,7 @@ import type { TranscriptSegment } from "./transcript";
 
 export type AskTurnRole = "user" | "agent";
 
-/** POST /auth/login. There is no public sign-up; accounts come from `brain add-user`. */
+/** POST /auth/login. There is no public sign-up; accounts come from `brain add-user` or an admin (POST /team/accounts). */
 export interface LoginRequest {
   email: string;
   password: string;
@@ -23,6 +23,20 @@ export interface LoginResponse {
 export interface PasswordChange {
   current_password: string;
   new_password: string;
+}
+
+/** POST /team/accounts, admin only: a person on the admin's own team with an email login. */
+export interface CreateAccountRequest {
+  name: string;
+  email: string;
+  title?: string | null;
+  is_admin?: boolean;
+}
+
+/** The generated password is returned only this once; nothing is emailed. */
+export interface CreateAccountResponse {
+  person: Person;
+  password: string;
 }
 
 /** Without scheduled_start the meeting starts now; with it, the meeting waits as scheduled. */

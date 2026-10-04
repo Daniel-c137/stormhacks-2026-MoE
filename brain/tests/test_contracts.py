@@ -18,6 +18,8 @@ from contracts import (
     AgendaUpdate,
     AskRequest,
     ConnectorStatus,
+    CreateAccountRequest,
+    CreateAccountResponse,
     CreateMeetingRequest,
     FactCheck,
     FactCheckRequest,
@@ -67,6 +69,26 @@ def test_people_have_an_optional_email_and_photo():
     alex = Person(id="u1", name="Alex Chen", short="Alex", initials="AC")
 
     assert (alex.email, alex.photo_url) == (None, None)
+
+
+def test_a_person_is_no_admin_unless_marked_and_old_payloads_still_parse():
+    alex = Person.model_validate(
+        {"id": "u1", "name": "Alex Chen", "short": "Alex", "initials": "AC"}
+    )
+
+    assert alex.is_admin is False
+    assert Person.model_validate(alex.model_dump() | {"is_admin": True}).is_admin is True
+
+
+def test_creating_an_account_names_the_person_and_returns_the_password_once():
+    body = CreateAccountRequest(name="Priya Natarajan", email="priya@example.com")
+
+    assert (body.title, body.is_admin) == (None, False)
+    person = Person(id="u2", name="Priya Natarajan", short="Priya", initials="PN")
+    assert set(CreateAccountResponse(person=person, password="p" * 24).model_dump()) == {
+        "person",
+        "password",
+    }
 
 
 def test_requests_from_before_the_v0_design_still_validate():

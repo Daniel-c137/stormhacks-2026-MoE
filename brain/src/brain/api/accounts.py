@@ -1,0 +1,62 @@
+"""Accounts an admin creates from the settings page (board -> brain). There is no public sign-up;
+the server makes the password and returns it once, and nothing is emailed."""
+
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.concurrency import run_in_threadpool
+
+from contracts import CreateAccountRequest, CreateAccountResponse, Person
+
+from ..accounts import (
+    MAX_NAME_LENGTH,
+    InvalidAccount,
+    clean_email,
+    clean_name,
+    existing_person,
+    generate_password,
+    save_account,
+)
+from ..auth import hash_password
+from ..store import Conflict, Store
+from .deps import get_store, require_admin, user_team
+
+router = APIRouter(tags=["team"])
+
+EMAIL_IN_USE = "Someone already signs in with this email"
+
+
+@router.post("/team/accounts", status_code=201)
+async def create_account(
+    body: CreateAccountRequest,
+    admin: Person = Depends(require_admin),
+    store: Store = Depends(get_store),
+) -> CreateAccountResponse:
+    """A person on the admin's own team with an email and password login. The password is
+    generated here and returned only in this response; the person can change it afterwards."""
+    team = await user_team(store, admin)
+    try:
+        name = clean_name(body.name)
+        email = clean_email(body.email)
+    except InvalidAccount as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
+    title = " ".join((body.title or "").split()) or None
+    if title and len(title) > MAX_NAME_LENGTH:
+        raise HTTPException(
+            status_code=422, detail=f"Title must be at most {MAX_NAME_LENGTH} characters"
+        )
+    if await existing_person(store, team, email) is not None:
+        raise HTTPException(status_code=409, detail=EMAIL_IN_USE)
+    password = generate_password()
+    hashed = await run_in_threadpool(hash_password, password)  # argon2 is deliberately slow
+    try:
+        person = await save_account(
+            store,
+            team,
+            name=name,
+            email=email,
+            password_hash=hashed,
+            title=title,
+            is_admin=body.is_admin,
+        )
+    except Conflict:  # only a race with another account for the same email gets here
+        raise HTTPException(status_code=409, detail=EMAIL_IN_USE) from None
+    return CreateAccountResponse(person=person, password=password)

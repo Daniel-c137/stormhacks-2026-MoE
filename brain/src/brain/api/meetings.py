@@ -34,6 +34,7 @@ from .deps import (
     get_runner,
     get_settings,
     get_store,
+    host_or_admin,
     team_meeting,
     user_team,
 )
@@ -68,8 +69,7 @@ async def end_live_meeting(store: Store, meeting_id: str) -> tuple[Meeting, bool
 
 async def host_meeting(store: Store, user: Person, meeting_id: str) -> Meeting:
     meeting = await team_meeting(store, user, meeting_id)
-    if meeting.host_id != user.id:
-        raise HTTPException(status_code=403, detail="Only the host can change invitees")
+    host_or_admin(meeting, user)
     if meeting.status not in ("scheduled", "live"):
         raise HTTPException(status_code=409, detail="This meeting has ended")
     return meeting
@@ -175,11 +175,10 @@ async def end_meeting(
     runner: PipelineRunner = Depends(get_runner),
     rooms: Rooms = Depends(get_rooms),
 ) -> Meeting:
-    """Host only. Closes the LiveKit room, so nobody keeps talking into a meeting being written
-    up, and returns at once; the meeting is written up in the background."""
+    """The host or an admin. Closes the LiveKit room, so nobody keeps talking into a meeting being
+    written up, and returns at once; the meeting is written up in the background."""
     meeting = await team_meeting(store, user, meeting_id)
-    if meeting.host_id != user.id:
-        raise HTTPException(status_code=403, detail="Only the host can end the meeting")
+    host_or_admin(meeting, user)
     meeting, ended = await end_live_meeting(store, meeting.id)
     if ended:  # only one end ever gets here; run() saves the first progress itself
         try:
@@ -224,7 +223,7 @@ async def invite(
     user: Person = Depends(current_user),
     store: Store = Depends(get_store),
 ) -> Meeting:
-    """Host only. Adds workspace members to the invitees."""
+    """The host or an admin. Adds workspace members to the invitees."""
     meeting = await host_meeting(store, user, meeting_id)
     invitees = await team_invitees(
         store, meeting.team_id, meeting.host_id, [*meeting.invitee_ids, *body.person_ids]
@@ -239,7 +238,7 @@ async def uninvite(
     user: Person = Depends(current_user),
     store: Store = Depends(get_store),
 ) -> Meeting:
-    """Host only. Removing someone who is not invited changes nothing."""
+    """The host or an admin. Removing someone who is not invited changes nothing."""
     meeting = await host_meeting(store, user, meeting_id)
     if person_id not in meeting.invitee_ids:
         return meeting

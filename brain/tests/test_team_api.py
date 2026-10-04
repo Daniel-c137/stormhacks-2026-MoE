@@ -156,11 +156,11 @@ def test_settings_default_until_saved(client_as):
     assert settings["timezone"] == "UTC"
 
 
-def test_any_member_saves_settings_that_teammates_then_read(client_as):
-    response = client_as(SARAH).put("/settings", json=settings_body())
+def test_the_admin_saves_settings_that_teammates_then_read(client_as):
+    response = client_as(ALEX).put("/settings", json=settings_body())
 
     assert response.status_code == 200
-    saved = client_as(ALEX).get("/settings").json()
+    saved = client_as(SARAH).get("/settings").json()
     assert saved == response.json()
     assert saved["github"]["repo"] == "acme/checkout"
     assert saved["jira"]["project"] == "DS"
@@ -175,7 +175,8 @@ def test_any_member_saves_settings_that_teammates_then_read(client_as):
 
 
 def test_settings_are_always_saved_for_the_callers_own_team(client_as):
-    response = client_as(OUTSIDER).put("/settings", json=settings_body(voice="hijack"))
+    olga_as_admin = OUTSIDER.model_copy(update={"is_admin": True})
+    response = client_as(olga_as_admin).put("/settings", json=settings_body(voice="hijack"))
 
     assert response.status_code == 200
     assert response.json()["team_id"] != TEAM.id

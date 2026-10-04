@@ -36,6 +36,7 @@ import {
   useTranscript,
 } from "@/hooks/useLive";
 import { askInMeeting, describeError, endMeeting } from "@/lib/api";
+import { hostOrAdmin } from "@/lib/roles";
 import { initialsOf, shortOf } from "@/lib/format";
 import { translationNote } from "@/lib/translation";
 import { publish } from "@/lib/room";
@@ -186,7 +187,7 @@ function RoomView({
   const [mentionedAt, setMentionedAt] = useState<number | null>(null);
   const [chatError, setChatError] = useState("");
 
-  const isHost = meeting.host_id === me.id;
+  const isHost = hostOrAdmin(meeting, me); // the host's controls are an admin's too
   const humans = participants.filter((p) => !p.is_agent);
   const agentPresent = participants.some((p) => p.is_agent);
   const handUp = participants.find((p) => p.id === me.id)?.hand_raised ?? false;
@@ -539,17 +540,17 @@ function RoomView({
       {(agenda.notices.length > 0 || nudges.length > 0) && (
         <div className="room-notes" data-chat={chatOpen}>
           {agenda.notices.map((n) => (
-            <div key={n.key} className="note" role="status" data-leaving={n.leaving}>
-              <span className="note-ic" aria-hidden="true">
+            <div key={n.key} className="agenda-note" role="status" data-leaving={n.leaving}>
+              <span className="agenda-note-ic" aria-hidden="true">
                 <Icon name="check" />
               </span>
-              <div className="note-main">
-                <span className="note-kind">Agenda item covered</span>
-                <b className="note-title">{n.title}</b>
+              <div className="agenda-note-main">
+                <span className="agenda-note-kind">Agenda item covered</span>
+                <b className="agenda-note-title">{n.title}</b>
               </div>
               <button
                 type="button"
-                className="note-undo"
+                className="agenda-note-undo"
                 onClick={() => {
                   checkItem({ id: n.item_id }, false);
                   agenda.dismissNotice(n.key);

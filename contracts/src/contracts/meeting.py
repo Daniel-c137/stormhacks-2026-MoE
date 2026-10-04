@@ -17,6 +17,7 @@ class Person(BaseModel):
     title: str | None = None
     email: str | None = None
     photo_url: str | None = None
+    is_admin: bool = False  # changes team settings, creates accounts, manages any meeting
 
 
 class Team(BaseModel):

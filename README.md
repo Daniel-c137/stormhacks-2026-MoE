@@ -88,14 +88,21 @@ ELEVENLABS_STT_MODEL=scribe_v2_realtime uv run pytest realtime -m live -k join -
 
 ## Teams, accounts and demo data
 
-There is no public sign-up. Create a team and its people with the brain's CLI; `add-user` prints a one-time password unless you pipe one in with `--password-stdin`:
+There is no public sign-up. Create a team and its first admin with the brain's CLI; `add-user` prints a one-time password unless you pipe one in with `--password-stdin`:
 
 ```sh
 uv run brain add-team --id <team-id> --name "<team name>"
-uv run brain add-user --team <team-id> --name "<full name>" --email <email>
+uv run brain add-user --team <team-id> --name "<full name>" --email <email> --admin
 ```
 
-The demo seed loads the DropSubs team, its settings and its past meetings (written up by the real models) and gives each person a login with their seeded email. `WORLD_SEED_PASSWORD` sets one demo password for everyone; otherwise each person gets a generated one, printed once. Running it again skips what's already there.
+Only an admin changes the team's settings (connectors, the agent's voice and fact-checking, who may allow answers, time zone) and creates the other accounts, in Settings → Members, which shows the generated password once (`POST /team/accounts`). What a meeting's host does (ending it, changing its invitees, retrying its write-up, approving its push to Jira) an admin may do too, so a meeting whose host left can still be managed. Everyone keeps their own profile, photo and password. `add-user` without `--admin` adds someone who is not an admin, and leaves an existing admin one. To grant or revoke admin later (the brain checks on every request, so it takes effect at once; a team's last admin can't be revoked):
+
+```sh
+uv run brain set-admin --email <email>
+uv run brain set-admin --email <email> --revoke
+```
+
+The demo seed loads the DropSubs team, its settings and its past meetings (written up by the real models) and gives each person a login with their seeded email; `danial@dropsubs.example` is the team's admin. `WORLD_SEED_PASSWORD` sets one demo password for everyone; otherwise each person gets a generated one, printed once. Running it again skips what's already there.
 
 ```sh
 uv run world-seed --snapshot demo                   # the DropSubs team, logins, settings and past meetings
@@ -119,10 +126,10 @@ One machine with Docker runs everything from [`docker-compose.yml`](docker-compo
    docker compose --env-file deploy/.env ps
    ```
    To apply migrations by hand: `docker compose --env-file deploy/.env run --rm migrate`.
-4. Create the first team and account (`add-user` prints a one-time password):
+4. Create the first team and its admin (`add-user` prints a one-time password); the admin then creates the other accounts in Settings:
    ```sh
    docker compose --env-file deploy/.env exec brain brain add-team --id <team-id> --name "<team name>"
-   docker compose --env-file deploy/.env exec brain brain add-user --team <team-id> --name "<full name>" --email <email>
+   docker compose --env-file deploy/.env exec brain brain add-user --team <team-id> --name "<full name>" --email <email> --admin
    ```
    Or load the demo instead; it creates the DropSubs people with logins (the brain image includes the world CLIs):
    ```sh

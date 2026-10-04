@@ -7,6 +7,7 @@ from contracts import (
     AGENT_PARTICIPANT_ID,
     AgendaItem,
     Decision,
+    DecisionStep,
     FactCheck,
     Report,
     Risk,
@@ -16,8 +17,11 @@ from contracts import (
     get_identity,
 )
 
-from .extraction import ReportExtraction, render_prompt, system_prompt
+from .extraction import ExtractedStep, ReportExtraction, render_prompt, system_prompt
 from .models import TranscriptInput
+
+CHAIN_MAX = 5
+"""Steps kept of the chain behind a decision: the last ones, which end at the decision."""
 
 
 async def build_report(
@@ -128,9 +132,20 @@ class Grounding:
                     made_by=self.names.get(decision.made_by_id or "") or said_by(cited[0]),
                     t=cited[0].t_start,
                     quote=cited[0].text,
+                    chain=self.chain(decision.chain),
                 )
             )
         return decisions
+
+    def chain(self, steps: list[ExtractedStep]) -> list[DecisionStep]:
+        """The steps the transcript supports, in the order they were said."""
+        chain: list[DecisionStep] = []
+        for step in steps:
+            cited = sorted(self.evidence(step.evidence), key=lambda s: s.t_start)
+            if cited and (text := step.text.strip()):
+                seg_ids = [s.seg_id for s in cited]
+                chain.append(DecisionStep(text=text, t=cited[0].t_start, seg_ids=seg_ids))
+        return sorted(chain, key=lambda step: step.t)[-CHAIN_MAX:]
 
     def evidence(self, labels: list[str]) -> list[TranscriptSegment]:
         cited = dict.fromkeys(label.strip() for label in labels)
