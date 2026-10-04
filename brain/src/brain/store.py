@@ -59,11 +59,12 @@ class JiraAccount(BaseModel):
 
 
 class GitHubAccount(BaseModel):
-    """The GitHub account whose fine-grained personal access token an admin connected for a
-    team: the team's GitHub reads go to GitHub's hosted MCP server with it. The token is kept
-    only sealed (brain.sealing); it never leaves the brain."""
+    """The GitHub account whose fine-grained personal access token an admin connected one of a
+    team's repositories with: that repository is read through GitHub's hosted MCP server with
+    it. The token is kept only sealed (brain.sealing); it never leaves the brain."""
 
     team_id: str
+    repo: str  # owner/name, in lower case
     login: str  # the token's owner on GitHub, shown as @login
     sealed_token: str
     connected_by: str  # the admin's person id
@@ -151,16 +152,19 @@ class Store(Protocol):
         """Removing none is not an error."""
         ...
 
-    async def github_account(self, team_id: str) -> GitHubAccount | None:
-        """The team's connected GitHub account, or None."""
+    async def github_accounts(self, team_id: str) -> list[GitHubAccount]:
+        """The accounts the team's repositories were connected with, one per repository, by
+        repository."""
         ...
 
     async def save_github_account(self, account: GitHubAccount) -> GitHubAccount:
-        """Inserts or replaces the team's account. NotFound when the team is missing."""
+        """Inserts or replaces the account of the team's repository (account.repo). NotFound
+        when the team is missing."""
         ...
 
-    async def delete_github_account(self, team_id: str) -> None:
-        """Removing none is not an error."""
+    async def delete_github_account(self, team_id: str, repo: str) -> None:
+        """Forgets the account of the team's repository (owner/name, in lower case). Removing
+        none is not an error."""
         ...
 
     # logins
@@ -410,7 +414,7 @@ class InMemoryStore:
         self._photos: dict[str, tuple[str, bytes]] = {}
         self._settings: dict[str, TeamSettings] = {}
         self._jira_accounts: dict[str, JiraAccount] = {}
-        self._github_accounts: dict[str, GitHubAccount] = {}
+        self._github_accounts: dict[tuple[str, str], GitHubAccount] = {}
         self._logins: dict[str, Login] = {}
         self._meetings: dict[str, Meeting] = {}
         self._segments: dict[str, dict[str, TranscriptSegment]] = {}
@@ -454,7 +458,8 @@ class InMemoryStore:
                 del rows[row_id]
         self._settings.pop(team_id, None)
         self._jira_accounts.pop(team_id, None)
-        self._github_accounts.pop(team_id, None)
+        for key in [key for key in self._github_accounts if key[0] == team_id]:
+            del self._github_accounts[key]
         del self._teams[team_id]
 
     async def team_for_user(self, user_id: str) -> Team:
@@ -532,17 +537,17 @@ class InMemoryStore:
     async def delete_jira_account(self, team_id: str) -> None:
         self._jira_accounts.pop(team_id, None)
 
-    async def github_account(self, team_id: str) -> GitHubAccount | None:
-        saved = self._github_accounts.get(team_id)
-        return _copy(saved) if saved else None
+    async def github_accounts(self, team_id: str) -> list[GitHubAccount]:
+        found = [a for (team, _), a in self._github_accounts.items() if team == team_id]
+        return [_copy(a) for a in sorted(found, key=lambda a: a.repo)]
 
     async def save_github_account(self, account: GitHubAccount) -> GitHubAccount:
         self._team(account.team_id)
-        self._github_accounts[account.team_id] = _copy(account)
+        self._github_accounts[(account.team_id, account.repo)] = _copy(account)
         return _copy(account)
 
-    async def delete_github_account(self, team_id: str) -> None:
-        self._github_accounts.pop(team_id, None)
+    async def delete_github_account(self, team_id: str, repo: str) -> None:
+        self._github_accounts.pop((team_id, repo), None)
 
     # logins
 

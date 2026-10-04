@@ -1,5 +1,6 @@
-"""Create Jira issues for approved task drafts on a team's own Jira Cloud site, through its REST
-API, as the account an admin connected in Settings (an Atlassian email and API token).
+"""Create Jira issues for approved task drafts on a team's own Jira Cloud site, and read its
+project's issues, through its REST API, as the account an admin connected in Settings (an
+Atlassian email and API token).
 
 Only https://<name>.atlassian.net is ever called, and redirects are never followed, so a typed
 site cannot point the brain at another host."""
@@ -11,8 +12,22 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, SecretStr, field_validator
 
-from brain.jira import OnCreated, TaskPusher, describe_parts, root_cause
+from brain.auth import signing_secret
+from brain.config import Settings
+from brain.jira import (
+    ISSUE_FIELDS,
+    JiraConfig,
+    JiraError,
+    JiraIssue,
+    JiraReader,
+    OnCreated,
+    TaskPusher,
+    describe_parts,
+    root_cause,
+)
 from brain.report import ProcessedMeeting
+from brain.sealing import Unsealable, unseal
+from brain.store import JiraAccount
 from contracts import Person, TaskDraft, TaskPushRequest, TaskPushResult
 
 logger = logging.getLogger(__name__)
@@ -57,6 +72,36 @@ class JiraAccess(BaseModel):
         if not PROJECT_KEY.fullmatch(key):  # it goes into request paths
             raise ValueError(f"{key!r} is not a Jira project key")
         return key
+
+
+def account_access(settings: Settings, account: JiraAccount) -> JiraAccess | None:
+    """What the team's connected account reaches its site with; None when its token was sealed
+    under an AUTH_SECRET this server no longer has."""
+    try:
+        return JiraAccess(
+            site=account.site,
+            email=account.email,
+            api_token=unseal(account.sealed_token, signing_secret(settings) or "", account.team_id),
+            project_key=account.project,
+            issue_type_id=account.issue_type_id,
+        )
+    except (Unsealable, ValueError):
+        return None
+
+
+def reads_with_account(
+    settings: Settings, project: str | None, site: str | None, account: JiraAccount | None
+) -> bool:
+    """Whether the project the agent reads (its key and site) is the one the team's account was
+    connected with, and not one of the demo world's (MOCK_JIRA_PROJECTS): it is then read on
+    the account's site with it."""
+    return (
+        account is not None
+        and project is not None
+        and project.upper() == account.project.upper()
+        and (site is None or site.casefold() == account.site.casefold())
+        and not settings.mocks_jira_project(project)
+    )
 
 
 class JiraRejected(RuntimeError):
@@ -134,6 +179,18 @@ class JiraCloud:
             and user.get("accountType", "atlassian") == "atlassian"
         ]
 
+    async def search(self, jql: str, fields: list[str], limit: int) -> list[dict[str, Any]]:
+        """The issues the JQL finds, with these fields (Jira's enhanced search)."""
+        body = {"jql": jql, "fields": fields, "maxResults": limit}
+        found = await self._call("POST", "/rest/api/3/search/jql", json=body)
+        issues = found.get("issues") if isinstance(found, dict) else None
+        return [issue for issue in issues or [] if isinstance(issue, dict)]
+
+    async def issue(self, key: str, fields: list[str]) -> dict[str, Any]:
+        """One issue with these fields. JiraRejected(404) when there is none the account sees."""
+        params = {"fields": ",".join(fields)}
+        return await self._call("GET", f"/rest/api/3/issue/{key}", params=params)
+
     async def create_issue(self, fields: dict[str, Any]) -> str:
         """The new issue's key. JiraTimedOut when Jira never answered: it may exist."""
         created = await self._call("POST", "/rest/api/3/issue", json={"fields": fields})
@@ -183,6 +240,66 @@ def rejected(response: httpx.Response) -> JiraRejected:
             fields = {str(k): str(v) for k, v in errors.items()}
     reason = " ".join([*messages, *fields.values()]) or f"HTTP {response.status_code}"
     return JiraRejected(response.status_code, reason[:300], fields)
+
+
+class JiraRestReader(JiraReader):
+    """What JiraReader reads through the MCP server, read from the connected account's project
+    on its own site over the REST API: unfinished issues, a text search and one issue."""
+
+    def __init__(self, access: JiraAccess, *, transport: httpx.AsyncBaseTransport | None = None):
+        self.cloud = JiraCloud(access, transport=transport)
+        # No MCP server: the reads below go to the site itself.
+        self.config = JiraConfig(
+            mcp_url="",
+            cloud_id=access.site,
+            project_key=access.project_key,
+            base_url=f"https://{access.site}",
+        )
+
+    async def _issue(self, key: str) -> object:
+        try:
+            return readable(await self.cloud.issue(key, ISSUE_FIELDS))
+        except JiraRejected as e:
+            if e.status == 404:
+                raise JiraError(f"{key} was not found in {self.project}") from None
+            raise JiraError(f"Jira answered {e.status}: {e}") from None
+        except JiraUnreachable as e:
+            raise JiraError(str(e)) from None
+
+    async def _search(self, jql: str, limit: int, fields: list[str]) -> list[JiraIssue]:
+        try:
+            found = await self.cloud.search(jql, fields, limit)
+        except JiraRejected as e:
+            raise JiraError(f"Jira answered {e.status}: {e}") from None
+        except JiraUnreachable as e:
+            raise JiraError(str(e)) from None
+        issues = (self.issue(readable(raw)) for raw in found)
+        return [issue for issue in issues if issue is not None]
+
+
+# Atlassian Document Format nodes that end a line of their own.
+BLOCKS = {"paragraph", "heading", "listItem", "blockquote", "codeBlock", "rule", "tableRow"}
+
+
+def readable(raw: dict[str, Any]) -> dict[str, Any]:
+    """The issue with its rich-text description as plain text, as the MCP server gives it."""
+    fields = raw.get("fields")
+    if not isinstance(fields, dict) or not isinstance(fields.get("description"), dict):
+        return raw
+    text = plain_text(fields["description"]).strip()
+    return {**raw, "fields": {**fields, "description": text or None}}
+
+
+def plain_text(node: Any) -> str:
+    """The text of an Atlassian Document Format node, a line per block."""
+    if not isinstance(node, dict):
+        return ""
+    if node.get("type") == "text":
+        return str(node.get("text") or "")
+    if node.get("type") == "hardBreak":
+        return "\n"
+    inner = "".join(plain_text(child) for child in node.get("content") or [])
+    return inner + "\n" if node.get("type") in BLOCKS else inner
 
 
 class JiraRestPusher(TaskPusher):

@@ -4,16 +4,16 @@ import re
 from collections.abc import Callable
 from datetime import UTC, datetime
 
-import anyio
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile
 
 from contracts import (
+    MAX_CODE_REPOS,
     CodeRepo,
     CodeRepoChoice,
     ConnectorStatus,
     ConnectorsUpdate,
-    GitHubAccountConnect,
+    GitHubRepoConnect,
     JiraAccountConnect,
     Person,
     ProfileUpdate,
@@ -23,7 +23,6 @@ from contracts import (
 )
 
 from ..accounts import signs_in
-from ..agent.team_tools import code_repos
 from ..auth import NOT_CONFIGURED, signing_secret
 from ..config import Settings
 from ..connectors import connector_statuses
@@ -33,8 +32,7 @@ from ..github_account import (
     GitHubRejected,
     GitHubUnreachable,
     fine_grained,
-    github_endpoint,
-    unsealed_token,
+    github_endpoints,
 )
 from ..gitlab import valid_project
 from ..jira import site_host
@@ -44,7 +42,9 @@ from ..jira_rest import (
     JiraCloud,
     JiraRejected,
     JiraUnreachable,
+    account_access,
     issue_type_for_tasks,
+    reads_with_account,
 )
 from ..sealing import seal
 from ..store import GitHubAccount, JiraAccount, NotFound, Store
@@ -184,7 +184,7 @@ NO_JIRA_ACCOUNT = {
 async def shown(store: Store, settings: TeamSettings) -> TeamSettings:
     """Settings as they are sent: what they say about the Jira and GitHub accounts is read from
     the saved accounts themselves, the ones pushes and reads use, so the two can never
-    disagree."""
+    disagree. Each GitHub repository names the account its token is from."""
     account = await store.jira_account(settings.team_id)
     about = NO_JIRA_ACCOUNT
     if account is not None:
@@ -194,12 +194,15 @@ async def shown(store: Store, settings: TeamSettings) -> TeamSettings:
             "account_site": account.site,
             "account_project": account.project,
         }
-    github = await store.github_account(settings.team_id)
-    login = github.login if github is not None else None
+    logins = {a.repo: a.login for a in await store.github_accounts(settings.team_id)}
+    repos = [
+        repo.model_copy(update={"login": logins.get(repo.path.lower())})
+        for repo in settings.github.repos
+    ]
     return settings.model_copy(
         update={
             "jira": settings.jira.model_copy(update=about),
-            "github": settings.github.model_copy(update={"account_login": login}),
+            "github": settings.github.model_copy(update={"repos": repos}),
         }
     )
 
@@ -252,24 +255,17 @@ async def write_connectors(
     body: ConnectorsUpdate,
     user: Person = Depends(require_admin),
     store: Store = Depends(get_store),
-    config: Settings = Depends(get_settings),
-    transport: httpx.AsyncBaseTransport | None = Depends(get_http_transport),
 ) -> TeamSettings:
     """The team's GitHub repositories, GitLab projects and Jira site and project, replacing
     the saved ones; admins only. A repository that stays keeps its connection and index state
-    (a new branch or tag drops its index). Paths are checked and repeats refused. With a GitHub
-    token connected, a repository added must be readable with it (422 naming it otherwise).
-    The Jira site and project here are what the agent reads; the accounts connected for
-    pushing and reading are separate and stay as they are."""
+    (a new branch or tag drops its index) and its token; a repository removed loses its token.
+    One added here has none: it is read from GITHUB_MCP_URL with no credentials (PUT
+    /settings/github/repos connects one with its token). Paths are checked and repeats refused.
+    The Jira site and project here are what the agent reads; the account connected for the
+    team's project (PUT /settings/jira/account) stays as it is."""
     team = await user_team(store, user)
     current = await store.settings(team.id)
     github = repos(body.github, current.github.repos, "GitHub repository", github_path)
-    saved_paths = {repo.path.casefold() for repo in current.github.repos}
-    added = [repo.path for repo in github if repo.path.casefold() not in saved_paths]
-    if added and (account := await store.github_account(team.id)) is not None:
-        token = unsealed_token(config, account)
-        if token is not None:  # a token that can't be unsealed shows in the status instead
-            await readable_with_github(GitHubApi(config.github_api_url, token, transport), added)
     gitlab = repos(body.gitlab, current.gitlab.projects, "GitLab project", gitlab_path)
     jira = current.jira.model_copy(
         update={"site": site_host(text(body.jira.site)), "project": jira_key(body.jira.project)}
@@ -278,15 +274,22 @@ async def write_connectors(
     saved = await store.save_settings(
         current.model_copy(
             update={
-                "github": current.github.model_copy(
-                    update={"repos": github, "account_login": None}  # `shown` reads it
-                ),
+                "github": current.github.model_copy(update={"repos": without_logins(github)}),
                 "gitlab": current.gitlab.model_copy(update={"projects": gitlab}),
                 "jira": jira,
             }
         )
     )
+    kept = {repo.path.lower() for repo in github}
+    for account in await store.github_accounts(team.id):
+        if account.repo not in kept:
+            await store.delete_github_account(team.id, account.repo)
     return await shown(store, saved)
+
+
+def without_logins(github: list[CodeRepo]) -> list[CodeRepo]:
+    """As saved: whose token a repository is read with is read from its account (`shown`)."""
+    return [repo.model_copy(update={"login": None}) for repo in github]
 
 
 def repos(
@@ -353,12 +356,16 @@ async def connect_jira_account(
     config: Settings = Depends(get_settings),
     transport: httpx.AsyncBaseTransport | None = Depends(get_http_transport),
 ) -> TeamSettings:
-    """Connects the team's Jira account; admins only. Before anything is saved, Jira is asked
-    whether it accepts the email and API token, whether that account sees the project and may
-    create issues in it, and which issue type tasks become there. The token is stored encrypted
-    and never returned; approved task drafts are then created as issues in that project as that
-    account. The Jira site and project the agent reads (PUT /settings/connectors) are not
-    changed."""
+    """Connects the team's Jira project with the account it is read and pushed with; admins
+    only. Before anything is saved, Jira is asked whether it accepts the email and API token,
+    whether that account sees the project and may create issues in it, and which issue type
+    tasks become there. The token is stored encrypted and never returned. The project becomes
+    the one the agent reads, on its site with that account, and approved task drafts are
+    created there as issues as that account.
+
+    One of the demo world's projects (MOCK_JIRA_PROJECTS) takes any account: nothing is
+    checked or kept, it becomes the project the agent reads, and it is read and pushed through
+    JIRA_MCP_URL, the mock, as before."""
     email, token = body.email.strip(), body.api_token.strip()
     project = jira_key(body.project)
     if not email or not token or project is None:
@@ -371,11 +378,14 @@ async def connect_jira_account(
         access = JiraAccess(site=body.site, email=email, api_token=token, project_key=project)
     except ValueError:
         raise HTTPException(status_code=422, detail=NOT_A_SITE) from None
+    team = await user_team(store, user)
+    if config.mocks_jira_project(project):
+        await store.delete_jira_account(team.id)
+        return await shown(store, await read_jira_project(store, team.id, access.site, project))
     if (secret := signing_secret(config)) is None:
         raise HTTPException(status_code=503, detail=NOT_CONFIGURED)
     issue_type = await checked_with_jira(JiraCloud(access, transport=transport))
 
-    team = await user_team(store, user)
     await store.save_jira_account(
         JiraAccount(
             team_id=team.id,
@@ -388,7 +398,14 @@ async def connect_jira_account(
             connected_at=datetime.now(UTC),
         )
     )
-    return await shown(store, await store.settings(team.id))
+    return await shown(store, await read_jira_project(store, team.id, access.site, project))
+
+
+async def read_jira_project(store: Store, team_id: str, site: str, project: str) -> TeamSettings:
+    """Makes the project the one the agent reads."""
+    current = await store.settings(team_id)
+    jira = current.jira.model_copy(update={"site": site, "project": project} | NO_JIRA_ACCOUNT)
+    return await store.save_settings(current.model_copy(update={"jira": jira}))
 
 
 async def checked_with_jira(cloud: JiraCloud) -> str | None:
@@ -435,35 +452,106 @@ async def checked_with_jira(cloud: JiraCloud) -> str | None:
 async def disconnect_jira_account(
     user: Person = Depends(require_admin), store: Store = Depends(get_store)
 ) -> TeamSettings:
-    """Forgets the team's Jira account and its token; admins only. The Jira site and project
-    the agent reads stay."""
+    """Removes the team's Jira project; admins only: its account and token are forgotten, and
+    the agent stops reading the project when it is the account's. A project the agent reads
+    apart from the account (connected before the two were one) stays."""
     team = await user_team(store, user)
+    account = await store.jira_account(team.id)
     await store.delete_jira_account(team.id)
-    return await shown(store, await store.settings(team.id))
+    current = await store.settings(team.id)
+    if account is not None and same_project(current, account):
+        jira = current.jira.model_copy(update={"site": None, "project": None})
+        current = await store.save_settings(current.model_copy(update={"jira": jira}))
+    return await shown(store, current)
 
 
-@router.put("/settings/github/account")
-async def connect_github_account(
-    body: GitHubAccountConnect,
+def same_project(team: TeamSettings, account: JiraAccount) -> bool:
+    """Whether the project the agent reads is the one the account was connected with."""
+    project, site = team.jira.project, team.jira.site
+    return (
+        project is not None
+        and project.upper() == account.project.upper()
+        and (site is None or site.casefold() == account.site.casefold())
+    )
+
+
+@router.put("/settings/github/repos")
+async def connect_github_repo(
+    body: GitHubRepoConnect,
     user: Person = Depends(require_admin),
     store: Store = Depends(get_store),
     config: Settings = Depends(get_settings),
     transport: httpx.AsyncBaseTransport | None = Depends(get_http_transport),
 ) -> TeamSettings:
-    """Connects GitHub for the team with a fine-grained personal access token; admins only.
-    Before anything is saved, GitHub is asked whose token it is and whether it reads each of
-    the team's repositories (their metadata, issues, pull requests and code). The token is
-    stored encrypted and never returned; the team's GitHub reads then go to GitHub's hosted MCP
-    server with it."""
+    """Connects one of the team's GitHub repositories with the fine-grained personal access
+    token it is read with, or changes the branch or tag or the token of one already connected
+    (the same path); admins only. Before anything is saved, GitHub is asked whose token it is
+    and whether it reads the repository (its metadata, issues, pull requests and code). The
+    token is stored encrypted and never returned; the repository is then read through GitHub's
+    hosted MCP server with it. Each repository has its own token, so connecting one never
+    depends on the others. A blank token keeps the one a connected repository has.
+
+    The demo world's repositories (MOCK_GITHUB_OWNERS) take any token: it is not checked or
+    kept, and they are read from GITHUB_MCP_URL, the mock, as before."""
+    try:
+        path = github_path(body.repo)
+    except ValueError:
+        raise HTTPException(
+            status_code=422, detail=f"{body.repo.strip()!r} is not a GitHub repository path"
+        ) from None
     token = body.token.strip()
+    team = await user_team(store, user)
+    current = await store.settings(team.id)
+    chosen = [CodeRepoChoice(path=r.path, ref=r.ref) for r in current.github.repos]
+    known = [i for i, r in enumerate(chosen) if r.path.casefold() == path.casefold()]
+    if known:
+        chosen[known[0]] = CodeRepoChoice(path=path, ref=body.ref)
+    elif not token:
+        raise HTTPException(status_code=422, detail="Paste the token the repository is read with")
+    elif len(chosen) >= MAX_CODE_REPOS:
+        raise HTTPException(
+            status_code=422, detail=f"At most {MAX_CODE_REPOS} repositories can be connected"
+        )
+    else:
+        chosen.append(CodeRepoChoice(path=path, ref=body.ref))
+    github = repos(chosen, current.github.repos, "GitHub repository", github_path)
+    mock = config.mocks_repository(path)
+    account = None
+    if token and not mock:
+        account = await github_account(config, transport, team.id, path, token, user.id)
+
+    saved = await store.save_settings(
+        current.model_copy(
+            update={"github": current.github.model_copy(update={"repos": without_logins(github)})}
+        )
+    )
+    if account is not None:
+        await store.save_github_account(account)
+    elif mock:  # read from the mock whatever was kept for it before
+        await store.delete_github_account(team.id, path.lower())
+    return await shown(store, saved)
+
+
+async def github_account(
+    config: Settings,
+    transport: httpx.AsyncBaseTransport | None,
+    team_id: str,
+    path: str,
+    token: str,
+    by: str,
+) -> GitHubAccount:
+    """The repository's account, its token sealed, once GitHub said whose token it is and that
+    it reads the repository. 422 when it is not a fine-grained token, GitHub refuses it or it
+    can't read the repository (naming the permission it lacks); 502 when GitHub can't be
+    asked; 503 without AUTH_SECRET."""
     if not fine_grained(token):
         raise HTTPException(status_code=422, detail=NOT_FINE_GRAINED)
     if (secret := signing_secret(config)) is None:
         raise HTTPException(status_code=503, detail=NOT_CONFIGURED)
-    team = await user_team(store, user)
     api = GitHubApi(config.github_api_url, token, transport)
     try:
         login = await api.login()
+        problem = await api.unreadable(path)
     except GitHubRejected as e:
         if e.status in (401, 403):
             raise HTTPException(
@@ -472,54 +560,16 @@ async def connect_github_account(
         raise HTTPException(status_code=502, detail=f"GitHub answered {e.status}") from None
     except GitHubUnreachable as e:
         raise HTTPException(status_code=502, detail=str(e)) from None
-    repos_read = [repo.path for repo in code_repos(await store.settings(team.id), config)]
-    await readable_with_github(api, repos_read)
-
-    await store.save_github_account(
-        GitHubAccount(
-            team_id=team.id,
-            login=login,
-            sealed_token=seal(token, secret, team.id),
-            connected_by=user.id,
-            connected_at=datetime.now(UTC),
-        )
+    if problem:
+        raise HTTPException(status_code=422, detail=problem)
+    return GitHubAccount(
+        team_id=team_id,
+        repo=path.lower(),
+        login=login,
+        sealed_token=seal(token, secret, team_id),
+        connected_by=by,
+        connected_at=datetime.now(UTC),
     )
-    return await shown(store, await store.settings(team.id))
-
-
-async def readable_with_github(api: GitHubApi, repos_read: list[str]) -> None:
-    """422 naming the first repository (and the permission) the token can't read; 502 when
-    GitHub can't be asked."""
-    found: dict[str, str | Exception | None] = {}
-
-    async def check(repo: str) -> None:
-        try:
-            found[repo] = await api.unreadable(repo)
-        except (GitHubRejected, GitHubUnreachable) as e:
-            found[repo] = e
-
-    async with anyio.create_task_group() as group:
-        for repo in repos_read:
-            group.start_soon(check, repo)
-    for repo in repos_read:
-        problem = found.get(repo)
-        if isinstance(problem, GitHubRejected):
-            raise HTTPException(status_code=422, detail="GitHub did not accept that token")
-        if isinstance(problem, GitHubUnreachable):
-            raise HTTPException(status_code=502, detail=str(problem))
-        if problem:
-            raise HTTPException(status_code=422, detail=str(problem))
-
-
-@router.delete("/settings/github/account")
-async def disconnect_github_account(
-    user: Person = Depends(require_admin), store: Store = Depends(get_store)
-) -> TeamSettings:
-    """Forgets the team's GitHub token; admins only. Its repositories stay, read through
-    GITHUB_MCP_URL with no credentials from then on."""
-    team = await user_team(store, user)
-    await store.delete_github_account(team.id)
-    return await shown(store, await store.settings(team.id))
 
 
 @router.get("/settings/connectors")
@@ -527,12 +577,38 @@ async def list_connectors(
     user: Person = Depends(current_user),
     store: Store = Depends(get_store),
     config: Settings = Depends(get_settings),
+    transport: httpx.AsyncBaseTransport | None = Depends(get_http_transport),
 ) -> list[ConnectorStatus]:
-    """GitHub, GitLab and Jira, each connected, not configured or failing, checked live. A
-    team's GitHub is checked on GitHub's hosted server with its token when it connected one."""
+    """Each GitHub repository, GitLab and Jira, each connected, not configured or failing,
+    checked live. A repository connected with a token is checked on GitHub's hosted server with
+    it; a Jira project connected with an account, on its own site as that account."""
     team = await user_team(store, user)
-    github = github_endpoint(config, await store.github_account(team.id))
-    return await connector_statuses(config, await store.settings(team.id), github)
+    settings = await store.settings(team.id)
+    github = github_endpoints(config, await store.github_accounts(team.id))
+    jira = jira_site(config, settings, await store.jira_account(team.id), transport)
+    return await connector_statuses(config, settings, github, jira)
+
+
+JIRA_CONNECT_AGAIN = (
+    "The token the project was connected with can't be read on this server: an admin must "
+    "connect Jira again"
+)
+
+
+def jira_site(
+    config: Settings,
+    team: TeamSettings,
+    account: JiraAccount | None,
+    transport: httpx.AsyncBaseTransport | None,
+) -> JiraCloud | str | None:
+    """The team's Jira site as its account, when the agent reads the project there; why the
+    account can't be used; None when the project is read through JIRA_MCP_URL."""
+    if account is None or not reads_with_account(
+        config, team.jira.project, team.jira.site, account
+    ):
+        return None
+    access = account_access(config, account)
+    return JIRA_CONNECT_AGAIN if access is None else JiraCloud(access, transport=transport)
 
 
 @router.get("/voices")

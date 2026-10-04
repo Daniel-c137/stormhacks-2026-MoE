@@ -58,14 +58,20 @@ class Settings(BaseSettings):
     # Join tokens are only checked on connect, so a short life doesn't affect anyone in the call.
     livekit_token_ttl_seconds: int = 600
 
-    # GitHub for a team with no token connected: an MCP server reached with no credentials (the
-    # world mock in the demo)
+    # GitHub for a repository connected without a token: an MCP server reached with no
+    # credentials (the world mock in the demo)
     github_mcp_url: str | None = None
-    # GitHub for a team whose admin connected a fine-grained token in Settings: GitHub's hosted
-    # MCP server, sent the token as a bearer header, and the REST API the token is checked
-    # against when it is connected
+    # GitHub for a repository an admin connected with its fine-grained token in Settings:
+    # GitHub's hosted MCP server, sent the token as a bearer header, and the REST API the token
+    # is checked against when it is connected
     github_hosted_mcp_url: str = "https://api.githubcopilot.com/mcp/"
     github_api_url: str = "https://api.github.com"
+    # The demo world's own repositories and Jira projects (world/world.json), which only the
+    # mocks serve: GitHub owners whose repositories are always read from GITHUB_MCP_URL, and
+    # Jira project keys always read and pushed through JIRA_MCP_URL. Comma-separated, any case.
+    # Connecting one takes any token, unchecked and never stored.
+    mock_github_owners: str | None = None
+    mock_jira_projects: str | None = None
     # GitLab's MCP server, https://<instance>/api/v4/mcp (links to code use that instance), or
     # the world mock
     gitlab_mcp_url: str | None = None
@@ -89,3 +95,17 @@ class Settings(BaseSettings):
     pipeline_settle_seconds: float = 8.0
     # minutes without progress after which a write-up nobody here is running may be retried
     pipeline_stale_minutes: float = Field(default=10.0, gt=0)
+
+    def mocks_repository(self, path: str) -> bool:
+        """Whether a GitHub owner/name is one of the demo world's (MOCK_GITHUB_OWNERS)."""
+        owner = path.strip().split("/", 1)[0]
+        return owner.casefold() in names(self.mock_github_owners)
+
+    def mocks_jira_project(self, key: str | None) -> bool:
+        """Whether a Jira project key is one of the demo world's (MOCK_JIRA_PROJECTS)."""
+        return bool(key) and key.strip().casefold() in names(self.mock_jira_projects)
+
+
+def names(value: str | None) -> set[str]:
+    """A comma-separated setting's names, in lower case."""
+    return {name.strip().casefold() for name in (value or "").split(",") if name.strip()}

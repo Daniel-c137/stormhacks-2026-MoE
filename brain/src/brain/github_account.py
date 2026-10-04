@@ -1,6 +1,6 @@
-"""A team's own GitHub connection: the fine-grained personal access token an admin connected in
-Settings, checked with GitHub's REST API when it is connected, and the hosted MCP server the
-team's reads then go to with it.
+"""A team's own GitHub connections: the fine-grained personal access token an admin connected
+each repository with in Settings, checked with GitHub's REST API when it is connected, and the
+hosted MCP server that repository's reads then go to with it.
 
 The token is sent only as a bearer header, to GITHUB_API_URL (when connecting) and
 GITHUB_HOSTED_MCP_URL (when reading); redirects are not followed, and it is never logged."""
@@ -25,11 +25,11 @@ MAX_TOKEN = 255
 FINE_GRAINED = re.compile(r"github_pat_[A-Za-z0-9_]{20,240}")
 NOT_FINE_GRAINED = (
     "Paste a fine-grained personal access token (it starts with github_pat_), with read access "
-    "to the team's repositories"
+    "to the repository"
 )
 RATE_LIMITED = "GitHub's rate limit was reached: try again in a few minutes"
 CONNECT_AGAIN = (
-    "the connected token can't be read on this server: an admin must connect GitHub again"
+    "the token it was connected with can't be read on this server: an admin must connect it again"
 )
 
 Part = Literal["metadata", "issues", "pull_requests", "contents"]
@@ -163,16 +163,49 @@ def message(response: httpx.Response) -> str:
     return str(text or f"GitHub answered {response.status_code}")[:200]
 
 
-def github_endpoint(settings: Settings, account: GitHubAccount | None) -> McpEndpoint | str | None:
-    """Where a team reads GitHub: GitHub's hosted MCP server with its connected token; None
-    when it has none (GITHUB_MCP_URL is read as before); or why its token can't be used. A
-    team with a token never falls back to the mock."""
-    if account is None:
-        return None
-    token = unsealed_token(settings, account)
-    if token is None:
-        return CONNECT_AGAIN
-    return McpEndpoint(settings.github_hosted_mcp_url, token)
+def github_endpoints(
+    settings: Settings, accounts: list[GitHubAccount]
+) -> dict[str, McpEndpoint | str]:
+    """Where each repository connected with a token is read, by its owner/name in lower case:
+    GitHub's hosted MCP server with that token, or why the token can't be used. A repository
+    with a token never falls back to the mock; one without is read from GITHUB_MCP_URL."""
+    found: dict[str, McpEndpoint | str] = {}
+    for account in accounts:
+        token = unsealed_token(settings, account)
+        found[account.repo] = (
+            CONNECT_AGAIN if token is None else McpEndpoint(settings.github_hosted_mcp_url, token)
+        )
+    return found
+
+
+class Unusable(RuntimeError):
+    """A repository that can't be read here. `failing`: its token can't be opened; otherwise
+    nothing to read it with is set up. `detail` says why, the message also names it."""
+
+    def __init__(self, path: str, detail: str, *, failing: bool):
+        prefix = "GitHub is not reachable" if failing else "GitHub is not configured"
+        super().__init__(f"{prefix}: {path}: {detail}")
+        self.detail = detail
+        self.failing = failing
+
+
+def repo_target(
+    settings: Settings, path: str, endpoints: dict[str, McpEndpoint | str]
+) -> McpEndpoint | str:
+    """Where one repository (owner/name) is read: GitHub's hosted server with the token it was
+    connected with, or GITHUB_MCP_URL with no credentials for the demo world's repositories
+    (MOCK_GITHUB_OWNERS) and any connected without a token. Unusable when its token can't be
+    opened or neither is there."""
+    own = None if settings.mocks_repository(path) else endpoints.get(path.lower())
+    if isinstance(own, str):
+        raise Unusable(path, own, failing=True)
+    if own is not None:
+        return own
+    if settings.github_mcp_url:
+        return settings.github_mcp_url
+    raise Unusable(
+        path, "connect it with a token in Settings, or set GITHUB_MCP_URL", failing=False
+    )
 
 
 def unsealed_token(settings: Settings, account: GitHubAccount) -> str | None:

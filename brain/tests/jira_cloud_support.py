@@ -2,6 +2,7 @@
 
 import base64
 import json
+import re
 
 import anyio
 import httpx
@@ -18,8 +19,10 @@ STORY = {"id": "10003", "name": "Story", "subtask": False}
 
 class FakeJiraCloud:
     """Answers what the brain calls on https://<site>/rest/api/3: myself, a project and its issue
-    types, the caller's permission to create issues, assignable users and issue creation. Any
-    other host cannot be reached.
+    types, the caller's permission to create issues, assignable users, issue creation, and the
+    reads: an enhanced JQL search (the issues in `issues` of the project the JQL names, whose
+    summary or description holds every quoted word when it has text ~, unfinished ones when
+    it excludes Done) and one issue. Any other host cannot be reached.
 
     As Jira does: a user search matches the start of an email or of a word of a name; a summary
     over 255 characters or with a line break, or starting with FAIL, is rejected; so is an issue
@@ -49,6 +52,8 @@ class FakeJiraCloud:
         self.creates = 0
         self.requests: list[httpx.Request] = []
         self.created: list[dict] = []
+        self.issues: list[dict] = []  # as Jira's REST API returns them, rich-text descriptions
+        self.searches: list[dict] = []
         self.transport = httpx.MockTransport(self.handle)
 
     async def handle(self, request: httpx.Request) -> httpx.Response:
@@ -79,6 +84,17 @@ class FakeJiraCloud:
             return httpx.Response(200, json={"permissions": allowed})
         if path == "/rest/api/3/user/assignable/search":
             return httpx.Response(200, json=self.search(request.url.params["query"]))
+        if path == "/rest/api/3/search/jql" and request.method == "POST":
+            body = json.loads(request.content)
+            self.searches.append(body)
+            return httpx.Response(200, json={"issues": self.found(body), "isLast": True})
+        if path.startswith("/rest/api/3/issue/") and request.method == "GET":
+            key = path.rsplit("/", 1)[1]
+            for issue in self.issues:
+                if issue["key"] == key:
+                    return httpx.Response(200, json=issue)
+            message = "Issue does not exist or you do not have permission to see it."
+            return httpx.Response(404, json={"errorMessages": [message], "errors": {}})
         if path == "/rest/api/3/issue" and request.method == "POST":
             self.creates += 1
             if self.slow:
@@ -89,6 +105,26 @@ class FakeJiraCloud:
                 raise httpx.ReadTimeout("timed out", request=request)
             return self.create(json.loads(request.content)["fields"])
         return httpx.Response(404, json={"errorMessages": ["Not found"], "errors": {}})
+
+    def found(self, body: dict) -> list[dict]:
+        jql = body["jql"]
+        project = re.search(r'project = "([^"]+)"', jql)
+        words = re.search(r'text ~ "([^"]*)"', jql)
+        found = []
+        for issue in self.issues:
+            fields = issue["fields"]
+            if project and not issue["key"].startswith(project.group(1) + "-"):
+                continue
+            if (
+                "statusCategory != Done" in jql
+                and fields["status"]["statusCategory"]["key"] == "done"
+            ):
+                continue
+            text = f"{fields['summary']} {text_of(fields.get('description') or {'type': 'doc'})}"
+            if words and not all(w.casefold() in text.casefold() for w in words.group(1).split()):
+                continue
+            found.append(issue)
+        return found[: body.get("maxResults", 50)]
 
     def search(self, query: str) -> list[dict]:
         query = query.casefold()
@@ -142,3 +178,34 @@ def text_of(document: dict) -> str:
         return ("\n" if node["type"] in ("doc", "blockquote") else "").join(inner)
 
     return walk(document)
+
+
+def rest_issue(
+    key: str,
+    summary: str,
+    *,
+    done: bool = False,
+    description: str | None = None,
+    assignee: str | None = "Sarah Kim",
+) -> dict:
+    """An issue as Jira Cloud's REST API returns it: the description in Atlassian Document
+    Format."""
+    status = (
+        {"name": "Done", "statusCategory": {"key": "done"}}
+        if done
+        else {
+            "name": "In Progress",
+            "statusCategory": {"key": "indeterminate"},
+        }
+    )
+    fields: dict = {
+        "summary": summary,
+        "status": status,
+        "assignee": {"displayName": assignee} if assignee else None,
+        "priority": {"name": "High"},
+        "description": None,
+    }
+    if description is not None:
+        paragraph = {"type": "paragraph", "content": [{"type": "text", "text": description}]}
+        fields["description"] = {"type": "doc", "version": 1, "content": [paragraph]}
+    return {"id": key.rsplit("-", 1)[1], "key": key, "fields": fields}
