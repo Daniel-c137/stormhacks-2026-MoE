@@ -725,6 +725,84 @@ async def test_an_agenda_is_none_until_saved_then_replaced_on_save(store):
     assert await store.agenda(meeting.id) == edited
 
 
+async def test_an_agendas_timekeeping_state_is_saved_with_it(store):
+    team, alex, *_ = await two_teams(store)
+    meeting = await store.create_meeting(team.id, "Standup", alex.id)
+    tracked = Agenda(
+        meeting_id=meeting.id,
+        items=[
+            AgendaItem(id="a1", title="Waitlist email", minutes=10, discussed_s=312.5),
+            AgendaItem(id="a2", title="Refund policy", minutes=5, nudged_t=1260.0),
+        ],
+        generated_at=at(0),
+        current_item_id="a1",
+        tracked_until=1265.25,
+    )
+
+    await store.save_agenda(tracked)
+
+    saved = await store.agenda(meeting.id)
+    assert saved == tracked
+    assert (saved.current_item_id, saved.tracked_until) == ("a1", 1265.25)
+    assert [(i.discussed_s, i.nudged_t) for i in saved.items] == [(312.5, None), (0, 1260.0)]
+
+
+async def test_a_timekeeping_save_goes_through_only_from_the_expected_point(store):
+    team, alex, *_ = await two_teams(store)
+    meeting = await store.create_meeting(team.id, "Standup", alex.id)
+    planned = Agenda(
+        meeting_id=meeting.id,
+        items=[AgendaItem(id="a1", title="Waitlist email", minutes=10)],
+        generated_at=at(0),
+    )
+    with pytest.raises(NotFound):
+        await store.save_agenda_if(planned, tracked_until=None)
+    await store.save_agenda(planned)
+
+    first = planned.model_copy(
+        update={
+            "items": [planned.items[0].model_copy(update={"discussed_s": 30.0})],
+            "current_item_id": "a1",
+            "tracked_until": 55.0,
+        }
+    )
+    assert await store.save_agenda_if(first, tracked_until=None) == first
+    stale = first.model_copy(update={"tracked_until": 85.0})
+    with pytest.raises(Conflict):
+        await store.save_agenda_if(stale, tracked_until=None)
+    assert await store.agenda(meeting.id) == first
+
+    second = first.model_copy(update={"tracked_until": 85.0})
+    assert await store.save_agenda_if(second, tracked_until=55.0) == second
+    assert await store.agenda(meeting.id) == second
+
+
+async def test_overlapping_timekeeping_saves_let_exactly_one_through(store):
+    team, alex, *_ = await two_teams(store)
+    meeting = await store.create_meeting(team.id, "Standup", alex.id)
+    planned = Agenda(
+        meeting_id=meeting.id,
+        items=[AgendaItem(id="a1", title="Waitlist email", minutes=10)],
+        generated_at=at(0),
+    )
+    await store.save_agenda(planned)
+    outcomes: list[str] = []
+
+    async def save(n: int) -> None:
+        tracked = planned.model_copy(update={"tracked_until": 55.0 + n})
+        try:
+            await store.save_agenda_if(tracked, tracked_until=None)
+            outcomes.append("saved")
+        except Conflict:
+            outcomes.append("conflict")
+
+    async with anyio.create_task_group() as tg:
+        for n in range(5):
+            tg.start_soon(save, n)
+
+    assert sorted(outcomes) == ["conflict"] * 4 + ["saved"]
+
+
 async def test_an_agenda_for_a_missing_meeting_is_refused(store):
     with pytest.raises(NotFound):
         await store.save_agenda(Agenda(meeting_id=new_id(), items=[], generated_at=at(0)))
