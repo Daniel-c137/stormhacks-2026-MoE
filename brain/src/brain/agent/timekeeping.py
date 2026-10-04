@@ -41,7 +41,7 @@ from contracts import (
     get_identity,
 )
 
-from .agenda_jev import Jev, jev_labels
+from .agenda_jev import OTHER, Jev, jev_labels
 from .ask import DATA_RULE, clip, fenced
 
 SETTLE_S = 5.0  # captions ending this close to `now` wait a tick, so late finals are not skipped
@@ -200,7 +200,7 @@ async def classify(
     if jev is not None:
         current = next((lb for lb, i in labels.items() if i.id == agenda.current_item_id), NO_ITEM)
         about, over = await jev_labels(jev, labels, current, segments, earlier)
-        work = any(label != NO_ITEM for label in about)
+        work = any(label in labels or label == OTHER for label in about)
         draft = AgendaTrackDraft(
             topics=[TopicRun(first=n, last=n, item=label) for n, label in enumerate(about, 1)],
             covered=sorted(over),
@@ -221,8 +221,8 @@ async def classify(
     marks: dict[int, str | None] = {}
     for run in draft.topics:
         about = item_id(run.item)
-        if about is None and run.item.strip().lower() != NO_ITEM:
-            continue
+        if about is None and run.item.strip().lower() not in (NO_ITEM, OTHER):
+            continue  # not a label: unlabelled, unlike "none" and "other", which are no item
         for n in range(max(run.first, 1), min(run.last, len(segments)) + 1):
             marks[n] = about
     about = tuple(marks.get(n) for n in range(1, len(segments) + 1))

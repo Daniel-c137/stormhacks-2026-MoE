@@ -67,7 +67,7 @@ async def jev_labels(
         about += said
         over |= {label for label in pending if answers[f"closed_{label}"]["noul"] >= COVERED_P}
         context += part
-        current = next((label for label in reversed(said) if label in labels), current)
+        current = said[-1] if said[-1] in labels else NO_ITEM  # as timekeeping's `current`
     return about, over
 
 
