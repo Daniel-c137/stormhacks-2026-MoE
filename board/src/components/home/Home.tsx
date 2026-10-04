@@ -29,7 +29,7 @@ export function Home() {
     <div className="home">
       <main className="home-main">
         <section className="home-hero" aria-labelledby="h-greet">
-          <p className="eyebrow">{now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</p>
+          <p className="hero-date">{now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</p>
           <h1 id="h-greet" className="hero-title">
             {greeting(now)}, {me.short}.
           </h1>

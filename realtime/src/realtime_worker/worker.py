@@ -102,6 +102,16 @@ def scribe_language(settings: Settings, meeting: Meeting) -> str | None:
     return None if meeting.translate else settings.elevenlabs_stt_language
 
 
+# A caption in a meeting with translation on waits up to the brain client's translate timeout
+# (4 s) for its translation before it is saved; the brain allows for it too (JEV_TRANSLATION_LAG_S).
+TRANSLATION_LAG_S = 4.0
+
+
+def agenda_check_delay(settings: Settings, meeting: Meeting) -> float:
+    """How long after a caption ends the agenda is checked for it (with Jev keeping time)."""
+    return settings.agenda_check_delay_seconds + (TRANSLATION_LAG_S if meeting.translate else 0)
+
+
 def meeting_clock(meeting: Meeting) -> Callable[[], float]:
     """Seconds since the meeting started: the clock the brain keeps segment times on."""
     start = meeting.started_at.timestamp() if meeting.started_at else time.time()
@@ -159,6 +169,8 @@ class MeetingSession:
             detector=detector,
             spoken_max_chars=settings.spoken_answer_max_chars,
             agenda_tick_seconds=settings.agenda_tick_seconds,
+            agenda_after_captions=settings.agenda_after_captions,
+            agenda_check_delay=agenda_check_delay(settings, meeting),
             fact_check_tick_seconds=settings.fact_check_tick_seconds,
             clock=clock,
         )
@@ -170,11 +182,14 @@ class MeetingSession:
                 keyterms=keyterms,
                 language=scribe_language(settings, meeting),
                 url=settings.elevenlabs_api_url,
+                vad_silence_seconds=settings.elevenlabs_vad_silence_seconds,
             ),
             bus=bus,
             brain=brain,
             detector=detector,
             on_invocation=agent.on_invocation,
+            on_listening=agent.on_listening,
+            on_saved=lambda saved: agent.caption_saved(max(s.t_end for s in saved)),
             clock=clock,
             translate=speech_translator(brain, meeting),
             provisional_seconds=settings.translation_provisional_seconds,

@@ -375,6 +375,10 @@ async def test_polaris_joins_transcribes_answers_and_speaks_on_click(world, ques
         assert card.answer.text.strip()
         states = [p["state"] for p in alex.on(Topic.AGENT_STATE)]
         assert "working" in states and states[-1] == "hand_raised"
+        # listening from the partial caption that said the name, before the question was final
+        assert states.index("capturing") < states.index("working"), states
+        listening = alex.on(Topic.AGENT_STATE)[states.index("capturing")]
+        assert listening["detail"] == f"Listening to {ALEX.name}"
         assert not any(peak > 500 for _, peak in alex.agent_audio)  # silent until Speak
 
         clicked = time.monotonic()

@@ -14,6 +14,10 @@ and has since moved to another agenda item for a while (moved_on), as of the las
 about it. The tracker only covers an item that has come up, and one a person reopened only once
 it comes up again. Nudges are decided by fixed rules, not the model, and are only shown: the
 agent never speaks on its own.
+
+A stretch of only small talk never covers an item. The model is Gemini, or Jev when JEV_MODEL is
+set (agenda_jev): fast and cheap enough to be asked as soon as anything new has settled, so with
+it the worker checks after every caption and a tick asks about a single short line too.
 """
 
 import math
@@ -36,9 +40,17 @@ from contracts import (
     get_identity,
 )
 
+from .agenda_jev import Jev, jev_labels
 from .ask import DATA_RULE, clip, fenced
 
 SETTLE_S = 5.0  # captions ending this close to `now` wait a tick, so late finals are not skipped
+# With Jev the worker checks 3.5 s after each caption ends (its AGENDA_CHECK_DELAY_SECONDS). A
+# caption reaches the brain about 1.5 s after its last word; one that ended earlier but arrives
+# after a later one has been tracked is never labelled, so this leaves another speaker's caption
+# finishing at about the same time room to arrive. With translation on, a caption waits up to
+# 4 s more for its translation before it is saved.
+JEV_SETTLE_S = 3.0
+JEV_TRANSLATION_LAG_S = 4.0
 PAUSE_S = 15.0  # a pause up to this long between utterances still counts as discussion
 # With the worker's tick every 10 s, the sentence that finishes an item is asked about at the
 # first tick after it settles: within about 15 s, plus the model call. The worker's tick is what
@@ -171,20 +183,32 @@ class Labelled:
 
 
 async def classify(
-    llm: LLM,
+    llm: LLM | None,
     agenda: Agenda,
     segments: Sequence[TranscriptSegment],
     earlier: Sequence[TranscriptSegment] = (),
+    *,
+    jev: Jev | None = None,
 ) -> Labelled:
     """Labels each segment (numbered from 1 in the order given) with an item; `earlier` is shown
     for context and not labelled. Labels not on the agenda and segment numbers outside the
-    stretch are ignored; where runs overlap, the later one wins."""
+    stretch are ignored; where runs overlap, the later one wins. Jev, when given, answers instead
+    of the LLM."""
     labels = {f"a{n}": item for n, item in enumerate(agenda.items, 1)}
-    draft = await llm.generate_structured(
-        render_track_prompt(agenda, labels, segments, earlier),
-        AgendaTrackDraft,
-        system=track_system(),
-    )
+    if jev is not None:
+        current = next((lb for lb, i in labels.items() if i.id == agenda.current_item_id), NO_ITEM)
+        about, over = await jev_labels(jev, labels, current, segments, earlier)
+        draft = AgendaTrackDraft(
+            topics=[TopicRun(first=n, last=n, item=label) for n, label in enumerate(about, 1)],
+            covered=sorted(over),
+        )
+    else:
+        assert llm is not None
+        draft = await llm.generate_structured(
+            render_track_prompt(agenda, labels, segments, earlier),
+            AgendaTrackDraft,
+            system=track_system(),
+        )
 
     def item_id(label: str) -> str | None:
         item = labels.get(label.strip())
@@ -392,7 +416,12 @@ class ClassificationFailed(Exception):
 
 
 async def track_agenda(
-    store: Store, make_llm: Callable[[], LLM], meeting: Meeting, now: float
+    store: Store,
+    make_llm: Callable[[], LLM],
+    meeting: Meeting,
+    now: float,
+    *,
+    jev: Jev | None = None,
 ) -> AgendaTrackResponse:
     """One tick at `now` seconds from the meeting start, against everyone's agenda: each person
     has their own, tracked on its own (its own tracked point, current item, talk time and
@@ -404,7 +433,7 @@ async def track_agenda(
     nudges: list[AgendaNudge] = []
     failure: LLMError | None = None
     for agenda in await store.agendas(meeting.id):
-        tracked, due, failed = await track_one(store, make_llm, meeting, agenda, now)
+        tracked, due, failed = await track_one(store, make_llm, meeting, agenda, now, jev=jev)
         agendas.append(tracked)
         nudges += [n.model_copy(update={"person_id": agenda.person_id}) for n in due]
         failure = failure or failed
@@ -415,22 +444,32 @@ async def track_agenda(
 
 
 async def track_one(
-    store: Store, make_llm: Callable[[], LLM], meeting: Meeting, agenda: Agenda, now: float
+    store: Store,
+    make_llm: Callable[[], LLM],
+    meeting: Meeting,
+    agenda: Agenda,
+    now: float,
+    *,
+    jev: Jev | None = None,
 ) -> tuple[Agenda, list[AgendaNudge], LLMError | None]:
     """One person's agenda for this tick: (the agenda after it, its nudges, a model failure).
 
     The captions to track are the final segments that ended after the agenda's tracked point
     and have settled. The model is made and asked only when they hold MIN_TALK_S of talk or the
     oldest has waited MAX_WAIT_S; the tracked point then moves to the end of the last of them.
-    A tick with nothing to ask about tracks nothing and saves nothing (but for a nudge that is
-    due). The result is saved with a compare-and-set on the agenda's revision; when someone else
-    saved first (an edit, another replica's tick), it is applied again to what they saved,
-    without asking the model again."""
+    With Jev, captions settle after JEV_SETTLE_S and any new one is asked about. A tick with
+    nothing to ask about tracks nothing and saves nothing (but for a nudge that is due). The
+    result is saved with a compare-and-set on the agenda's revision; when someone else saved
+    first (an edit, another replica's tick), it is applied again to what they saved, without
+    asking the model again."""
     if not agenda.items:
         return agenda, [], None
 
     since = agenda.tracked_until
-    settled = now - SETTLE_S
+    if jev is None:
+        settled = now - SETTLE_S
+    else:
+        settled = now - JEV_SETTLE_S - (JEV_TRANSLATION_LAG_S if meeting.translate else 0)
     transcript = await store.transcript(meeting.id)
     batch = sorted(
         (s for s in transcript if (since is None or s.t_end > since) and s.t_end <= settled),
@@ -443,7 +482,7 @@ async def track_one(
         spans = uncounted(transcript, since, until)
         talk = sum(b - a for a, b in spans)
         waited = settled - min(s.t_end for s in batch)
-        if talk >= MIN_TALK_S or waited >= MAX_WAIT_S:
+        if jev is not None or talk >= MIN_TALK_S or waited >= MAX_WAIT_S:
             first = batch[0].t_start
             earlier = sorted(
                 (
@@ -456,7 +495,8 @@ async def track_one(
                 key=lambda s: s.t_start,
             )[-CONTEXT_SEGMENTS:]
             try:
-                said = await classify(make_llm(), agenda, batch, earlier)
+                llm = make_llm() if jev is None else None
+                said = await classify(llm, agenda, batch, earlier, jev=jev)
             except LLMError as e:
                 failure = e
             else:
@@ -469,7 +509,10 @@ async def track_one(
                     current=said.current,
                     seconds=split_talk(spans, batch, said.about, agenda.current_item_id),
                     last=last,
-                    said_covered=said.covered,
+                    # small talk alone never finishes an item, whatever the model says
+                    said_covered=(
+                        said.covered if any(i is not None for i in said.about) else frozenset()
+                    ),
                     ends_on=next((i for i in reversed(said.about) if i is not None), None),
                 )
 

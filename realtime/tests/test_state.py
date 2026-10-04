@@ -62,9 +62,11 @@ def test_the_moves_the_meeting_needs_are_allowed():
         ("capturing", "working"),  # the question came
         ("capturing", "idle"),  # the Ask was cancelled or ran out
         ("capturing", "hand_raised"),  # ... while an answer was waiting
+        ("capturing", "speaking"),  # someone chose Speak while Polaris listened
         ("idle", "working"),  # a voice question or a chat mention
         ("working", "hand_raised"),  # the answer card is ready
         ("working", "idle"),  # the answer failed, or went to chat
+        ("working", "capturing"),  # the answer is done and someone is calling Polaris
         ("hand_raised", "speaking"),  # someone chose Speak
         ("hand_raised", "working"),  # a new question while an answer waits
         ("hand_raised", "capturing"),  # an Ask while an answer waits
@@ -73,6 +75,8 @@ def test_the_moves_the_meeting_needs_are_allowed():
         ("idle", "speaking"),  # Speak on a card after the hand went down
         ("speaking", "idle"),
         ("speaking", "hand_raised"),  # another answer is still waiting
+        ("speaking", "capturing"),  # someone called Polaris while it spoke
+        ("speaking", "working"),  # someone asked a question while it spoke
     ]
     for before, after in needed:
         assert after in TRANSITIONS[before], (before, after)

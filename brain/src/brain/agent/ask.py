@@ -22,6 +22,7 @@ import anyio
 from pydantic import BaseModel, Field
 
 from brain.config import Settings
+from brain.github_account import github_endpoint
 from brain.llm import LLM
 from brain.memory import MeetingMemory
 from brain.report.decisions import terms
@@ -234,6 +235,9 @@ class ToolOrchestrator:
         """The team's read-only tools, with its GitHub repositories, GitLab projects and Jira
         when configured. Its dates and today are the team's, in its time zone."""
         team_settings = await self.store.settings(team_id)
+        github = None
+        if self.github_target is None:
+            github = github_endpoint(self.settings, await self.store.github_account(team_id))
         return TeamToolbox(
             team_id,
             asker_id,
@@ -241,7 +245,7 @@ class ToolOrchestrator:
             members=await self.store.members(team_id),
             memory=self.memory,
             jira=jira_reader(self.settings, team_settings, self.jira_target),
-            github=github_readers(self.settings, team_settings, self.github_target),
+            github=github_readers(self.settings, team_settings, self.github_target, github),
             gitlab=gitlab_readers(self.settings, team_settings, self.gitlab_target),
             timeout=self.timeout,
             zone=team_zone(team_settings.timezone),

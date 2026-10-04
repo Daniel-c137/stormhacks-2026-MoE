@@ -136,7 +136,7 @@ def tracked(worker: TestClient, meeting_id: str, now: float | None = None) -> di
 
 
 def alexs(body: dict) -> dict:
-    """Alex's agenda in a tick's response body (an empty one when he has none)."""
+    """Alex's agenda in a tick's response body (an empty one when Alex has none)."""
     mine = [a for a in body["agendas"] if a["person_id"] == ALEX.id]
     return mine[0] if mine else {"items": [], "current_item_id": None, "tracked_until": None}
 

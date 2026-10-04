@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     # ISO 639-1 language Scribe is pinned to. A meeting with live translation on (#106) lets
     # Scribe detect each utterance's language instead.
     elevenlabs_stt_language: str = "en"
+    # Seconds of silence after which Scribe ends an utterance and sends its final. Scribe's own
+    # (about 1.5 s) made Polaris start working 1.8 s after a question ended; 1.0 makes it 1.3 s.
+    # Shorter still splits a sentence with a pause in it into more captions. Scribe refuses a
+    # session outside 0.3 to 3.0.
+    elevenlabs_vad_silence_seconds: float = Field(default=1.0, ge=0.3, le=3.0)
     # With translation on, a sentence still going after this long is translated so far, again
     # each period while it grows.
     translation_provisional_seconds: float = Field(default=1.5, gt=0)
@@ -38,9 +43,19 @@ class Settings(BaseSettings):
     # The agenda's is short so a finished item is ticked within seconds: the brain asks its model
     # only once a tick's new stretch holds enough talk.
     agenda_tick_seconds: float = Field(default=10, gt=0)
+    # The brain's JEV_MODEL and OPENROUTER_API_KEY: with Jev keeping time the agenda is also
+    # checked after every caption, this long after it ends, once it has settled in the brain: at
+    # least the brain's JEV_SETTLE_S (3 s), and 4 s more with translation on.
+    jev_model: str | None = None
+    openrouter_api_key: str | None = None
+    agenda_check_delay_seconds: float = Field(default=3.5, ge=3.0)
     fact_check_tick_seconds: float = Field(default=60, gt=0)
     # A spoken answer stops after the last whole sentence within this many characters.
     spoken_answer_max_chars: int = Field(default=600, gt=0)
+
+    @property
+    def agenda_after_captions(self) -> bool:
+        return bool(self.jev_model and self.openrouter_api_key)
 
 
 def missing(settings: Settings) -> list[str]:

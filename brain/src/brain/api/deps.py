@@ -9,6 +9,7 @@ from fastapi import Depends, Header, HTTPException, Request
 
 from contracts import Answer, Meeting, Person, Team
 
+from ..agent.agenda_jev import Jev
 from ..agent.ask import (
     MAX_HISTORY_TURNS,
     MAX_QUESTION_CHARS,
@@ -25,6 +26,7 @@ from ..google_auth import GoogleKeys, OneTimeCodes
 from ..jira import JiraPusher, jira_config
 from ..livekit_rooms import Rooms, rooms_from_settings
 from ..llm import LLM, LLMError, LLMUnavailable, make_embedder, make_llm, make_translation_llm
+from ..llm.jev import make_jev
 from ..memory import MeetingMemory, PgMemoryStore, UnusableMemory
 from ..speech import MeetingLocks
 from ..store import NotFound, Store
@@ -68,6 +70,20 @@ def get_llm_factory(settings: Settings = Depends(get_settings)) -> Callable[[], 
     """Makes the LLM when the write-up needs it, so ending a meeting never fails on an
     unconfigured model; the write-up step shows LLMUnavailable instead. Tests override it."""
     return lambda: make_llm(settings)
+
+
+def get_jev(
+    settings: Settings = Depends(get_settings),
+    transport: httpx.AsyncBaseTransport | None = Depends(get_http_transport),
+) -> Jev | None:
+    """Jev for live agenda tracking when JEV_MODEL is set; None keeps the tracker on Gemini. Set
+    without OPENROUTER_API_KEY it is unavailable: that is logged, and Gemini keeps time. Tests
+    override this."""
+    try:
+        return make_jev(settings, transport)
+    except LLMUnavailable as e:
+        logger.warning("Agenda tracking stays on Gemini: %s", e)
+        return None
 
 
 def get_translation_llm_factory(settings: Settings = Depends(get_settings)) -> Callable[[], LLM]:

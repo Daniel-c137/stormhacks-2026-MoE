@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.12, <3.14"
 resolution-markers = [
     "python_full_version >= '3.13'",
@@ -972,6 +972,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "google-genai" },
     { name = "httpx" },
+    { name = "httpx2" },
     { name = "livekit-api" },
     { name = "mcp" },
     { name = "moe-contracts" },
@@ -991,6 +992,7 @@ requires-dist = [
     { name = "fastapi" },
     { name = "google-genai" },
     { name = "httpx", specifier = ">=0.28.1" },
+    { name = "httpx2", specifier = ">=2.13.1" },
     { name = "livekit-api" },
     { name = "mcp" },
     { name = "moe-contracts", editable = "contracts" },

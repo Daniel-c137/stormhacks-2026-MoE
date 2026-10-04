@@ -13,6 +13,10 @@ sentence finish, and whatever could not be saved is counted.
 A spoken question that trails off is held by the detector for the rest of the sentence; the
 manager owns the clock, so it runs the timer that sends a held question when nothing follows.
 
+Partial captions go to the detector too, but only to say who the agent is listening to: someone
+calling it by name is heard while still speaking, not once their sentence is final. The manager
+tells the agent each time that changes, including when a wait runs out.
+
 With a translator (#106) the room reads only English. A finished sentence in another language is
 translated before it is published, saved or checked for the wake word. A sentence still going
 after provisional_seconds is translated so far and published as a partial, again each period
@@ -75,6 +79,8 @@ class TranscriptionManager:
         detector: WakeDetector,
         on_invocation: Callable[[Invocation], Awaitable[None]],
         on_unavailable: Callable[[str, str], Awaitable[None]] | None = None,
+        on_listening: Callable[[dict[str, str]], Awaitable[None]] | None = None,
+        on_saved: Callable[[list[TranscriptSegment]], None] | None = None,
         clock: Callable[[], float] | None = None,
         max_restarts: int = 3,
         restart_backoff: float = 1.0,
@@ -86,8 +92,11 @@ class TranscriptionManager:
     ):
         """clock() returns seconds since the meeting started (Meeting.started_at); every
         segment time and the Ask window are on it. on_unavailable(participant_id, name) is
-        called when a participant's captions stop for good. translate turns non-English speech
-        into English (#106); without it every utterance is shown and saved as heard."""
+        called when a participant's captions stop for good. on_listening(listening) gets who the
+        agent is listening to by voice (id -> name) whenever that changes. on_saved(segments) gets
+        the final segments the brain has just saved. translate turns
+        non-English speech into English (#106); without it every utterance is shown and saved as
+        heard."""
         self.meeting_id = meeting_id
         self._stt = stt
         self._bus = bus
@@ -95,6 +104,8 @@ class TranscriptionManager:
         self._detector = detector
         self._on_invocation = on_invocation
         self._on_unavailable = on_unavailable
+        self._on_listening = on_listening
+        self._on_saved = on_saved
         if clock is None:
             origin = time.monotonic()
             clock = lambda: time.monotonic() - origin  # noqa: E731
@@ -119,6 +130,8 @@ class TranscriptionManager:
         self._recent: deque[TranscriptSegment] = deque(maxlen=RECENT_FINALS)
         self._held_timer: asyncio.Task[None] | None = None
         self._held_deadline: float | None = None
+        self._listening: dict[str, str] = {}  # as the agent was last told
+        self._listening_timer: asyncio.Task[None] | None = None
 
     # state
 
@@ -160,6 +173,13 @@ class TranscriptionManager:
         """Withdraw an Ask press. True if one was waiting."""
         return self._detector.cancel_ask(participant_id)
 
+    def cancel_listening(self, participant_id: str) -> bool:
+        """Stop listening to this participant's voice: what they are saying now and their waits
+        for a question. True if the agent was listening to them."""
+        stopped = self._detector.cancel_listening(participant_id)
+        self._watch_listening()
+        return stopped
+
     async def stop(self, track_sid: str) -> None:
         """The track was muted, unpublished or unsubscribed. Ends its audio so the transcriber
         can finalise the last sentence, waiting up to drain_seconds before cancelling."""
@@ -198,6 +218,8 @@ class TranscriptionManager:
         await asyncio.gather(*(self.stop(t) for t in list(self._sessions)))
         if self._held_timer:
             self._held_timer.cancel()
+        if self._listening_timer:
+            self._listening_timer.cancel()
         self._send_held(math.inf)  # a question still waiting for its last words goes as it is
         if pending := [t for t in self._background if not t.done()]:
             await asyncio.wait(pending, timeout=self._drain_seconds)
@@ -218,6 +240,8 @@ class TranscriptionManager:
                     failures = 0
                     utterance = utterance or f"{self.meeting_id}-{uuid4().hex}"
                     segment = self._segment(piece, utterance, participant_id, name, origin)
+                    if not piece.is_final:
+                        self._heard(segment)
                     if piece.is_final:
                         utterance = None
                         if live:
@@ -279,8 +303,14 @@ class TranscriptionManager:
             self._recent.append(segment)
             self._spawn(self._save(segment))
             if invocation := self._detector.on_segment(segment):
-                self._spawn(self._invoke(invocation))
+                self._spawn(self._invoke(invocation))  # first: the agent is working, not idle
             self._time_held()
+            self._watch_listening()
+
+    def _heard(self, segment: TranscriptSegment) -> None:
+        """A partial caption, as heard: the original words, before any translation."""
+        self._detector.on_partial(segment)
+        self._watch_listening()
 
     async def _unavailable(self, participant_id: str, name: str) -> None:
         log.error("Captions unavailable for %s after repeated transcriber drops", participant_id)
@@ -366,6 +396,7 @@ class TranscriptionManager:
             await self._brain.ingest_segments(self.meeting_id, batch)
             self._saved += len(batch)
             self._backlog = []
+            self._reached_brain(batch)
             return
         except BrainRejected:
             held = []
@@ -373,6 +404,7 @@ class TranscriptionManager:
                 try:
                     await self._brain.ingest_segments(self.meeting_id, [segment])
                     self._saved += 1
+                    self._reached_brain([segment])
                 except BrainRejected as e:
                     self._dropped += 1
                     log.warning("Brain rejected segment %s (%d)", segment.seg_id, e.status)
@@ -382,6 +414,13 @@ class TranscriptionManager:
         except Exception as e:
             log.warning("Holding %d segment(s) to resend: %s", len(batch), e)
             self._hold(batch)
+
+    def _reached_brain(self, segments: list[TranscriptSegment]) -> None:
+        if self._on_saved:
+            try:
+                self._on_saved(segments)
+            except Exception:
+                log.exception("Could not report saved segments")
 
     def _hold(self, segments: list[TranscriptSegment]) -> None:
         overflow = max(0, len(segments) - self._backlog_limit)
@@ -408,10 +447,39 @@ class TranscriptionManager:
         self._held_timer = None
         self._send_held(max(self._clock(), deadline))
         self._time_held()
+        self._watch_listening(max(self._clock(), deadline))
 
     def _send_held(self, now: float) -> None:
         for invocation in self._detector.due(now):
             self._spawn(self._invoke(invocation))
+
+    # listening
+
+    def _watch_listening(self, now: float | None = None) -> None:
+        """Tell the agent who it is listening to if that changed, and look again when the
+        earliest wait runs out."""
+        now = self._clock() if now is None else now
+        listening = self._detector.listening(now)
+        if listening != self._listening:
+            self._listening = listening
+            if self._on_listening:
+                self._spawn(self._tell_listening(listening))
+        if self._listening_timer and not self._listening_timer.done():
+            self._listening_timer.cancel()
+        self._listening_timer = None
+        if (ends := self._detector.listening_ends(now)) is not None:
+            self._listening_timer = asyncio.create_task(self._watch_listening_at(ends))
+
+    async def _watch_listening_at(self, ends: float) -> None:
+        await asyncio.sleep(max(0.0, ends - self._clock()))
+        self._listening_timer = None
+        self._watch_listening(max(self._clock(), ends))
+
+    async def _tell_listening(self, listening: dict[str, str]) -> None:
+        try:
+            await self._on_listening(listening)  # type: ignore[misc]
+        except Exception:
+            log.exception("Could not tell the agent who it is listening to")
 
     # background work
 

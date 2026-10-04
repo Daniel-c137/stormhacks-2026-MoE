@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     # The embeddings fallback, e.g. google/gemini-embedding-001: the same model as
     # GEMINI_EMBEDDING_MODEL (its vectors are compared with Gemini's), at GEMINI_EMBEDDING_DIM
     openrouter_embedding_model: str | None = None
+    # Live agenda tracking on Jev, TypeSafe's decision model, through OpenRouter's decisions API
+    # with OPENROUTER_API_KEY: e.g. typesafe/jev-1.13. Unset, the tracker asks the Gemini chain at
+    # its own pace. The realtime worker reads it too, and then checks the agenda after every
+    # caption instead of only on its timer.
+    jev_model: str | None = None
+    jev_url: str = "https://openrouter.ai/api/alpha/decisions"
 
     livekit_url: str | None = None
     livekit_api_key: str | None = None
@@ -58,12 +64,18 @@ class Settings(BaseSettings):
     # Join tokens are only checked on connect, so a short life doesn't affect anyone in the call.
     livekit_token_ttl_seconds: int = 600
 
+    # GitHub for a team with no token connected: an MCP server reached with no credentials (the
+    # world mock in the demo)
     github_mcp_url: str | None = None
+    # GitHub for a team whose admin connected a fine-grained token in Settings: GitHub's hosted
+    # MCP server, sent the token as a bearer header, and the REST API the token is checked
+    # against when it is connected
+    github_hosted_mcp_url: str = "https://api.githubcopilot.com/mcp/"
+    github_api_url: str = "https://api.github.com"
     # GitLab's MCP server, https://<instance>/api/v4/mcp (links to code use that instance), or
     # the world mock
     gitlab_mcp_url: str | None = None
     jira_mcp_url: str | None = None
-    github_token: str | None = None
     github_repo: str | None = None
     jira_base_url: str | None = None
     jira_cloud_id: str | None = None

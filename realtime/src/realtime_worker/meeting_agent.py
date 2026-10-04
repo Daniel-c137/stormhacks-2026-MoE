@@ -3,7 +3,8 @@
 Polaris reasons only when someone asks deliberately: by name, with the Ask button or with a public
 @mention. A spoken question's answer is a shared card that stays silent until a participant
 chooses Speak, Post in chat or Dismiss; a chat mention is answered in chat. On timers it asks the
-brain to keep time against the agenda and to fact-check. The agenda goes to the room; a fact-check
+brain to keep time against the agenda and to fact-check; with Jev keeping time, it also checks
+the agenda once each caption has settled in the brain. The agenda goes to the room; a fact-check
 goes only to whoever made the claim, as a private chat message from the agent that is never
 stored, spoken or shown to anyone else. Someone joining 5 minutes or more late, or back after 5
 minutes or more away, gets a private catch-up from the brain the same way, only to them. Other
@@ -48,11 +49,14 @@ log = logging.getLogger(__name__)
 MAX_DETAIL = 120
 # A moment for a joiner's board to start listening before their catch-up is sent.
 CATCH_UP_DELAY_S = 3.0
+# Captions that settle within this of the first one waiting are checked against the agenda together.
+AGENDA_GATHER_S = 0.5
 
 
 # What a refused sender is told, privately. {agent} is the agent's name.
 REFUSED: dict[str, str] = {
     "speak": "Only the host or an admin can let {agent} speak in this meeting.",
+    "stop": "Only the host or an admin can stop {agent} in this meeting.",
     "send_to_chat": "Only the host or an admin can post {agent}'s answers in chat in this meeting.",
 }
 REFUSED_UNCHECKED = "I couldn't check who may do that just now, so I didn't. Try again in a moment."
@@ -64,6 +68,8 @@ class Transcription(Protocol):
     def arm_ask(self, participant_id: str) -> None: ...
 
     def cancel_ask(self, participant_id: str) -> bool: ...
+
+    def cancel_listening(self, participant_id: str) -> bool: ...
 
     def recent_finals(self) -> list[TranscriptSegment]: ...
 
@@ -97,6 +103,8 @@ class MeetingAgent:
         detector: WakeDetector | None = None,  # share the TranscriptionManager's
         spoken_max_chars: int = 600,
         agenda_tick_seconds: float = 10,
+        agenda_after_captions: bool = False,
+        agenda_check_delay: float = 3.5,
         fact_check_tick_seconds: float = 60,
         ask_seconds: float = ASK_SECONDS,
         clock: Callable[[], float] | None = None,
@@ -118,6 +126,8 @@ class MeetingAgent:
         self._detector = detector or WakeDetector(default_aliases(agent_name))
         self._spoken_max_chars = spoken_max_chars
         self._agenda_tick_seconds = agenda_tick_seconds
+        self._agenda_after_captions = agenda_after_captions
+        self._agenda_check_delay = agenda_check_delay
         self._fact_check_tick_seconds = fact_check_tick_seconds
         self._ask_seconds = ask_seconds
         self._clock = clock
@@ -126,9 +136,16 @@ class MeetingAgent:
 
         self._cards: dict[str, ResponseCard] = {}
         self._asking: dict[str, asyncio.Task[None]] = {}  # participant -> their Ask's expiry
+        self._listening: dict[str, str] = {}  # who is calling the agent by voice: id -> name
         self._working = 0
         self._speaking = asyncio.Lock()
+        self._playback: asyncio.Task[None] | None = None  # the answer being spoken
+        self._stop_requested = False
         self._last_agenda: str | None = None
+        self._agenda_lock = asyncio.Lock()  # one agenda check at a time: a tick or a caption's
+        self._agenda_due: list[float] = []  # when saved captions settle, on the meeting clock
+        self._agenda_waiter: asyncio.Task[None] | None = None
+        self._closed = False
         self._tasks: set[asyncio.Task[None]] = set()
 
     def start(self) -> None:
@@ -148,6 +165,7 @@ class MeetingAgent:
             log.warning("Could not tell the brain the agent joined %s: %s", self.meeting_id, e)
 
     async def aclose(self) -> None:
+        self._closed = True  # the transcription flushes its last captions after this
         for task in [*self._tasks, *self._asking.values()]:
             task.cancel()
         await asyncio.gather(*self._tasks, *self._asking.values(), return_exceptions=True)
@@ -164,6 +182,7 @@ class MeetingAgent:
             return
         if signal.cancel:
             self.transcription.cancel_ask(sender)
+            self.transcription.cancel_listening(sender)
             self._stop_asking(sender)
             if not self._asking and self.state.current.state == "capturing":
                 await self._rest()
@@ -183,6 +202,15 @@ class MeetingAgent:
         if task := self._asking.pop(participant_id, None):
             task.cancel()
 
+    # hearing its name
+
+    async def on_listening(self, listening: dict[str, str]) -> None:
+        """Who is calling the agent by voice (id -> name), from the transcription each time it
+        changes: someone still saying "Polaris, ...", or waiting after the name alone or a
+        question that trailed off. The agent shows it is listening to them."""
+        self._listening = listening
+        await self._rest()
+
     # answering
 
     async def on_invocation(self, invocation: Invocation) -> None:
@@ -192,6 +220,10 @@ class MeetingAgent:
             log.warning("Ignored a %s invocation in the room", invocation.visibility)
             return
         self._stop_asking(invocation.asked_by_id)
+        if invocation.via != "chat":  # a spoken question ends its asker's voice wait
+            self._listening = {
+                k: v for k, v in self._listening.items() if k != invocation.asked_by_id
+            }
         self._working += 1
         try:
             await self._move("working", clip(f"Looking into: {invocation.question}"))
@@ -232,6 +264,9 @@ class MeetingAgent:
             return
         if action.action == "show_on_stage":
             return  # the board publishes Topic.STAGE itself
+        if action.action == "stop":
+            await self._stop(action, sender)
+            return
         if self._pending(action) is None or not await self._may_act(action, sender):
             return
         card = self._pending(action)  # it may have changed while the brain was asked
@@ -291,10 +326,14 @@ class MeetingAgent:
             log.warning("Could not tell %s their %s was refused: %s", sender, action.action, e)
 
     async def _speak(self, card: ResponseCard) -> None:
+        """Plays the answer as its own task, so a Stop can cut it off (_stop). The card is
+        `speaking` meanwhile, so the board shows Stop instead of Speak; it ends `spoken`, or back
+        to `pending` when stopped or when the speech failed."""
         if self._speaking.locked():
             log.info("Already speaking; ignored Speak on card %s", card.id)
             return
         failure = ""
+        stopped = False
         async with self._speaking:
             if card.status != "pending" or not self.state.can_move("speaking"):
                 log.info("Not speaking card %s from %s", card.id, self.state.current.state)
@@ -303,14 +342,40 @@ class MeetingAgent:
             voice = await self._voice()
             log.info("Speaking card %s: %d characters", card.id, len(text))
             await self._move("speaking", clip(f"Answering {card.invocation.asked_by_name}"))
+            await self._set_status(card, "speaking")
+            self._playback = asyncio.create_task(
+                self._speaker.play(self._tts.synthesize(text, voice or ""))
+            )
+            self._stop_requested = False
             try:
-                await self._speaker.play(self._tts.synthesize(text, voice or ""))
+                await self._playback
+            except asyncio.CancelledError:
+                current = asyncio.current_task()
+                if not self._stop_requested or (current and current.cancelling()):
+                    raise  # the agent itself is closing, not a Stop
+                stopped = True
+                log.info("Stopped speaking card %s", card.id)
             except Exception as e:
                 log.warning("Could not speak card %s: %s", card.id, e)
                 failure = clip(f"Couldn't speak the answer: {e}")
-        if not failure:
-            await self._set_status(card, "spoken")
+            finally:
+                self._playback = None
+        latest = self._cards.get(card.id, card)
+        await self._set_status(latest, "pending" if stopped or failure else "spoken")
         await self._rest(failure)
+
+    async def _stop(self, action: ResponseAction, sender: str) -> None:
+        """Stop pressed on the card being spoken: the audio stops at once (TrackSpeaker clears
+        what was queued). Anyone the team's who_can_allow lets act on cards may stop it."""
+        card = self._cards.get(action.card_id)
+        if card is None or card.status != "speaking" or self._playback is None:
+            log.info("Ignored stop on card %s: it isn't being spoken", action.card_id)
+            return
+        if not await self._may_act(action, sender):
+            return
+        if self._playback is not None and not self._playback.done():
+            self._stop_requested = True
+            self._playback.cancel()
 
     async def _voice(self) -> str | None:
         """The team's chosen voice, else the default."""
@@ -431,13 +496,38 @@ class MeetingAgent:
     # ticks
 
     async def tick_agenda(self) -> None:
-        tracked = await self.brain.track_agenda(self.meeting_id)
-        shown = tracked.agenda.model_dump_json(exclude={"generated_at"})
-        if shown != self._last_agenda:
-            await self.bus.publish(Topic.AGENDA, tracked.agenda)
-            self._last_agenda = shown
-        for nudge in tracked.nudges:
-            await self.bus.publish(Topic.AGENDA_NUDGE, nudge)
+        async with self._agenda_lock:
+            tracked = await self.brain.track_agenda(self.meeting_id)
+            shown = tracked.agenda.model_dump_json(exclude={"generated_at"})
+            if shown != self._last_agenda:
+                await self.bus.publish(Topic.AGENDA, tracked.agenda)
+                self._last_agenda = shown
+            for nudge in tracked.nudges:
+                await self.bus.publish(Topic.AGENDA_NUDGE, nudge)
+
+    def caption_saved(self, t_end: float) -> None:
+        """A final caption that ended at `t_end` (meeting clock) reached the brain. With Jev
+        keeping time the agenda is checked once it has settled there, agenda_check_delay after
+        it ended; captions settling within AGENDA_GATHER_S of each other share one check."""
+        if not self._agenda_after_captions or self._clock is None or self._closed:
+            return
+        self._agenda_due.append(t_end + self._agenda_check_delay)
+        if self._agenda_waiter is None or self._agenda_waiter.done():
+            self._agenda_waiter = asyncio.create_task(self._check_agenda_when_due())
+            self._tasks.add(self._agenda_waiter)
+            self._agenda_waiter.add_done_callback(self._tasks.discard)
+
+    async def _check_agenda_when_due(self) -> None:
+        assert self._clock is not None
+        while self._agenda_due:
+            first = min(self._agenda_due)
+            due = max(d for d in self._agenda_due if d <= first + AGENDA_GATHER_S)
+            await asyncio.sleep(max(0.0, due - self._clock()))
+            self._agenda_due = [d for d in self._agenda_due if d > due]
+            try:
+                await self.tick_agenda()
+            except Exception as e:
+                log.warning("Agenda check failed; the next caption or tick tries again: %s", e)
 
     async def tick_fact_check(self) -> None:
         """Each check goes to whoever made the claim and nobody else, as a private chat message
@@ -468,13 +558,17 @@ class MeetingAgent:
 
     async def _rest(self, detail: str = "") -> None:
         """Where the agent settles when nothing is in progress: working on another question,
-        listening for an Ask, an answer waiting (hand raised), or idle."""
+        listening for an Ask or to someone calling it, an answer waiting (hand raised), or
+        idle."""
         if self._speaking.locked():
             return  # the answer being spoken settles the state when it ends
         if self._working:
             await self._move("working", self.state.current.detail)
         elif self._asking:
             await self._move("capturing", detail or "Listening for a question")
+        elif self._listening:
+            names = " and ".join(self._listening.values())
+            await self._move("capturing", detail or clip(f"Listening to {names}"))
         elif any(c.status == "pending" for c in self._cards.values()):
             await self._move("hand_raised", detail or "Answer ready")
         else:
