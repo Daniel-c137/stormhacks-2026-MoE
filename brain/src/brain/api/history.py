@@ -46,6 +46,7 @@ from .deps import (
     get_settings,
     get_speech_locks,
     get_store,
+    host_or_admin,
     team_meeting,
     user_team,
 )
@@ -147,13 +148,12 @@ async def retry_report(
     runner: PipelineRunner = Depends(get_runner),
     settings: Settings = Depends(get_settings),
 ) -> ReportProgress:
-    """Host only, for a meeting still being written up that nothing here is running: once the
-    last run failed, never saved progress, or has made no progress for PIPELINE_STALE_MINUTES
-    (its process died). Starts it over; the report, its links and the meeting's memory are
-    replaced, not added to. A refused retry changes nothing."""
+    """The host or an admin, for a meeting still being written up that nothing here is running:
+    once the last run failed, never saved progress, or has made no progress for
+    PIPELINE_STALE_MINUTES (its process died). Starts it over; the report, its links and the
+    meeting's memory are replaced, not added to. A refused retry changes nothing."""
     meeting = await team_meeting(store, user, meeting_id)
-    if meeting.host_id != user.id:
-        raise HTTPException(status_code=403, detail="Only the host can retry the write-up")
+    host_or_admin(meeting, user)
     if meeting.status != "processing":
         raise HTTPException(
             status_code=409, detail=f"The meeting is {meeting.status}, not being written up"
@@ -219,10 +219,12 @@ async def push_tasks(
     store: Store = Depends(get_store),
     make_pusher: Callable[[], JiraPusher] = Depends(get_jira_pusher),
 ) -> list[TaskPushResult]:
-    """The only path to external writes. Runs once a human approved these drafts and destination.
-    The approver is always the caller. The meeting leaves review once every included draft has
-    a key; a draft Jira rejected keeps it in review so it can be fixed and pushed again."""
+    """The only path to external writes. Runs once a human approved these drafts and destination:
+    the meeting's host or an admin, always recorded as the approver. The meeting leaves review
+    once every included draft has a key; a draft Jira rejected keeps it in review so it can be
+    fixed and pushed again."""
     meeting = await team_meeting(store, user, meeting_id)
+    host_or_admin(meeting, user)
     if meeting.status not in REVIEWABLE:
         raise HTTPException(
             status_code=409, detail=f"The meeting is {meeting.status}, not in review"

@@ -10,7 +10,14 @@ from ..connectors import connector_statuses
 from ..store import NotFound, Store
 from ..voices import VoicesFailed, VoicesUnavailable, fetch_voices, with_default
 from ..zones import is_zone
-from .deps import current_user, get_http_transport, get_settings, get_store, user_team
+from .deps import (
+    current_user,
+    get_http_transport,
+    get_settings,
+    get_store,
+    require_admin,
+    user_team,
+)
 
 router = APIRouter(tags=["team"])
 
@@ -131,10 +138,10 @@ async def read_team_settings(
 
 @router.put("/settings")
 async def write_team_settings(
-    body: TeamSettings, user: Person = Depends(current_user), store: Store = Depends(get_store)
+    body: TeamSettings, user: Person = Depends(require_admin), store: Store = Depends(get_store)
 ) -> TeamSettings:
-    """Any team member may change them for now. Always the caller's own team; connection and
-    index state belong to the server and are kept as they are."""
+    """Admin only. Always the caller's own team; connection and index state belong to the server
+    and are kept as they are."""
     if body.interrupt_minutes not in INTERRUPT_MINUTES:
         raise HTTPException(
             status_code=422,

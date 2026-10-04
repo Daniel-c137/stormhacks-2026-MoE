@@ -36,6 +36,7 @@ import {
   useTranscript,
 } from "@/hooks/useLive";
 import { askInMeeting, describeError, endMeeting } from "@/lib/api";
+import { hostOrAdmin } from "@/lib/roles";
 import { initialsOf, shortOf } from "@/lib/format";
 import { publish } from "@/lib/room";
 import { AgendaTracker } from "./AgendaTracker";
@@ -185,7 +186,7 @@ function RoomView({
   const [mentionedAt, setMentionedAt] = useState<number | null>(null);
   const [chatError, setChatError] = useState("");
 
-  const isHost = meeting.host_id === me.id;
+  const isHost = hostOrAdmin(meeting, me); // the host's controls are an admin's too
   const humans = participants.filter((p) => !p.is_agent);
   const agentPresent = participants.some((p) => p.is_agent);
   const handUp = participants.find((p) => p.id === me.id)?.hand_raised ?? false;

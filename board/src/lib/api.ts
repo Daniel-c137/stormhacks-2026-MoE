@@ -9,6 +9,8 @@ import type {
   Answer,
   AskRequest,
   ConnectorStatus,
+  CreateAccountRequest,
+  CreateAccountResponse,
   CreateMeetingRequest,
   Decision,
   InviteRequest,
@@ -167,6 +169,8 @@ export const getPhoto = async (photoUrl: string): Promise<Blob> => (await send("
 // team
 export const getTeam = () => get<Team>("/team");
 export const listMembers = () => get<Person[]>("/team/members");
+/** Admin only. The generated password is in this response and nowhere else. */
+export const createAccount = (body: CreateAccountRequest) => request<CreateAccountResponse>("POST", "/team/accounts", body);
 export const getSettings = () => get<TeamSettings>("/settings");
 export const updateSettings = (body: TeamSettings) => request<TeamSettings>("PUT", "/settings", body);
 export const listConnectors = () => get<ConnectorStatus[]>("/settings/connectors");

@@ -1,5 +1,5 @@
 """Email and password sign-in, checked by the brain (board -> brain). There is no public sign-up;
-accounts come from `brain add-user`."""
+accounts come from `brain add-user` or an admin (POST /team/accounts)."""
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.concurrency import run_in_threadpool

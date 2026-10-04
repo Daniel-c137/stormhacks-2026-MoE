@@ -50,7 +50,7 @@ MEETING = (
     "id, team_id, title, status, code, host_id, participant_ids, invitee_ids, scheduled_start,"
     " started_at, ended_at, duration_min, jira_keys, transcript_deleted_at, agent_joined_at"
 )
-PERSON = "p.id, p.name, p.short, p.initials, p.title, p.email, p.photo_url"
+PERSON = "p.id, p.name, p.short, p.initials, p.title, p.email, p.photo_url, p.is_admin"
 TEAM = """
 select t.id, t.name, t.github_repo, t.jira_project,
     array(select m.person_id from memberships m where m.team_id = t.id order by m.seq)
@@ -174,12 +174,12 @@ class PostgresStore:
         async with self._tx() as cur:
             await self._team(cur, team_id)
             await cur.execute(
-                "insert into people (id, name, short, initials, title, email, photo_url)"
+                "insert into people (id, name, short, initials, title, email, photo_url, is_admin)"
                 " values (%(id)s, %(name)s, %(short)s, %(initials)s, %(title)s, %(email)s,"
-                " %(photo_url)s)"
+                " %(photo_url)s, %(is_admin)s)"
                 " on conflict (id) do update set name = excluded.name, short = excluded.short,"
                 " initials = excluded.initials, title = excluded.title, email = excluded.email,"
-                " photo_url = excluded.photo_url",
+                " photo_url = excluded.photo_url, is_admin = excluded.is_admin",
                 person.model_dump(),
             )
             await self._add_members(cur, team_id, [person.id])
@@ -200,7 +200,8 @@ class PostgresStore:
                 cur,
                 "update people p set name = %(name)s, short = %(short)s,"
                 " initials = %(initials)s, title = %(title)s, email = %(email)s,"
-                f" photo_url = %(photo_url)s where id = %(id)s returning {PERSON}",
+                " photo_url = %(photo_url)s, is_admin = %(is_admin)s"
+                f" where id = %(id)s returning {PERSON}",
                 person.model_dump(),
             )
         if row is None:

@@ -248,7 +248,7 @@ def test_approval_pushes_records_keys_and_marks_the_meeting_pushed(client_as, st
     one, two = task(meeting["id"], 1), task(meeting["id"], 2)
     processed(store, meeting, one, two)
 
-    response = push(client_as(SARAH), meeting["id"], one.id, two.id)
+    response = push(client_as(ALEX), meeting["id"], one.id, two.id)
 
     assert response.status_code == 200, response.text
     assert response.json() == [
@@ -275,7 +275,7 @@ def test_approval_pushes_records_keys_and_marks_the_meeting_pushed(client_as, st
 
 
 def test_the_approver_is_the_caller_whatever_the_body_says(client_as, store, pushing):
-    meeting = create(client_as(ALEX))
+    meeting = create(client_as(SARAH))
     draft = task(meeting["id"], 1)
     processed(store, meeting, draft)
 
