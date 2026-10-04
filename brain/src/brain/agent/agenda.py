@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from brain.jira import JiraIssue
 from brain.llm import LLM, LLMError
 from brain.store import NotFound, Store
+from brain.text import one_line
 from contracts import (
     Agenda,
     AgendaItem,
@@ -39,12 +40,6 @@ class AgendaPlanner(Protocol):
 
 def valid_minutes(minutes: int | None) -> bool:
     return minutes is None or MINUTES_MIN <= minutes <= MINUTES_MAX
-
-
-def one_line(text: str) -> str:
-    """Whitespace collapsed, wrapping quotes and a trailing period dropped."""
-    line = " ".join(text.split()).strip("\"'` \u201c\u201d\u2018\u2019")
-    return line[:-1].rstrip() if line.endswith(".") and not line.endswith("..") else line
 
 
 # rewrite

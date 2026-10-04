@@ -64,7 +64,10 @@ def settings() -> Settings:
         livekit_api_secret=SECRET,
         brain_internal_token=WORKER_TOKEN,
         gemini_api_key=None,  # never real Gemini; tests that need a model override get_llm*
-        pipeline_settle_seconds=0,
+        # A sync TestClient closes its event loop after each request, so a write-up it starts
+        # is always still settling then and is cut off; ending a meeting stays at processing.
+        # test_pipeline_api.py runs write-ups to the end on its own loop with no settle time.
+        pipeline_settle_seconds=3600,
     )
 
 

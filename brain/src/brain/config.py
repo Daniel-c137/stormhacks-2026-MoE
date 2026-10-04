@@ -53,3 +53,5 @@ class Settings(BaseSettings):
 
     # seconds the write-up waits after the host ends, so the worker's last final segments land
     pipeline_settle_seconds: float = 8.0
+    # minutes without progress after which a write-up nobody here is running may be retried
+    pipeline_stale_minutes: float = Field(default=10.0, gt=0)

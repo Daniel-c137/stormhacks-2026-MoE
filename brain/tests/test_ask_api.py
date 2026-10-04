@@ -11,11 +11,13 @@ from ask_support import citing, scripted
 from fastapi.testclient import TestClient
 
 from brain.agent.ask import PlannedCall
+from brain.agent.team_tools import TeamToolbox
 from brain.api.deps import get_llm, get_memory, get_settings
 from brain.config import Settings
 from brain.llm import MockEmbedder
-from brain.memory import InMemoryMemoryStore, MeetingMemory
+from brain.memory import InMemoryMemoryStore, MeetingMemory, UnusableMemory
 from brain.report import TranscriptInput
+from brain.store import InMemoryStore
 from contracts import Answer, InvokeResponse, Source
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -318,7 +320,8 @@ def test_overlong_questions_and_histories_are_rejected(client_as, worker, memory
     assert llm.calls == []
 
 
-def test_memory_with_the_wrong_embedding_size_is_unavailable_not_an_error():
+@pytest.mark.anyio
+async def test_memory_with_the_wrong_embedding_size_is_a_failed_tool_not_an_error():
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(db_pool=object())))
     settings = Settings(
         _env_file=None,
@@ -326,5 +329,13 @@ def test_memory_with_the_wrong_embedding_size_is_unavailable_not_an_error():
         gemini_embedding_model="some-embedding-model",
         gemini_embedding_dim=3072,
     )
+    memory = get_memory(request, settings)
+    assert isinstance(memory, UnusableMemory)
+    tools = TeamToolbox(
+        TEAM.id, ALEX.id, InMemoryStore(), members=[], memory=memory, jira="off", github="off"
+    )
 
-    assert get_memory(request, settings) is None
+    result = await tools.call("search_meetings", {"query": "refunds"})
+
+    assert not result.ok
+    assert "misconfigured" in (result.error or "") and "3072" in (result.error or "")

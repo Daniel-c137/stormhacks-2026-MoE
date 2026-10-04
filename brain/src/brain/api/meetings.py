@@ -37,11 +37,10 @@ from .deps import (
 )
 
 router = APIRouter(prefix="/meetings", tags=["meetings"])
+logger = logging.getLogger(__name__)
 
 MAX_DURATION_MIN = 24 * 60
 MAX_TITLE = 200
-
-logger = logging.getLogger(__name__)
 
 
 async def team_invitees(store: Store, team_id: str, host_id: str, ids: Iterable[str]) -> list[str]:
@@ -177,13 +176,17 @@ async def end_meeting(
     if meeting.host_id != user.id:
         raise HTTPException(status_code=403, detail="Only the host can end the meeting")
     meeting, ended = await end_live_meeting(store, meeting.id)
-    if ended:  # only one end ever gets here
+    if ended:  # only one end ever gets here; run() saves the first progress itself
         try:
             await rooms.close(meeting.id)
         except Exception:
             logger.warning("Could not close LiveKit room %s", meeting.id, exc_info=True)
-        await pipeline.queued(meeting.id)
-        runner.start(meeting.id, pipeline.run)
+        try:
+            runner.start(meeting.id, pipeline.run)
+        except Exception:
+            # The meeting has ended either way; leave an error so the host can retry.
+            logger.exception("could not start the write-up of meeting %s", meeting.id)
+            await pipeline.not_started(meeting.id)
     return meeting
 
 
