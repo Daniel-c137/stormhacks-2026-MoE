@@ -7,7 +7,7 @@ from itertools import count
 import pytest
 
 from contracts import AGENT_PARTICIPANT_ID, ChatMessage, TranscriptSegment
-from realtime_worker.invocation import WakeDetector, default_aliases
+from realtime_worker.invocation import TRAILING_SECONDS, WakeDetector, default_aliases
 
 MEETING = "m-1"
 _seq = count(1)
@@ -166,6 +166,114 @@ def test_name_alone_expires_if_the_speaker_says_nothing_soon(detector):
     detector.on_segment(said("OmniMan.", t=10.0))
 
     assert detector.on_segment(said("Anyway, moving on.", t=60.0)) is None
+
+
+# a question that trails off
+
+
+def test_a_question_that_trails_off_waits_for_the_rest_of_the_sentence(detector):
+    """Scribe finalised a short pause as two segments: the question is both, joined."""
+    assert detector.on_segment(said("OmniMan, what's the status of...", t=10.0)) is None
+
+    inv = detector.on_segment(said("DS-104 in Jira.", t=14.0))
+
+    assert inv is not None
+    assert inv.via == "voice"
+    assert inv.asked_by_id == "u-alex"
+    assert inv.question == "what's the status of DS-104 in Jira."
+    assert inv.t == 10.0
+    assert detector.next_due() is None
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "OmniMan, what's the status of...",
+        "OmniMan, what's the status of" + chr(0x2026),
+        "OmniMan, what's the status of",
+        "OmniMan, can you check the",
+        "OmniMan, tell me about",
+        "OmniMan, what's",
+        "OmniMan, so what's",
+        "OmniMan, check DS-104",
+    ],
+)
+def test_unfinished_questions_are_held(detector, text):
+    assert detector.on_segment(said(text, t=10.0)) is None
+    assert detector.next_due() == pytest.approx(12.0 + TRAILING_SECONDS)
+
+
+@pytest.mark.parametrize(
+    "text, question",
+    [
+        ("OmniMan, what's the status of DS-104?", "what's the status of DS-104?"),
+        ("OmniMan, any blockers?", "any blockers?"),
+        ("OmniMan, summarise the last decision.", "summarise the last decision."),
+    ],
+)
+def test_a_finished_question_is_sent_at_once(detector, text, question):
+    inv = detector.on_segment(said(text))
+
+    assert inv is not None and inv.question == question
+    assert detector.next_due() is None
+
+
+def test_a_held_question_is_sent_as_it_is_when_nothing_follows(detector):
+    detector.on_segment(said("OmniMan, what's the status of...", t=10.0))
+
+    assert detector.due(12.0 + TRAILING_SECONDS - 0.1) == []
+    [inv] = detector.due(12.0 + TRAILING_SECONDS + 0.1)
+
+    assert inv.via == "voice"
+    assert inv.question == "what's the status of..."
+    assert inv.t == 10.0
+    assert detector.next_due() is None
+    assert detector.on_segment(said("DS-104 in Jira.", t=19.0)) is None
+
+
+def test_the_rest_said_too_late_is_not_joined_and_the_partial_still_goes(detector):
+    detector.on_segment(said("OmniMan, what's the status of...", t=10.0))
+
+    assert detector.on_segment(said("Anyway, moving on.", t=40.0)) is None
+    [inv] = detector.due(40.0)
+    assert inv.question == "what's the status of..."
+
+
+def test_another_speaker_in_between_is_not_joined(detector):
+    detector.on_segment(said("OmniMan, what's the status of...", t=10.0))
+
+    assert detector.on_segment(said("I think it's blocked.", by="u-sarah", t=13.0)) is None
+    inv = detector.on_segment(said("DS-104 in Jira.", t=15.0))
+
+    assert inv is not None
+    assert inv.asked_by_id == "u-alex"
+    assert inv.question == "what's the status of DS-104 in Jira."
+
+
+def test_the_name_alone_then_a_question_that_trails_off_waits_too(detector):
+    detector.on_segment(said("OmniMan.", t=10.0))
+
+    assert detector.on_segment(said("What's the status of...", t=12.0)) is None
+    inv = detector.on_segment(said("DS-104?", t=15.0))
+
+    assert inv.question == "What's the status of DS-104?"
+    assert inv.t == 12.0
+
+
+def test_the_ask_button_still_takes_the_next_segment_at_once(detector):
+    detector.arm_ask("u-sarah", at=20.0)
+
+    inv = detector.on_segment(said("Who owns the...", by="u-sarah", t=22.0))
+
+    assert inv is not None and inv.via == "ask"
+    assert inv.question == "Who owns the..."
+    assert detector.next_due() is None
+
+
+def test_a_chat_mention_that_trails_off_is_still_sent_at_once(detector):
+    inv = posted(detector, chat("@OmniMan what's the status of"))
+
+    assert inv is not None and inv.question == "what's the status of"
 
 
 # Ask button

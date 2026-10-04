@@ -180,7 +180,7 @@ def unavailable():
 async def make_manager(stt, bus, clock, invocations, unavailable):
     managers = []
 
-    def make(brain) -> TranscriptionManager:
+    def make(brain, detector: WakeDetector | None = None) -> TranscriptionManager:
         async def on_invocation(invocation: Invocation) -> None:
             invocations.append(invocation)
 
@@ -192,7 +192,7 @@ async def make_manager(stt, bus, clock, invocations, unavailable):
             stt=stt,
             bus=bus,
             brain=brain,
-            detector=WakeDetector(["OmniMan"]),
+            detector=detector or WakeDetector(["OmniMan"]),
             on_invocation=on_invocation,
             on_unavailable=on_unavailable,
             clock=clock,
@@ -490,6 +490,41 @@ async def test_a_final_segment_addressing_the_assistant_is_handed_on(manager, st
     assert [(i.asked_by_id, i.question) for i in invocations] == [
         ("u-alex", "what did we decide about Postgres?")
     ]
+
+
+async def test_a_question_that_trails_off_is_joined_with_the_rest(manager, stt, invocations):
+    start(manager, "u-alex")
+    stt.say("u-alex", "OmniMan, what's the status of...")
+    stt.say("u-alex", "DS-104 in Jira.")
+    stt.end("u-alex")
+    await manager.join()
+
+    assert [i.question for i in invocations] == ["what's the status of DS-104 in Jira."]
+
+
+async def test_a_question_that_trails_off_is_sent_when_nothing_follows(
+    make_manager, brain, stt, clock, invocations
+):
+    manager = make_manager(brain, WakeDetector(["OmniMan"], trailing_seconds=0.05))
+    start(manager, "u-alex")
+    await until(lambda: stt.started)
+    clock.now = 2.0  # the segment below ends 2 s after its stream started
+    stt.say("u-alex", "OmniMan, what's the status of...")
+
+    await until(lambda: invocations, timeout=2.0)
+    assert [i.question for i in invocations] == ["what's the status of..."]
+
+
+async def test_a_held_question_is_not_lost_when_the_meeting_closes(
+    make_manager, brain, stt, invocations
+):
+    manager = make_manager(brain)
+    start(manager, "u-alex")
+    stt.say("u-alex", "OmniMan, what's the status of...")
+    await until(lambda: brain.saved)
+    await manager.aclose()
+
+    assert [i.question for i in invocations] == ["what's the status of..."]
 
 
 async def test_ask_button_uses_the_meeting_clock(manager, stt, clock, invocations):
