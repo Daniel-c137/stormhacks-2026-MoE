@@ -9,10 +9,14 @@ background so a slow brain never delays captions.
 Words are not lost quietly: a dropped transcriber connection is reopened, saves that fail are
 held and resent (the brain ignores an identical seg_id), stopping a track lets the last
 sentence finish, and whatever could not be saved is counted.
+
+A spoken question that trails off is held by the detector for the rest of the sentence; the
+manager owns the clock, so it runs the timer that sends a held question when nothing follows.
 """
 
 import asyncio
 import logging
+import math
 import time
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
@@ -83,6 +87,8 @@ class TranscriptionManager:
         self._saved = 0
         self._dropped = 0
         self._recent: deque[TranscriptSegment] = deque(maxlen=RECENT_FINALS)
+        self._held_timer: asyncio.Task[None] | None = None
+        self._held_deadline: float | None = None
 
     # state
 
@@ -146,7 +152,11 @@ class TranscriptionManager:
         then try once more to save anything still held."""
         while pending := [
             t
-            for t in [*(s.task for s in self._sessions.values()), *self._background]
+            for t in [
+                *(s.task for s in self._sessions.values()),
+                *self._background,
+                *([self._held_timer] if self._held_timer else []),
+            ]
             if not t.done()
         ]:
             await asyncio.wait(pending)
@@ -156,6 +166,9 @@ class TranscriptionManager:
         """End every session letting its last sentence finish, wait briefly for in-flight saves,
         flush what is held, then cancel what remains."""
         await asyncio.gather(*(self.stop(t) for t in list(self._sessions)))
+        if self._held_timer:
+            self._held_timer.cancel()
+        self._send_held(math.inf)  # a question still waiting for its last words goes as it is
         if pending := [t for t in self._background if not t.done()]:
             await asyncio.wait(pending, timeout=self._drain_seconds)
         await self._flush()
@@ -217,6 +230,7 @@ class TranscriptionManager:
             self._spawn(self._save(segment))
             if invocation := self._detector.on_segment(segment):
                 self._spawn(self._invoke(invocation))
+            self._time_held()
 
     async def _unavailable(self, participant_id: str, name: str) -> None:
         log.error("Captions unavailable for %s after repeated transcriber drops", participant_id)
@@ -267,6 +281,29 @@ class TranscriptionManager:
             log.error("Backlog full; dropping %d oldest segment(s)", overflow)
         self._dropped += overflow
         self._backlog = segments[overflow:]
+
+    # held questions
+
+    def _time_held(self) -> None:
+        """Keep one timer running for the earliest question the detector is holding."""
+        deadline = self._detector.next_due()
+        if deadline == self._held_deadline and self._held_timer and not self._held_timer.done():
+            return
+        if self._held_timer and not self._held_timer.done():
+            self._held_timer.cancel()
+        self._held_timer, self._held_deadline = None, deadline
+        if deadline is not None:
+            self._held_timer = asyncio.create_task(self._send_held_at(deadline))
+
+    async def _send_held_at(self, deadline: float) -> None:
+        await asyncio.sleep(max(0.0, deadline - self._clock()))
+        self._held_timer = None
+        self._send_held(max(self._clock(), deadline))
+        self._time_held()
+
+    def _send_held(self, now: float) -> None:
+        for invocation in self._detector.due(now):
+            self._spawn(self._invoke(invocation))
 
     # background work
 
