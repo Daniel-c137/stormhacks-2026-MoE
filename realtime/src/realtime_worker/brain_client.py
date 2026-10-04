@@ -7,6 +7,8 @@ import httpx
 from contracts import (
     AgendaTrackResponse,
     Answer,
+    CatchUpRequest,
+    CatchUpResponse,
     ChatMessage,
     FactCheckResponse,
     Invocation,
@@ -65,6 +67,10 @@ class BrainClient(Protocol):
     async def track_agenda(self, meeting_id: str) -> AgendaTrackResponse: ...
 
     async def fact_check(self, meeting_id: str) -> FactCheckResponse: ...
+
+    async def catch_up(
+        self, meeting_id: str, participant_id: str, since: float, until: float
+    ) -> CatchUpResponse: ...
 
 
 class HttpBrainClient:
@@ -161,6 +167,20 @@ class HttpBrainClient:
             timeout=self._invoke_timeout,
         )
         return FactCheckResponse.model_validate_json(response.content)
+
+    async def catch_up(
+        self, meeting_id: str, participant_id: str, since: float, until: float
+    ) -> CatchUpResponse:
+        """What to send the participant about the span they missed. Not retried: each attempt
+        is a model call, and a missed catch-up only costs them the summary."""
+        body = CatchUpRequest(participant_id=participant_id, since=since, until=until)
+        response = await self._post(
+            f"/internal/meetings/{meeting_id}/catch-up",
+            body.model_dump(mode="json"),
+            idempotent=False,
+            timeout=self._invoke_timeout,
+        )
+        return CatchUpResponse.model_validate_json(response.content)
 
     async def aclose(self) -> None:
         await self._http.aclose()

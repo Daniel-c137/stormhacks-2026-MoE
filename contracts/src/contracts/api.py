@@ -123,6 +123,26 @@ class FactCheckResponse(BaseModel):
     snippets: list[CodeSnippet] = []
 
 
+class CatchUpRequest(BaseModel):
+    """realtime -> brain when someone joins a live meeting 5 minutes or more after it started,
+    or comes back after 5 minutes or more away. `since` and `until` are seconds from the meeting
+    start: the span they missed."""
+
+    participant_id: str
+    since: float = Field(ge=0, allow_inf_nan=False)
+    until: float = Field(ge=0, allow_inf_nan=False)
+
+
+class CatchUpResponse(BaseModel):
+    """What the worker sends only to the participant, as a private chat message from the agent
+    (Topic.PRIVATE_CHAT, recipient_id set). `text` is None when there is nothing to send.
+    `source_times` are the meeting seconds of the transcript lines it rests on. Never stored,
+    broadcast or spoken."""
+
+    text: str | None = None
+    source_times: list[float] = []
+
+
 class ProfileUpdate(BaseModel):
     """Only the fields that are set change."""
 

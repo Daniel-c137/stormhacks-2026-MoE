@@ -8,8 +8,9 @@ for that meeting and leaves any room that is not a live meeting.
 Per participant microphone: Scribe -> captions on Topic.TRANSCRIPT -> final segments to the brain
 -> the wake detector. Invocations (the name, the Ask button, a public @mention) go to the brain;
 answers come back as a shared ResponseCard and are spoken only after a participant chooses Speak.
-Public chat goes to the brain. Agenda and fact-check ticks run on timers. When the room closes
-the job shuts down, flushing the last final segments to the brain.
+Public chat goes to the brain. Agenda and fact-check ticks run on timers. Participants joining and
+leaving are followed, so a late joiner gets a private catch-up. When the room closes the job shuts
+down, flushing the last final segments to the brain.
 """
 
 import asyncio
@@ -114,6 +115,7 @@ class MeetingSession:
     ) -> "MeetingSession":
         meeting = info.meeting
         name = get_identity().agent_name
+        clock = meeting_clock(meeting)
         bus = LiveKitBus(room.local_participant)
         detector = WakeDetector(default_aliases(name))
         agent = MeetingAgent(
@@ -134,6 +136,7 @@ class MeetingSession:
             spoken_max_chars=settings.spoken_answer_max_chars,
             agenda_tick_seconds=settings.agenda_tick_seconds,
             fact_check_tick_seconds=settings.fact_check_tick_seconds,
+            clock=clock,
         )
         transcription = TranscriptionManager(
             meeting.id,
@@ -148,7 +151,7 @@ class MeetingSession:
             brain=brain,
             detector=detector,
             on_invocation=agent.on_invocation,
-            clock=meeting_clock(meeting),
+            clock=clock,
         )
         agent.transcription = transcription
         router = TrackRouter(transcription)
@@ -157,6 +160,7 @@ class MeetingSession:
         bus.attach(room)
         router.attach(room)
         room.register_text_stream_handler(CHAT_TOPIC, session._on_chat)
+        watch_presence(room, agent)
         for participant in room.remote_participants.values():  # subscribed before we listened
             for publication in participant.track_publications.values():
                 if publication.subscribed and publication.track is not None:
@@ -199,6 +203,13 @@ class MeetingSession:
                 "%d final segment(s) of %s never reached the brain", unsaved, self.agent.meeting_id
             )
         await self.brain.aclose()
+
+
+def watch_presence(room: rtc.Room, agent: MeetingAgent) -> None:
+    """Who is already in the room, then everyone who joins or leaves after the agent did."""
+    agent.already_here(list(room.remote_participants))
+    room.on("participant_connected", lambda p: agent.on_participant_joined(p.identity))
+    room.on("participant_disconnected", lambda p: agent.on_participant_left(p.identity))
 
 
 async def on_request(request: JobRequest) -> None:

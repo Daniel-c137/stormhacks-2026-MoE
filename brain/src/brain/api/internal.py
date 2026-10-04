@@ -13,6 +13,8 @@ from contracts import (
     AGENT_PARTICIPANT_ID,
     AgendaTrackRequest,
     AgendaTrackResponse,
+    CatchUpRequest,
+    CatchUpResponse,
     ChatMessage,
     FactCheckRequest,
     FactCheckResponse,
@@ -26,6 +28,7 @@ from contracts import (
 from contracts.meeting import MeetingStatus
 
 from ..agent.ask import Question, ToolOrchestrator
+from ..agent.catchup import catch_up
 from ..agent.factcheck import FactChecker
 from ..agent.timekeeping import (
     NOW_SLACK_S,
@@ -300,3 +303,40 @@ async def fact_check_tick(
             raise HTTPException(status_code=503, detail=str(e)) from None
         except LLMError as e:
             raise HTTPException(status_code=502, detail=f"Could not fact-check: {e}") from e
+
+
+@router.post("/meetings/{meeting_id}/catch-up")
+async def catch_up_participant(
+    meeting_id: str,
+    body: CatchUpRequest,
+    store: Store = Depends(get_store),
+    make_llm: Callable[[], LLM] = Depends(get_llm_factory),
+) -> CatchUpResponse:
+    """The worker asks when someone joins a live meeting 5 minutes or more after it started, or
+    comes back after 5 minutes or more away, and sends the text only to them as a private chat
+    message from the agent. One model call over the final segments said from `since` to `until`
+    (never the agent's own, never chat) and the agenda; no text when too little was said, without
+    a model call. Nothing about it is stored."""
+    try:
+        meeting = await store.meeting(meeting_id)
+    except NotFound:
+        raise HTTPException(status_code=404, detail="Meeting not found") from None
+    if meeting.status != "live":
+        raise HTTPException(status_code=409, detail="Only a live meeting has someone to catch up")
+    who = body.participant_id
+    if who == AGENT_PARTICIPANT_ID or who not in meeting.participant_ids:
+        raise HTTPException(status_code=422, detail="Not a participant of this meeting")
+    if body.since > body.until:
+        raise HTTPException(status_code=422, detail="since must not be after until")
+    elapsed = seconds_since_start(meeting)
+    if body.until > elapsed + NOW_SLACK_S:
+        raise HTTPException(
+            status_code=422,
+            detail=f"until is {body.until:.0f} s, but the meeting started {elapsed:.0f} s ago",
+        )
+    try:
+        return await catch_up(store, make_llm, meeting, body)
+    except LLMUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e)) from None
+    except LLMError as e:
+        raise HTTPException(status_code=502, detail=f"Could not catch up: {e}") from e
