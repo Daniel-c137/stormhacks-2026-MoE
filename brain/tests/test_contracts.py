@@ -29,6 +29,9 @@ from contracts import (
     PasswordChange,
     Person,
     ReportProgress,
+    TranscriptSegment,
+    TranslateRequest,
+    TranslateResponse,
 )
 
 TS_DIR = Path(contracts.__file__).resolve().parents[2] / "ts"
@@ -221,6 +224,55 @@ def contract_literals() -> dict[str, set[str]]:
             if typing.get_origin(value) is typing.Literal:
                 found[name] = set(typing.get_args(value))
     return found
+
+
+def test_segments_from_before_translation_still_parse_as_untranslated():
+    old = TranscriptSegment.model_validate(
+        {
+            "seg_id": "s1",
+            "meeting_id": "m1",
+            "speaker_id": "u1",
+            "speaker_name": "Alex",
+            "text": "Let's keep Postgres.",
+            "is_final": True,
+            "t_start": 1.0,
+            "t_end": 2.0,
+        }
+    )
+
+    assert old.language is None
+    assert old.original_text is None
+
+
+def test_a_translated_segment_carries_the_english_and_the_words_as_said():
+    seg = TranscriptSegment(
+        seg_id="s1",
+        meeting_id="m1",
+        speaker_id="u1",
+        speaker_name="Lucía",
+        text="We keep Postgres for now.",
+        is_final=True,
+        t_start=1.0,
+        t_end=2.0,
+        language="es",
+        original_text="Por ahora nos quedamos con Postgres.",
+    )
+
+    assert (seg.text, seg.original_text, seg.language) == (
+        "We keep Postgres for now.",
+        "Por ahora nos quedamos con Postgres.",
+        "es",
+    )
+
+
+def test_a_translate_request_may_hint_the_language_and_the_answer_names_it():
+    assert TranslateRequest(text="Hola a todos").language is None
+    assert TranslateRequest(text="Hola a todos", language="es").language == "es"
+    answer = TranslateResponse(language="es", text="Hello everyone")
+
+    assert (answer.language, answer.text) == ("es", "Hello everyone")
+    with pytest.raises(ValidationError):
+        TranslateResponse(text="Hello everyone")  # the language is always reported
 
 
 def test_every_exported_model_has_a_typescript_interface_with_the_same_fields():
