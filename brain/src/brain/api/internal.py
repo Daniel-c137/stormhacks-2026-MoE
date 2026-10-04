@@ -32,6 +32,7 @@ from contracts import (
 from contracts.language import ISO_CODE
 from contracts.meeting import MeetingStatus
 
+from ..agent.agenda_jev import Jev
 from ..agent.ask import Question, ToolOrchestrator
 from ..agent.catchup import catch_up
 from ..agent.factcheck import FactChecker
@@ -49,6 +50,7 @@ from ..translation import TranslationFailed, translate
 from .deps import (
     ask_agent,
     get_fact_checker,
+    get_jev,
     get_llm_factory,
     get_orchestrator,
     get_settings,
@@ -314,10 +316,12 @@ async def track_agenda_tick(
     body: AgendaTrackRequest | None = None,
     store: Store = Depends(get_store),
     make_llm: Callable[[], LLM] = Depends(get_llm_factory),
+    jev: Jev | None = Depends(get_jev),
 ) -> AgendaTrackResponse:
-    """The worker's timer tick (every 10 s or so, never per utterance) for a live meeting. Reads the
-    final segments since the last tick from the store, so the worker sends none. The worker
-    publishes the agenda on Topic.AGENDA and each nudge on Topic.AGENDA_NUDGE; nothing is spoken.
+    """The worker's timer tick (every 10 s or so), and with Jev (JEV_MODEL) its check after each
+    caption, for a live meeting. Reads the final segments since the last tick from the store, so
+    the worker sends none. The worker publishes the agenda on Topic.AGENDA and each nudge on
+    Topic.AGENDA_NUDGE; nothing is spoken.
 
     Gemini is needed only when there is a stretch to classify: 503 when it is not configured,
     502 when the call fails. Either way nothing is tracked, and the body still carries the agenda
@@ -338,7 +342,7 @@ async def track_agenda_tick(
     now = body.now if body and body.now is not None else elapsed
     async with meeting_lock(request, "agenda", meeting_id):
         try:
-            return await track_agenda(store, make_llm, meeting, now)
+            return await track_agenda(store, make_llm, meeting, now, jev=jev)
         except ClassificationFailed as e:
             unavailable = isinstance(e.error, LLMUnavailable)
             detail = str(e.error) if unavailable else f"Could not track the agenda: {e.error}"
