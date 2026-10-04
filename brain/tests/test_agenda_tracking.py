@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 import anyio
 import httpx
 import pytest
-from api_support import ALEX, SARAH, TEAM, WORKER_TOKEN, create, postgres_world
+from api_support import ALEX, SARAH, TEAM, WORKER_TOKEN, create, postgres_world, speakers_join
 from fastapi.testclient import TestClient
 
 from brain.agent.timekeeping import MAX_WAIT_S, MIN_TALK_S, NOW_SLACK_S, SETTLE_S, AgendaTrackDraft
@@ -61,6 +61,7 @@ def said(meeting_id: str, n: int, text: str, start: float, end: float, speaker=A
 
 
 def ingest(worker: TestClient, meeting_id: str, *segments: dict) -> None:
+    anyio.run(speakers_join, worker.app, meeting_id, list(segments))
     response = worker.post(
         f"/internal/meetings/{meeting_id}/segments", json={"segments": list(segments)}
     )

@@ -22,6 +22,7 @@ from ..agent.pipeline import PipelineRunner, PostMeetingPipeline, ReportPipeline
 from ..auth import AuthNotConfigured, InvalidToken, KeysUnavailable, TokenVerifier
 from ..config import Settings
 from ..jira import JiraPusher, jira_config
+from ..livekit_rooms import Rooms, rooms_from_settings
 from ..llm import LLM, LLMError, LLMUnavailable, make_embedder, make_llm
 from ..memory import MeetingMemory, PgMemoryStore, UnusableMemory
 from ..store import NotFound, Store
@@ -123,6 +124,11 @@ def get_runner(request: Request) -> PipelineRunner:
     return state.pipeline_runner
 
 
+def get_rooms(settings: Settings = Depends(get_settings)) -> Rooms:
+    """LiveKit's room service, to close a meeting's room when it ends."""
+    return rooms_from_settings(settings)
+
+
 def get_verifier(request: Request, settings: Settings = Depends(get_settings)) -> TokenVerifier:
     """One verifier per app and auth config, so the JWKS cache outlives a request."""
     state = request.app.state
@@ -178,15 +184,25 @@ def get_jira_pusher(settings: Settings = Depends(get_settings)) -> Callable[[], 
     return lambda: JiraPusher(jira_config(settings))
 
 
+MIN_INTERNAL_TOKEN = 32
+
+
 async def require_internal(
     x_internal_token: str | None = Header(default=None),
     settings: Settings = Depends(get_settings),
 ) -> None:
-    """Guard for realtime -> brain calls (BRAIN_INTERNAL_TOKEN)."""
+    """Guard for realtime -> brain calls (BRAIN_INTERNAL_TOKEN). A short token is treated as
+    unset: /internal shares the board's port, so the token is the only thing protecting it."""
     expected = settings.brain_internal_token
-    if not expected:
-        raise HTTPException(status_code=503, detail="BRAIN_INTERNAL_TOKEN is not configured")
-    if not x_internal_token or not secrets.compare_digest(x_internal_token, expected):
+    if not expected or len(expected) < MIN_INTERNAL_TOKEN:
+        raise HTTPException(
+            status_code=503,
+            detail=f"BRAIN_INTERNAL_TOKEN must be set to at least {MIN_INTERNAL_TOKEN} characters",
+        )
+    # Bytes: compare_digest raises on non-ASCII str, which would turn a bad header into a 500.
+    if not x_internal_token or not secrets.compare_digest(
+        x_internal_token.encode(), expected.encode()
+    ):
         raise HTTPException(status_code=401, detail="Invalid internal token")
 
 

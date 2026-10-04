@@ -1,6 +1,6 @@
 import hashlib
 import secrets
-from collections.abc import Collection, Iterable, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Protocol
 from uuid import uuid4
@@ -144,7 +144,8 @@ class Store(Protocol):
     # transcript and public chat
 
     async def add_segments(self, meeting_id: str, segments: list[TranscriptSegment]) -> None:
-        """Final segments, idempotent by (meeting_id, seg_id): one already saved is ignored."""
+        """Final segments, idempotent by (meeting_id, seg_id): an identical resend is ignored,
+        a seg_id reused with different content raises Conflict and nothing is saved."""
         ...
 
     async def transcript(self, meeting_id: str) -> list[TranscriptSegment]:
@@ -448,9 +449,9 @@ class InMemoryStore:
     # transcript and public chat
 
     async def add_segments(self, meeting_id: str, segments: list[TranscriptSegment]) -> None:
-        """Ignores a seg_id already saved: the worker may resend after a timeout."""
         self._meeting(meeting_id)
         saved = self._segments.setdefault(meeting_id, {})
+        unique_segments(segments, saved)
         for segment in segments:
             saved.setdefault(segment.seg_id, _copy(segment))
 
@@ -670,3 +671,16 @@ class InMemoryStore:
             for m in sorted(meetings, key=_when, reverse=True)
             if m.id in self._reports
         ]
+
+
+def unique_segments(
+    segments: list[TranscriptSegment], saved: Mapping[str, TranscriptSegment]
+) -> None:
+    """Raises Conflict if a seg_id in the batch is already saved, or repeated within the batch,
+    with different content. An identical resend is fine: the worker retries after a timeout."""
+    batch: dict[str, TranscriptSegment] = {}
+    for segment in segments:
+        known = saved.get(segment.seg_id) or batch.get(segment.seg_id)
+        if known is not None and known != segment:
+            raise Conflict(f"seg_id {segment.seg_id} was already saved with different content")
+        batch[segment.seg_id] = segment

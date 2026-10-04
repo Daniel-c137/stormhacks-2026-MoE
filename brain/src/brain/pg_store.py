@@ -32,7 +32,7 @@ from contracts import (
 from contracts.meeting import MeetingStatus
 
 from .db import connection
-from .store import Conflict, FactCheckState, NotFound, new_join_code, photo_path
+from .store import Conflict, FactCheckState, NotFound, new_join_code, photo_path, unique_segments
 
 Row = dict[str, Any]
 Cursor = AsyncCursor[Row]
@@ -388,7 +388,10 @@ class PostgresStore:
     # transcript and public chat
 
     async def add_segments(self, meeting_id: str, segments: list[TranscriptSegment]) -> None:
-        """Ignores a seg_id already saved: the worker may resend after a timeout."""
+        """An identical resend is ignored; a seg_id saved with different content is a Conflict.
+        Checked after the insert in the same transaction, so it holds against a concurrent
+        writer too, and a conflict rolls the whole batch back."""
+        unique_segments(segments, {})
         async with self._tx() as cur:
             await self._meeting(cur, meeting_id)
             if not segments:
@@ -400,6 +403,14 @@ class PostgresStore:
                 " on conflict (meeting_id, seg_id) do nothing",
                 [s.model_dump() | {"meeting": meeting_id} for s in segments],
             )
+            rows = await self._all(
+                cur,
+                f"select {SEGMENT} from transcript_segments"
+                " where meeting_id = %s and seg_id = any(%s)",
+                [meeting_id, [s.seg_id for s in segments]],
+            )
+            stored = {r["seg_id"]: TranscriptSegment.model_validate(r) for r in rows}
+            unique_segments(segments, stored)
 
     async def transcript(self, meeting_id: str) -> list[TranscriptSegment]:
         async with self._tx() as cur:

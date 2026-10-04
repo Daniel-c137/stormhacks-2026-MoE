@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     livekit_url: str | None = None
     livekit_api_key: str | None = None
     livekit_api_secret: str | None = None
+    # Join tokens are only checked on connect, so a short life doesn't affect anyone in the call.
+    livekit_token_ttl_seconds: int = 600
 
     github_mcp_url: str | None = None
     jira_mcp_url: str | None = None

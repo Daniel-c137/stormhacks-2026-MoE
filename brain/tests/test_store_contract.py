@@ -582,11 +582,27 @@ async def test_segments_are_saved_once_and_read_in_time_order(store):
     late, early = segment(meeting.id, 2, sarah, t=30), segment(meeting.id, 1, alex, t=10)
 
     await store.add_segments(meeting.id, [late])
-    await store.add_segments(meeting.id, [early, late.model_copy(update={"text": "resent"})])
+    await store.add_segments(meeting.id, [early, late])  # the worker resending after a timeout
     await store.add_segments(other.id, [segment(other.id, 1, alex)])
 
     assert await store.transcript(meeting.id) == [early, late]
     assert await store.transcript(new_id()) == []
+
+
+async def test_a_seg_id_reused_with_different_content_is_a_conflict_and_saves_nothing(store):
+    """A colliding id must be loud: silently keeping the first text loses the second."""
+    team, alex, sarah, *_ = await two_teams(store)
+    meeting = await store.create_meeting(team.id, "Standup", alex.id)
+    first = segment(meeting.id, 1, alex, t=10)
+    await store.add_segments(meeting.id, [first])
+    fresh = segment(meeting.id, 2, sarah, t=20)
+
+    with pytest.raises(Conflict):
+        await store.add_segments(
+            meeting.id, [fresh, first.model_copy(update={"text": "something else"})]
+        )
+
+    assert await store.transcript(meeting.id) == [first]
 
 
 async def test_segments_at_the_same_time_are_ordered_by_seg_id(store):
