@@ -34,6 +34,8 @@ export const generateAgenda = async (meetingId: string): Promise<Agenda> => notI
 export const getTranscript = async (meetingId: string): Promise<TranscriptSegment[]> => notImplemented("getTranscript");
 export const getReport = async (meetingId: string): Promise<Report> => notImplemented("getReport");
 export const getReportProgress = async (meetingId: string): Promise<ReportProgress> => notImplemented("getReportProgress");
+/** The summary read aloud as MP3 (GET /meetings/{id}/report/audio); 503 when ElevenLabs is not configured. */
+export const getReportAudio = async (meetingId: string): Promise<Blob> => notImplemented("getReportAudio");
 export const updateTask = async (meetingId: string, task: TaskDraft): Promise<TaskDraft> => notImplemented("updateTask");
 export const pushTasks = async (meetingId: string, body: TaskPushRequest): Promise<TaskPushResult[]> => notImplemented("pushTasks");
 export const listDecisions = async (q?: string): Promise<Decision[]> => notImplemented("listDecisions");

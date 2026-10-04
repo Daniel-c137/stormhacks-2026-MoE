@@ -103,6 +103,7 @@ async def test_the_repos_migrations_build_the_core_schema_and_memory(pg_dsn):
         "report_progress",
         "task_drafts",
         "decisions",
+        "report_audio",
         "memory_chunks",
         "schema_migrations",
     } <= tables
@@ -120,3 +121,21 @@ async def test_no_core_table_is_readable_through_supabases_client_keys(pg_dsn):
     )
 
     assert exposed == []
+
+
+async def test_a_meetings_report_audio_goes_with_the_meeting(pg_dsn):
+    await migrate(pg_dsn)
+    with psycopg.connect(pg_dsn) as conn:
+        conn.execute("insert into teams (id, name) values ('t', 'Checkout')")
+        conn.execute(
+            "insert into meetings (id, team_id, title, status, code, host_id)"
+            " values ('m', 't', 'Standup', 'needs_review', 'code', 'u')"
+        )
+        conn.execute(
+            "insert into report_audio (meeting_id, key, content_type, data)"
+            " values ('m', 'k', 'audio/mpeg', %s)",
+            [b"ID3"],
+        )
+        conn.execute("delete from meetings where id = 'm'")
+
+    assert query(pg_dsn, "select meeting_id from report_audio") == []

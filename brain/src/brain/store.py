@@ -2,7 +2,7 @@ import hashlib
 import secrets
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import NamedTuple, Protocol
 from uuid import uuid4
 
 from pydantic import BaseModel
@@ -32,6 +32,14 @@ class NotFound(LookupError):
 
 class Conflict(Exception):
     """The row is not in the state the write expected, e.g. another call already ended it."""
+
+
+class ReportAudio(NamedTuple):
+    """The report's summary read aloud. `key` names what it was made from (text, voice, model)."""
+
+    key: str
+    content_type: str
+    data: bytes
 
 
 class FactCheckState(BaseModel):
@@ -223,6 +231,16 @@ class Store(Protocol):
 
     async def save_report_progress(self, progress: ReportProgress) -> ReportProgress: ...
     async def report_progress(self, meeting_id: str) -> ReportProgress | None: ...
+    async def save_report_audio(
+        self, meeting_id: str, key: str, content_type: str, data: bytes
+    ) -> ReportAudio:
+        """Replaces the meeting's stored summary audio."""
+        ...
+
+    async def report_audio(self, meeting_id: str) -> ReportAudio:
+        """NotFound until audio is saved for the meeting."""
+        ...
+
     async def task(self, team_id: str, task_id: str) -> TaskDraft: ...
     async def update_task(self, task: TaskDraft) -> TaskDraft:
         """Saves an existing task. No team check: read it with task(team_id, ...) first."""
@@ -282,6 +300,7 @@ class InMemoryStore:
         self._fact_check_states: dict[str, FactCheckState] = {}
         self._reports: dict[str, Report] = {}
         self._progress: dict[str, ReportProgress] = {}
+        self._report_audio: dict[str, ReportAudio] = {}
         self._tasks: dict[str, TaskDraft] = {}
         self._decisions: dict[str, Decision] = {}
 
@@ -594,6 +613,20 @@ class InMemoryStore:
     async def report_progress(self, meeting_id: str) -> ReportProgress | None:
         saved = self._progress.get(meeting_id)
         return _copy(saved) if saved else None
+
+    async def save_report_audio(
+        self, meeting_id: str, key: str, content_type: str, data: bytes
+    ) -> ReportAudio:
+        self._meeting(meeting_id)
+        audio = ReportAudio(key, content_type, bytes(data))
+        self._report_audio[meeting_id] = audio
+        return audio
+
+    async def report_audio(self, meeting_id: str) -> ReportAudio:
+        saved = self._report_audio.get(meeting_id)
+        if saved is None:
+            raise NotFound(f"report audio for meeting {meeting_id}")
+        return saved
 
     async def task(self, team_id: str, task_id: str) -> TaskDraft:
         task = self._tasks.get(task_id)

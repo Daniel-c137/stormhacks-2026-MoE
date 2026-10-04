@@ -4,7 +4,8 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Response
 
 from contracts import (
     Answer,
@@ -24,15 +25,26 @@ from ..agent.pipeline import PipelineRunner, PostMeetingPipeline, can_retry
 from ..config import Settings
 from ..jira import ApprovalRequired, JiraPusher, JiraUnavailable, apply_results
 from ..report import ProcessedMeeting
+from ..speech import (
+    CONTENT_TYPE,
+    MeetingLocks,
+    SpeechFailed,
+    SpeechUnavailable,
+    audio_key,
+    missing,
+    synthesize,
+)
 from ..store import Conflict, NotFound, Store
 from .deps import (
     ask_agent,
     current_user,
+    get_http_transport,
     get_jira_pusher,
     get_orchestrator,
     get_pipeline,
     get_runner,
     get_settings,
+    get_speech_locks,
     get_store,
     team_meeting,
     user_team,
@@ -63,6 +75,56 @@ async def get_report(
         return await store.report(meeting.id)
     except NotFound:
         raise HTTPException(status_code=404, detail="No report yet") from None
+
+
+@router.get("/meetings/{meeting_id}/report/audio")
+async def get_report_audio(
+    meeting_id: str,
+    user: Person = Depends(current_user),
+    store: Store = Depends(get_store),
+    settings: Settings = Depends(get_settings),
+    transport: httpx.AsyncBaseTransport | None = Depends(get_http_transport),
+    locks: MeetingLocks = Depends(get_speech_locks),
+) -> Response:
+    """The report's summary read aloud, word for word, in the team's agent voice (else
+    ELEVENLABS_VOICE_ID), as MP3. Made with ElevenLabs once, then served from the store until the
+    summary, voice or model changes. For the report page only; never played into a meeting."""
+    meeting = await team_meeting(store, user, meeting_id)
+    if meeting.status == "processing":
+        raise HTTPException(status_code=409, detail=RUNNING)
+    try:
+        report = await store.report(meeting.id)
+    except NotFound:
+        raise HTTPException(status_code=404, detail="No report yet") from None
+    text = report.summary
+    if not text.strip():
+        raise HTTPException(status_code=404, detail="The summary is empty: nothing to read")
+    voice = (await store.settings(meeting.team_id)).voice or settings.elevenlabs_voice_id
+    model = settings.elevenlabs_tts_model
+    gaps = missing(settings, voice)
+    if gaps or not voice or not model:
+        raise HTTPException(
+            status_code=503, detail=f"ElevenLabs speech is not configured: set {', '.join(gaps)}"
+        )
+    key = audio_key(text, voice, model)
+    async with locks.hold(meeting.id):
+        try:
+            audio = await store.report_audio(meeting.id)
+        except NotFound:
+            audio = None
+        if audio is None or audio.key != key:
+            try:
+                data = await synthesize(settings, voice, text, transport=transport)
+            except SpeechUnavailable as e:
+                raise HTTPException(status_code=503, detail=str(e)) from None
+            except SpeechFailed as e:
+                raise HTTPException(status_code=502, detail=str(e)) from None
+            audio = await store.save_report_audio(meeting.id, key, CONTENT_TYPE, data)
+    return Response(
+        content=audio.data,
+        media_type=audio.content_type,
+        headers={"Cache-Control": "private, no-cache", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.get("/meetings/{meeting_id}/report/progress")

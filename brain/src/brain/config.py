@@ -48,6 +48,10 @@ class Settings(BaseSettings):
 
     elevenlabs_api_key: str | None = None
     elevenlabs_api_url: str = "https://api.elevenlabs.io"
+    # the agent's voice and speech model, shared with realtime's spoken answers; a team's chosen
+    # voice wins over the default voice
+    elevenlabs_voice_id: str | None = None
+    elevenlabs_tts_model: str | None = None
 
     brain_internal_token: str | None = None
 
