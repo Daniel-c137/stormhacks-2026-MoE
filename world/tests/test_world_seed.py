@@ -761,6 +761,24 @@ async def test_an_existing_login_is_left_alone():
     assert verify_password((await store.login(first.id)).password_hash, "changed-in-the-app")
 
 
+async def test_danial_is_the_only_admin_and_stays_one_when_seeded_again():
+    from world.seed import seed_logins
+
+    store, _ = in_memory()
+    people = seed_people()
+    team = await seed.seed_team(store, people)
+
+    await seed_logins(store, people, password="demo-password-1")
+
+    admins = [p for p in await store.members(team.id) if p.is_admin]
+    assert [(p.id, p.email) for p in admins] == [("p-danial", "danial@dropsubs.example")]
+
+    await seed.seed_team(store, people)
+    await seed_logins(store, people, password="demo-password-1")
+
+    assert [p.id for p in await store.members(team.id) if p.is_admin] == ["p-danial"]
+
+
 async def test_a_short_shared_password_is_refused():
     from world.seed import seed_logins
 

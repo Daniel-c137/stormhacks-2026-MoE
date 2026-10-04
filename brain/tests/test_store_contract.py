@@ -271,6 +271,29 @@ async def test_a_profile_update_is_saved(store):
         await store.update_person(person("Nobody Here"))
 
 
+async def test_a_person_is_an_admin_only_once_made_one(store):
+    team, alex, sarah, *_ = await two_teams(store)
+    assert not (await store.person(alex.id)).is_admin
+
+    admin = alex.model_copy(update={"is_admin": True})
+    await store.upsert_person(admin, team.id)
+
+    assert (await store.person(alex.id)).is_admin
+    assert {p.id: p.is_admin for p in await store.members(team.id)} == {
+        alex.id: True,
+        sarah.id: False,
+    }
+    assert [p.is_admin for p in await store.search_members(team.id, "alex")] == [True]
+
+    assert await store.update_person(sarah.model_copy(update={"is_admin": True})) == (
+        sarah.model_copy(update={"is_admin": True})
+    )
+    revoked = await store.update_person(admin.model_copy(update={"is_admin": False}))
+    assert not revoked.is_admin
+    assert not (await store.person(alex.id)).is_admin
+    assert (await store.person(sarah.id)).is_admin
+
+
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
 JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 64
 

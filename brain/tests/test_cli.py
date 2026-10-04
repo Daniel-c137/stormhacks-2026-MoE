@@ -434,13 +434,91 @@ def test_add_user_refuses_an_invalid_email(db, email):
     assert "email" in str(exit_info.value.code).lower()
 
 
+# admins: the only accounts that change connectors and create accounts
+
+
+def is_admin(db, email: str) -> bool:
+    login = asyncio.run(db.login_by_email(email))
+    return asyncio.run(db.person(login.person_id)).is_admin
+
+
+def add_sam(*extra: str) -> int:
+    return main(
+        ["add-user", "--team", "t-1", "--name", "Sam Lee", "--email", "sam@example.com", *extra]
+    )
+
+
+def test_add_user_is_no_admin_unless_asked(db, capsys):
+    main(["add-team", "--id", "t-1", "--name", "Checkout"])
+
+    assert add_alex("--admin") == 0
+    assert add_sam() == 0
+
+    assert is_admin(db, "alex@example.com")
+    assert not is_admin(db, "sam@example.com")
+    assert "admin" in capsys.readouterr().out.lower()
+
+
+def test_add_user_again_without_admin_keeps_an_admin_one(db):
+    main(["add-team", "--id", "t-1", "--name", "Checkout"])
+    add_alex("--admin")
+
+    assert add_alex() == 0
+
+    assert is_admin(db, "alex@example.com")
+
+
+def test_set_admin_grants_and_revokes(db, capsys):
+    main(["add-team", "--id", "t-1", "--name", "Checkout"])
+    add_alex("--admin")
+    add_sam()
+    capsys.readouterr()
+
+    assert main(["set-admin", "--email", "SAM@example.com"]) == 0
+    assert is_admin(db, "sam@example.com")
+    assert "Sam Lee" in capsys.readouterr().out
+
+    assert main(["set-admin", "--email", "alex@example.com", "--revoke"]) == 0
+    assert not is_admin(db, "alex@example.com")
+    assert is_admin(db, "sam@example.com")
+
+
+def test_set_admin_refuses_to_revoke_the_teams_last_admin(db):
+    main(["add-team", "--id", "t-1", "--name", "Checkout"])
+    add_alex("--admin")
+    add_sam()
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(["set-admin", "--email", "alex@example.com", "--revoke"])
+
+    assert "last admin" in str(exit_info.value.code)
+    assert is_admin(db, "alex@example.com")
+
+
+def test_set_admin_revoking_someone_who_is_no_admin_changes_nothing(db):
+    main(["add-team", "--id", "t-1", "--name", "Checkout"])
+    add_sam()
+
+    assert main(["set-admin", "--email", "sam@example.com", "--revoke"]) == 0
+
+    assert not is_admin(db, "sam@example.com")
+
+
+def test_set_admin_needs_someone_who_signs_in_with_the_email(db):
+    with pytest.raises(SystemExit) as exit_info:
+        main(["set-admin", "--email", "nobody@example.com"])
+
+    assert "nobody@example.com" in str(exit_info.value.code)
+
+
 @pytest.mark.parametrize(
     "argv",
     [
         ["add-team", "--id", "t-1", "--name", "Checkout"],
         ["add-user", "--team", "t-1", "--name", "Alex Chen", "--email", "alex@example.com"],
+        ["set-admin", "--email", "alex@example.com"],
     ],
-    ids=["add-team", "add-user"],
+    ids=["add-team", "add-user", "set-admin"],
 )
 def test_account_commands_without_database_url_say_what_is_missing(monkeypatch, argv):
     monkeypatch.setenv("DATABASE_URL", "")
