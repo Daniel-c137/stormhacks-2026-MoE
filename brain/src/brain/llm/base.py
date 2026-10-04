@@ -11,6 +11,11 @@ class LLMUnavailable(LLMError):
     """The LLM is not configured. Never silently replaced by the mock."""
 
 
+class LLMOutOfCapacity(LLMError):
+    """Every model of a provider was overloaded, failing on the server, or missing, so another
+    provider may still answer. A bad request, auth error or unusable answer is never this."""
+
+
 class LLM(Protocol):
     last_model: str | None
     """The model that answered the latest call, for logs and the CLI."""

@@ -10,9 +10,9 @@ from pipeline_support import GatedLLM
 from starlette.requests import Request
 
 from brain.agent.pipeline import PipelineRunner, ReportPipeline
-from brain.api.deps import get_llm, get_memory, get_pipeline
+from brain.api.deps import get_llm, get_llm_factory, get_memory, get_pipeline
 from brain.config import Settings
-from brain.llm import GeminiEmbedder
+from brain.llm import FallbackLLM, GeminiEmbedder, GeminiLLM, OpenRouterLLM
 from brain.main import create_app
 from brain.memory import MemoryMisconfigured, PgMemoryStore, UnusableMemory
 from brain.report import ReportExtraction
@@ -178,6 +178,24 @@ async def test_get_llm_is_a_503_when_gemini_is_not_configured():
 
     assert raised.value.status_code == 503
     assert "Gemini is not configured" in raised.value.detail
+
+
+OPENROUTER = {"openrouter_api_key": "or-key", "openrouter_models": "vendor/model"}
+
+
+async def test_get_llm_uses_openrouter_alone_when_gemini_is_not_configured():
+    llm = await get_llm(Settings(_env_file=None, gemini_api_key=None, **OPENROUTER))
+
+    assert isinstance(llm, OpenRouterLLM)
+
+
+def test_the_write_up_factory_makes_gemini_then_openrouter():
+    settings = Settings(_env_file=None, gemini_api_key="k", gemini_model="g", **OPENROUTER)
+
+    llm = get_llm_factory(settings)()
+
+    assert isinstance(llm, FallbackLLM)
+    assert [type(p) for p in llm.providers] == [GeminiLLM, OpenRouterLLM]
 
 
 def test_the_pipeline_waits_for_the_configured_settle_time():

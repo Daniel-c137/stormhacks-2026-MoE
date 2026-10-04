@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     gemini_embedding_dim: int | None = None
     # comma-separated; one call never mixes models, and memory search only compares like with like
     gemini_embedding_fallback_models: str | None = None
+    # The fallback when every Gemini model is out of capacity: comma-separated OpenRouter model
+    # ids, tried in order on 404, 408, 429 or 5xx
+    openrouter_api_key: str | None = None
+    openrouter_models: str | None = None
+    openrouter_url: str = "https://openrouter.ai/api/v1"
 
     livekit_url: str | None = None
     livekit_api_key: str | None = None
