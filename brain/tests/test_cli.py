@@ -133,3 +133,25 @@ def test_push_prints_why_an_issue_was_created_unassigned(jira_env, tmp_path, cap
     out = capsys.readouterr().out
     assert "mtg-standup-task-1: DS-117" in out
     assert "mtg-standup-task-1: created unassigned:" in out
+
+
+def test_migrate_without_database_url_says_what_is_missing(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "")
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(["migrate"])
+
+    assert "DATABASE_URL" in str(exit_info.value.code)
+
+
+def test_migrate_applies_the_migrations_once(monkeypatch, pg_dsn, capsys):
+    monkeypatch.setenv("DATABASE_URL", pg_dsn)
+
+    assert main(["migrate"]) == 0
+    first = capsys.readouterr().out
+    assert main(["migrate"]) == 0
+    second = capsys.readouterr().out
+
+    assert "_core" in first
+    assert "_core" not in second
+    assert "up to date" in second
