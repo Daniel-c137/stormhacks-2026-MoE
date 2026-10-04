@@ -6,7 +6,7 @@ chooses Speak, Post in chat or Dismiss; a chat mention is answered in chat. On t
 brain to keep time against the agenda and to fact-check; with Jev keeping time, it also checks
 the agenda once each caption has settled in the brain. The agenda goes to the room; a fact-check
 goes only to whoever made the claim, as a private chat message from the agent that is never
-stored, spoken or shown to anyone else. Someone joining 5 minutes or more late, or back after 5
+stored, spoken or shown to anyone else. Someone joining 2 minutes or more late, or back after 2
 minutes or more away, gets a private catch-up from the brain the same way, only to them. Other
 people's private chat never passes through here.
 """

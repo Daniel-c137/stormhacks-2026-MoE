@@ -13,7 +13,7 @@ from typing import NamedTuple
 
 from contracts import AGENT_PARTICIPANT_ID
 
-CATCH_UP_AFTER_SECONDS = 300.0
+CATCH_UP_AFTER_SECONDS = 120.0
 
 
 class Span(NamedTuple):

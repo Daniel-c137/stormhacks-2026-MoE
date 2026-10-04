@@ -391,8 +391,8 @@ async def catch_up_participant(
     store: Store = Depends(get_store),
     make_llm: Callable[[], LLM] = Depends(get_llm_factory),
 ) -> CatchUpResponse:
-    """The worker asks when someone joins a live meeting 5 minutes or more after it started, or
-    comes back after 5 minutes or more away, and sends the text only to them as a private chat
+    """The worker asks when someone joins a live meeting 2 minutes or more after it started, or
+    comes back after 2 minutes or more away, and sends the text only to them as a private chat
     message from the agent. One model call over the final segments said from `since` to `until`
     (never the agent's own, never chat) and the agenda; no text when too little was said, without
     a model call. Nothing about it is stored."""
