@@ -2,11 +2,14 @@
 
 import {
   AGENT_PARTICIPANT_ID,
+  type Decision,
+  type DecisionStep,
   type Meeting,
   type Report,
   type TaskDestination,
   type TaskDraft,
   type TeamSettings,
+  type TranscriptSegment,
   identity,
 } from "@moe/contracts";
 import Link from "next/link";
@@ -42,8 +45,9 @@ const BackLink = () => (
 );
 
 /**
- * Processing steps while the report is written, then summary, decisions (with links to past
- * decisions), task review, and whatever else the meeting produced, down to the transcript.
+ * Processing steps while the report is written, then summary, decisions (each with what was said
+ * that led to it, and links to past decisions), task review, and whatever else the meeting
+ * produced, down to the transcript.
  */
 export function MeetingReport({ meetingId }: MeetingReportProps) {
   // Poll while the meeting is still running or being written up.
@@ -194,6 +198,87 @@ function Bullets({ id, title, icon, items }: { id: string; title: string; icon: 
   );
 }
 
+/** Lines shown for one step before it falls back to only the lines the step names. */
+const TALK_MAX = 8;
+
+/** The part of the conversation a step describes: the lines it names and those between them. */
+function talkOf(step: DecisionStep, segs: TranscriptSegment[]): TranscriptSegment[] {
+  const at = step.seg_ids.map((id) => segs.findIndex((g) => g.seg_id === id)).filter((i) => i >= 0);
+  if (!at.length) return [];
+  const first = Math.min(...at);
+  const last = Math.max(...at);
+  return last - first < TALK_MAX ? segs.slice(first, last + 1) : at.map((i) => segs[i]);
+}
+
+/**
+ * What was said that led to a decision, oldest first. A step opens the part of the conversation
+ * it describes. A decision recorded without a chain has one step: its quote, with the lines just
+ * before it.
+ */
+function DecisionChain({
+  decision,
+  segs,
+  speakerName,
+  onJump,
+}: {
+  decision: Decision;
+  segs: TranscriptSegment[];
+  speakerName: (id: string, saved: string) => string;
+  onJump: (segIds: string[]) => void;
+}) {
+  const [open, setOpen] = useState<number | null>(null);
+  const chain = decision.chain ?? [];
+  let steps: { text: string; t: number; talk: TranscriptSegment[] }[];
+  if (chain.length) {
+    steps = chain.map((step) => ({ text: step.text, t: step.t, talk: talkOf(step, segs) }));
+  } else if (decision.quote) {
+    const at = segs.reduce((best, g, i) => (Math.abs(g.t_start - decision.t) < Math.abs(segs[best].t_start - decision.t) ? i : best), 0);
+    steps = [{ text: `“${decision.quote}”`, t: decision.t, talk: segs.slice(Math.max(0, at - 2), at + 1) }];
+  } else {
+    return null;
+  }
+  return (
+    <ol className="chain" aria-label="What led to this decision">
+      {steps.map((step, i) => {
+        const shown = open === i && step.talk.length > 0;
+        return (
+          <li key={i} className="chain-step" data-open={shown}>
+            <button
+              type="button"
+              className="chain-btn"
+              onClick={() => setOpen(shown ? null : i)}
+              disabled={!step.talk.length}
+              aria-expanded={shown}
+              title={step.talk.length ? undefined : "This part of the transcript isn't available"}
+            >
+              <span className="chain-text">{step.text}</span>
+              <span className="chain-t">{fmtT(step.t)}</span>
+              {step.talk.length > 0 && <Icon name={shown ? "chevron-up" : "chevron-down"} />}
+            </button>
+            {shown && (
+              <div className="chain-talk">
+                <ol className="talk">
+                  {step.talk.map((g) => (
+                    <li key={g.seg_id} className="line">
+                      <span className="tm">{fmtT(g.t_start)}</span>
+                      <span className="who">{speakerName(g.speaker_id, g.speaker_name)}</span>
+                      <span className="tx">{g.text}</span>
+                    </li>
+                  ))}
+                </ol>
+                <button type="button" className="jump" onClick={() => onJump(step.talk.map((g) => g.seg_id))}>
+                  <Icon name="scroll-text" />
+                  Show in the transcript
+                </button>
+              </div>
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 function ReportView({ meeting, onPushed }: { meeting: Meeting; onPushed: () => void }) {
   const agent = identity.agent_name;
   const { me, members, person } = useTeam();
@@ -205,7 +290,7 @@ function ReportView({ meeting, onPushed }: { meeting: Meeting; onPushed: () => v
 
   const [search, setSearch] = useState("");
   const [speaker, setSpeaker] = useState("all");
-  const [highlighted, setHighlighted] = useState<string | null>(null);
+  const [highlighted, setHighlighted] = useState<string[]>([]);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(highlightTimer.current), []);
 
@@ -213,6 +298,8 @@ function ReportView({ meeting, onPushed }: { meeting: Meeting; onPushed: () => v
   const r = report.data;
   const start = meetingStart(meeting);
   const pushed = meeting.status === "pushed";
+  // Review and pushing are about the tasks: a meeting that produced none has neither state.
+  const reviewable = (r?.tasks.length ?? 0) > 0;
 
   // The saved name is the fallback for someone who has since left the team.
   const speakerName = (id: string, saved: string) =>
@@ -221,16 +308,22 @@ function ReportView({ meeting, onPushed }: { meeting: Meeting; onPushed: () => v
   const scrollTo = (domId: string, block: ScrollLogicalPosition = "start") =>
     document.getElementById(domId)?.scrollIntoView({ behavior: "smooth", block });
 
+  /** Brings these transcript lines into view, in the transcript's own scroll, and marks them. */
+  const jumpToLines = (segIds: string[]) => {
+    if (!segIds.length) return;
+    setSearch("");
+    setSpeaker("all");
+    setHighlighted(segIds);
+    // Wait for the filters to clear so the lines are on the page.
+    setTimeout(() => scrollTo(`seg-${segIds[0]}`, "center"), 0);
+    clearTimeout(highlightTimer.current);
+    highlightTimer.current = setTimeout(() => setHighlighted([]), 2600);
+  };
+
   const jumpTo = (t: number) => {
     if (!segs.length) return;
     const nearest = segs.reduce((a, b) => (Math.abs(b.t_start - t) < Math.abs(a.t_start - t) ? b : a), segs[0]);
-    setSearch("");
-    setSpeaker("all");
-    setHighlighted(nearest.seg_id);
-    // Wait for the filters to clear so the line is on the page.
-    setTimeout(() => scrollTo(`seg-${nearest.seg_id}`, "center"), 0);
-    clearTimeout(highlightTimer.current);
-    highlightTimer.current = setTimeout(() => setHighlighted(null), 2600);
+    jumpToLines([nearest.seg_id]);
   };
 
   const q = search.trim().toLowerCase();
@@ -283,10 +376,12 @@ function ReportView({ meeting, onPushed }: { meeting: Meeting; onPushed: () => v
         </nav>
         <article className="rep">
           <header className="rcard">
-            <span className="rep-status" data-pushed={pushed}>
-              <Icon name={pushed ? "circle-check" : "file-pen-line"} />
-              {pushed ? "Pushed" : "Needs review"}
-            </span>
+            {reviewable && (
+              <span className="rep-status" data-pushed={pushed}>
+                <Icon name={pushed ? "circle-check" : "file-pen-line"} />
+                {pushed ? "Pushed" : "Needs review"}
+              </span>
+            )}
             <h1 className="rep-title">{meeting.title}</h1>
             <div className="rep-meta">
               {start && (
@@ -306,7 +401,6 @@ function ReportView({ meeting, onPushed }: { meeting: Meeting; onPushed: () => v
                 {people}
               </span>
             </div>
-            {r?.summary && <ListenButton meetingId={meeting.id} />}
           </header>
 
           {report.error && !r && (
@@ -325,13 +419,14 @@ function ReportView({ meeting, onPushed }: { meeting: Meeting; onPushed: () => v
           {r && (
             <>
               <section className="rcard" aria-labelledby="r-summary">
-                <h2 id="r-summary" className="sec-h">
-                  Summary
-                </h2>
+                <div className="sec-row">
+                  <h2 id="r-summary" className="sec-h">
+                    Summary
+                  </h2>
+                  {r.summary && <ListenButton meetingId={meeting.id} />}
+                </div>
                 {r.summary ? <p className="summary">{r.summary}</p> : <p className="muted-p">No summary was written.</p>}
               </section>
-
-              <Bullets id="r-topics" title="Topics" icon="circle-dot" items={r.topics} />
 
               <section className="rcard" aria-labelledby="r-decisions">
                 <h2 id="r-decisions" className="sec-h">
@@ -347,20 +442,7 @@ function ReportView({ meeting, onPushed }: { meeting: Meeting; onPushed: () => v
                       <span className="dnum">{String(i + 1).padStart(2, "0")}</span>
                       <div>
                         <p className="dtext">{d.text}</p>
-                        {d.quote && <blockquote className="dquote">“{d.quote}”</blockquote>}
-                        <div className="dmeta">
-                          <span>{d.made_by}</span>
-                          <button
-                            type="button"
-                            className="jump"
-                            onClick={() => jumpTo(d.t)}
-                            disabled={!segs.length}
-                            aria-label={`Jump to ${fmtT(d.t)} in the transcript`}
-                          >
-                            <Icon name="scroll-text" />
-                            {fmtT(d.t)}
-                          </button>
-                        </div>
+                        <DecisionChain decision={d} segs={segs} speakerName={speakerName} onJump={jumpToLines} />
                         {d.relation && (
                           <div className="contra" role="note">
                             <Icon name="git-compare" />
@@ -387,27 +469,17 @@ function ReportView({ meeting, onPushed }: { meeting: Meeting; onPushed: () => v
                 <h2 id="r-tasks" className="sec-h">
                   Tasks
                 </h2>
-                <Tasks key={meeting.id} meeting={meeting} report={r} settings={settings.data} onPushed={onPushed} />
+                <Tasks
+                  key={meeting.id}
+                  meeting={meeting}
+                  report={r}
+                  settings={settings.data}
+                  onPushed={onPushed}
+                  onJump={segs.length ? jumpTo : null}
+                />
               </section>
 
-              <Bullets id="r-questions" title="Open questions" icon="message-circle" items={r.open_questions} />
               <Bullets id="r-blockers" title="Blockers" icon="triangle-alert" items={r.blockers} />
-              {r.risks.length > 0 && (
-                <section className="rcard" aria-labelledby="r-risks">
-                  <h2 id="r-risks" className="sec-h">
-                    Risks
-                  </h2>
-                  <ul className="bullets">
-                    {r.risks.map((risk, i) => (
-                      <li key={i} data-sev={risk.severity}>
-                        <Icon name={risk.severity === "high" ? "triangle-alert" : "info"} />
-                        <span>{risk.text}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              )}
-              <Bullets id="r-tech" title="Technical context" icon="file-code" items={r.technical_context} />
               {r.links.length > 0 && (
                 <section className="rcard" aria-labelledby="r-links">
                   <h2 id="r-links" className="sec-h">
@@ -456,9 +528,10 @@ function ReportView({ meeting, onPushed }: { meeting: Meeting; onPushed: () => v
                     {filtered.length} of {segs.length} lines
                   </span>
                 </div>
-                <ol className="lines">
+                {/* Its own scroll: a long meeting does not stretch the page. */}
+                <ol className="lines" tabIndex={0} aria-label="Transcript lines">
                   {filtered.map((g) => (
-                    <li key={g.seg_id} id={`seg-${g.seg_id}`} className="line" data-hl={highlighted === g.seg_id}>
+                    <li key={g.seg_id} id={`seg-${g.seg_id}`} className="line" data-hl={highlighted.includes(g.seg_id)}>
                       <span className="tm">{fmtT(g.t_start)}</span>
                       <span className="who">{speakerName(g.speaker_id, g.speaker_name)}</span>
                       <span className="tx">{mark(g.text)}</span>
@@ -481,11 +554,13 @@ function Tasks({
   report,
   settings,
   onPushed,
+  onJump,
 }: {
   meeting: Meeting;
   report: Report;
   settings: TeamSettings | undefined;
   onPushed: () => void;
+  onJump: ((t: number) => void) | null;
 }) {
   const { me, members } = useTeam();
   const [tasks, setTasks] = useState<TaskDraft[]>(report.tasks);
@@ -557,6 +632,7 @@ function Tasks({
       onCommit={commit}
       onDestination={setDestination}
       onPush={() => void push()}
+      onJump={onJump}
     />
   );
 }

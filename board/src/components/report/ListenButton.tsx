@@ -9,7 +9,8 @@ export interface ListenButtonProps {
 }
 
 /**
- * Listen: plays the report's summary, read word for word in the agent's voice. Fetches the audio
+ * The speaker button beside the Summary heading: plays the report's summary, read word for word
+ * in the agent's voice. Fetches the audio
  * with getReportAudio (the session header), plays it from a blob URL and revokes the URL when
  * done. Shows an unavailable state when the brain answers 503 (ElevenLabs not configured).
  * Report page only; never plays into a meeting.
@@ -57,11 +58,18 @@ export function ListenButton({ meetingId }: ListenButtonProps) {
     }
   };
 
+  const label = state === "playing" ? "Stop reading the summary" : state === "loading" ? "Getting the audio…" : "Listen to the summary";
   return (
     <span className="listen">
-      <button type="button" className="btn btn-outline btn-sm" onClick={() => void listen()} disabled={state === "loading"}>
+      <button
+        type="button"
+        className="icon-btn sm"
+        onClick={() => void listen()}
+        disabled={state === "loading"}
+        aria-label={label}
+        title={label}
+      >
         {state === "loading" ? <Spinner /> : <Icon name={state === "playing" ? "x" : "volume-2"} />}
-        {state === "playing" ? "Stop" : "Listen"}
       </button>
       {problem && (
         <span role="status" className="note">
