@@ -7,6 +7,7 @@ import { useAuth } from "@/components/AuthProvider";
 import { waitText } from "@/lib/api";
 import { apiBase, apiConfigured } from "@/lib/apiUrl";
 import { LoginError, authOptions, finishGoogleSignIn, googleSignInUrl, login, signUp } from "@/lib/auth";
+import { safeNextPath } from "@/lib/nextPath";
 import styles from "./LoginForm.module.css";
 
 /** Sign in, create an account (invited emails only) and Google, all checked by the brain
@@ -27,11 +28,11 @@ const GOOGLE_ERRORS: Record<string, string> = {
   failed: "Google sign-in didn't work. Try again.",
 };
 
-/** Where to go after auth: the ?next= path when it is a safe same-site path, else home. */
+/** Where to go after auth, also after Google: the ?next= path when it stays on this site, else
+ * home. */
 function nextPath(): string {
   if (typeof window === "undefined") return "/";
-  const next = new URLSearchParams(window.location.search).get("next");
-  return next && next.startsWith("/") && !next.startsWith("//") ? next : "/";
+  return safeNextPath(new URLSearchParams(window.location.search).get("next"), window.location.origin);
 }
 
 function authProblem(err: unknown, mode: Mode | "google"): string {

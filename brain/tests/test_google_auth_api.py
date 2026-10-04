@@ -25,6 +25,7 @@ from test_auth import base_settings, bearer
 
 from brain.api.deps import get_http_transport, get_settings
 from brain.auth import hash_password
+from brain.google_auth import safe_next
 from brain.store import NotFound
 from contracts import LoginResponse, Person
 
@@ -283,6 +284,54 @@ def test_the_one_time_code_works_once(client, google):
 def test_only_a_same_site_path_is_kept_as_where_to_go_next(client, google):
     assert sign_in_with_google(client, google, next_path="//evil.example")["next"] == "/"
     assert sign_in_with_google(client, google, next_path="https://evil.example")["next"] == "/"
+
+
+@pytest.mark.parametrize(
+    "next_path",
+    [
+        "/\\evil.com",  # browsers read a backslash as a slash: //evil.com
+        "/\t/evil.com",  # browsers drop tabs and newlines: //evil.com
+        "/\n/evil.com",
+        "/\x00/evil.com",
+        "/\x7f/evil.com",
+        "//evil.com",
+        "https://evil.com",
+        "http:/evil.com",
+        "/%5Cevil.com",  # a backslash once decoded
+        "/%09/evil.com",
+        "evil.com",
+        "",
+        None,
+    ],
+)
+def test_a_next_that_could_leave_the_site_is_home(next_path):
+    assert safe_next(next_path) == "/"
+
+
+@pytest.mark.parametrize(
+    "next_path", ["/", "/meetings/x?y=1#z", "/m/abc-def", "/login?mode=signup"]
+)
+def test_a_path_on_this_site_is_kept(next_path):
+    assert safe_next(next_path) == next_path
+
+
+@pytest.mark.parametrize("next_path", ["/\\evil.com", "/\t/evil.com", "//evil.com"])
+def test_a_bad_next_comes_back_from_google_as_home(client, google, next_path):
+    back = sign_in_with_google(client, google, next_path=next_path)
+
+    assert back["next"] == "/"
+    assert exchange(client, back["google"]).status_code == 200
+
+
+def test_an_encoded_backslash_in_the_query_comes_back_as_home(client, google):
+    """/login?next=/%5Cevil.com: the board passes the decoded /\\evil.com on to the brain."""
+    response = client.get("/auth/google?next=/%5Cevil.com")
+    sent = {k: v[0] for k, v in parse_qs(urlsplit(response.headers["location"]).query).items()}
+    google.nonce = sent["nonce"]
+
+    back = landed(back_from_google(client, code="google-code", state=sent["state"]))
+
+    assert back["next"] == "/"
 
 
 def test_a_failed_google_sign_in_leaves_no_login_behind(client, google, store):
