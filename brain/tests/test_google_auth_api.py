@@ -312,3 +312,22 @@ def test_behind_a_proxy_google_uses_the_public_callback_url_and_the_cookie_still
     assert google.token_requests[0]["redirect_uri"] == public
     assert all(c.path == "/" for c in cookie if c.name == "google_signin")
     assert "google" in back
+
+
+def test_without_board_url_google_returns_to_the_same_sites_sign_in_page(
+    app, client, google, settings
+):
+    """Production serves the board and the brain on one domain (Caddy, /api), so with no
+    BOARD_URL the callback sends the browser to /login on that domain, never to localhost."""
+    app.dependency_overrides[get_settings] = lambda: settings.model_copy(update={"board_url": None})
+
+    sent = start(client, google)
+    response = back_from_google(client, code="google-code", state=sent["state"])
+
+    location = response.headers["location"]
+    assert location.startswith("/login?google=")
+    assert "localhost" not in location
+
+
+def test_the_board_url_is_unset_by_default(settings):
+    assert base_settings().board_url is None
