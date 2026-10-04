@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from brain.config import Settings
 from brain.github import GitHubItem, GitHubReader, GitHubRelease
 from brain.gitlab import GitLabDiff, GitLabItem, GitLabReader, web_address
-from brain.integrations import ToolRefused
+from brain.integrations import McpEndpoint, ToolRefused
 from brain.jira import JiraConfig, JiraIssue, JiraReader, root_cause
 from brain.memory import Chunk, MeetingMemory
 from brain.memory.chunking import Turn, people_turns, turn_text
@@ -275,19 +275,27 @@ def code_repos(team: TeamSettings, settings: Settings) -> list[CodeRepo]:
 
 
 def github_readers(
-    settings: Settings, team: TeamSettings, target: Any = None
+    settings: Settings,
+    team: TeamSettings,
+    target: Any = None,
+    endpoint: McpEndpoint | str | None = None,
 ) -> list[GitHubReader] | str:
     """A reader for each of the team's repositories at its ref (default branch when unset), or
-    why there is none."""
+    why there is none. `endpoint` is the team's own connection (github_account.github_endpoint):
+    GitHub's hosted server with its token, or why its token can't be used; None reads
+    GITHUB_MCP_URL with no credentials. `target` (tests) stands in for the server."""
     repos = code_repos(team, settings)
-    if not settings.github_mcp_url:
-        return "GitHub is not configured: set GITHUB_MCP_URL"
+    if isinstance(endpoint, str):
+        return f"GitHub is not reachable: {endpoint}"
+    if not (endpoint or settings.github_mcp_url):
+        return "GitHub is not configured: connect GitHub in Settings, or set GITHUB_MCP_URL"
+    server = target or endpoint or settings.github_mcp_url
     if not repos:
         return "GitHub is not configured: no repository is set in workspace settings or GITHUB_REPO"
     readers, problems = [], []
     for repo in repos:
         try:
-            readers.append(GitHubReader(repo.path, target or settings.github_mcp_url, ref=repo.ref))
+            readers.append(GitHubReader(repo.path, server, ref=repo.ref))
         except ValueError as e:
             problems.append(str(e))
     return readers or f"GitHub is not configured: {problems[0]}"
@@ -791,6 +799,10 @@ def github_finding(repo: str, item: GitHubItem, zone: tzinfo = UTC) -> Finding:
             state += f" {merged_on.isoformat()}"
     noun = "Pull request" if item.kind == "pr" else "Issue"
     text = f"{noun} {label}: {item.title} ({state})"
+    if item.checks:
+        text += f"; checks: {item.checks}"
+    if item.reviews:
+        text += f"; reviews: {item.reviews}"
     if item.body:
         text += f". {item.body}"
     kind = "github_pr" if item.kind == "pr" else "github_issue"

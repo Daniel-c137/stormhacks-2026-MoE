@@ -11,6 +11,7 @@ dependencies = [
     "google-genai",
     "livekit-api",
     "mcp",
+    "httpx2>=2.13.1",  # the MCP SDK's HTTP client: a bearer header for GitHub's hosted server
     "pyjwt[crypto]>=2.15.1",
     "httpx>=0.28.1",
     "psycopg[binary]",

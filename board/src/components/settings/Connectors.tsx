@@ -13,7 +13,14 @@ import { type FormEvent, useCallback, useRef, useState } from "react";
 import { Icon } from "@/components/ui/Icon";
 import { useDismiss } from "@/hooks/useDismiss";
 import type { useConnectors } from "@/hooks/useApi";
-import { connectJiraAccount, describeError, disconnectJiraAccount, updateConnectors } from "@/lib/api";
+import {
+  connectGitHubAccount,
+  connectJiraAccount,
+  describeError,
+  disconnectGitHubAccount,
+  disconnectJiraAccount,
+  updateConnectors,
+} from "@/lib/api";
 
 type Statuses = ReturnType<typeof useConnectors>;
 type Host = "github" | "gitlab";
@@ -49,8 +56,11 @@ interface AccountDraft {
 }
 
 const TOKENS_URL = "https://id.atlassian.com/manage-profile/security/api-tokens";
-/** The account row's key in the open-menu state, beside the `name:index` keys of the others. */
+/** Where GitHub makes a fine-grained personal access token. */
+const GITHUB_TOKENS_URL = "https://github.com/settings/personal-access-tokens/new";
+/** The account rows' keys in the open-menu state, beside the `name:index` keys of the others. */
 const ACCOUNT = "jira-account";
+const GITHUB_ACCOUNT = "github-account";
 
 const choices = (repos: CodeRepo[]): CodeRepoChoice[] => repos.map(({ path, ref }) => ({ path, ref }));
 
@@ -76,7 +86,9 @@ function State({ name, statuses }: { name: ConnectorName; statuses: Statuses }) 
 /** One row per connected repository, project and Jira; admins add, edit and remove them inline.
  * Each change is saved at once (PUT /settings/connectors) and the states are checked again.
  * The Jira account approved tasks are pushed to is a row of its own, with its own site and
- * project: connecting it leaves the Jira project the agent reads as it is. */
+ * project: connecting it leaves the Jira project the agent reads as it is. So is the GitHub
+ * account whose token the repositories are read with (PUT /settings/github/account); without
+ * one they are read through the server's GitHub MCP server with no credentials. */
 export function Connectors({
   settings,
   statuses,
@@ -90,6 +102,8 @@ export function Connectors({
 }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [account, setAccount] = useState<AccountDraft | null>(null);
+  /** The GitHub token being pasted; null when the form is closed. */
+  const [githubToken, setGithubToken] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [menu, setMenu] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -116,6 +130,7 @@ export function Connectors({
   const startAccount = () => {
     setMenu(null);
     setDraft(null);
+    setGithubToken(null);
     setProblem("");
     setAccount({
       site: settings.jira.account_site ?? "",
@@ -162,6 +177,45 @@ export function Connectors({
     }
   };
 
+  const startGitHub = () => {
+    setMenu(null);
+    setAdding(false);
+    setDraft(null);
+    setAccount(null);
+    setProblem("");
+    setGithubToken("");
+  };
+
+  const connectGitHub = async (e: FormEvent) => {
+    e.preventDefault();
+    if (githubToken === null) return;
+    setBusy(true);
+    setProblem("");
+    try {
+      onSaved(await connectGitHubAccount({ token: githubToken.trim() }));
+      setGithubToken(null);
+      statuses.reload();
+    } catch (err) {
+      setProblem(`Not connected. ${describeError(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const disconnectGitHub = async () => {
+    setMenu(null);
+    setBusy(true);
+    setProblem("");
+    try {
+      onSaved(await disconnectGitHubAccount());
+      statuses.reload();
+    } catch (err) {
+      setProblem(`Not disconnected. ${describeError(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const remove = (name: ConnectorName, index: number) => {
     setMenu(null);
     const next = current(settings);
@@ -190,6 +244,7 @@ export function Connectors({
     setAdding(false);
     setMenu(null);
     setAccount(null);
+    setGithubToken(null);
     setProblem("");
     if (name === "jira") {
       setDraft({ name, index: 0, path: settings.jira.project ?? "", ref: settings.jira.site ?? "" });
@@ -208,6 +263,7 @@ export function Connectors({
         ]
       : []),
   ];
+  const githubStatus = statuses.data?.find((c) => c.name === "github");
   const full: Record<ConnectorName, boolean> = {
     github: settings.github.repos.length >= MAX_CODE_REPOS,
     gitlab: settings.gitlab.projects.length >= MAX_CODE_REPOS,
@@ -291,6 +347,85 @@ export function Connectors({
         })}
         {draft && draft.index === null && <li>{form(draft)}</li>}
         {draft?.name === "jira" && !settings.jira.project && <li>{form(draft)}</li>}
+        {settings.github.account_login && githubToken === null && (
+          <li className="conn-row">
+            <Icon name="github" className="conn-icon is-github" />
+            <span className="conn-name">
+              @{settings.github.account_login}
+              <span className="conn-ref-text">
+                {" "}
+                ·{" "}
+                {githubStatus?.state === "failing" && githubStatus.detail
+                  ? githubStatus.detail
+                  : "GitHub is read with this account's token"}
+              </span>
+            </span>
+            <State name="github" statuses={statuses} />
+            {canEdit && (
+              <div className="conn-more" ref={menu === GITHUB_ACCOUNT ? rowMenu : undefined}>
+                <button
+                  type="button"
+                  className="icon-btn sm"
+                  aria-label="More for the GitHub account"
+                  aria-haspopup="menu"
+                  aria-expanded={menu === GITHUB_ACCOUNT}
+                  onClick={() => setMenu(menu === GITHUB_ACCOUNT ? null : GITHUB_ACCOUNT)}
+                  disabled={busy}
+                >
+                  <Icon name="ellipsis" />
+                </button>
+                {menu === GITHUB_ACCOUNT && (
+                  <div className="menu conn-menu" role="menu" aria-label="GitHub account">
+                    <button type="button" className="menu-item" role="menuitem" onClick={startGitHub}>
+                      <Icon name="pencil" />
+                      Change token
+                    </button>
+                    <button type="button" className="menu-item danger" role="menuitem" onClick={() => void disconnectGitHub()}>
+                      <Icon name="trash-2" />
+                      Disconnect
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </li>
+        )}
+        {githubToken !== null && (
+          <li>
+            <form className="conn-account" onSubmit={(e) => void connectGitHub(e)} aria-label="Connect GitHub">
+              <h3>Connect GitHub</h3>
+              <label className="label wide">
+                Fine-grained access token
+                <input
+                  className="field mono"
+                  type="password"
+                  value={githubToken}
+                  onChange={(e) => setGithubToken(e.target.value)}
+                  placeholder="github_pat_…"
+                  autoComplete="new-password"
+                  autoFocus
+                  required
+                />
+              </label>
+              <p className="note">
+                <a className="link" href={GITHUB_TOKENS_URL} target="_blank" rel="noopener noreferrer">
+                  Create a token on GitHub
+                </a>{" "}
+                with read-only access to the repositories above: Metadata, Contents, Issues, Pull requests and Commit
+                statuses. It is checked with GitHub, stored encrypted and never shown again.
+              </p>
+              <div className="conn-account-actions">
+                <button type="submit" className="btn btn-primary btn-sm" disabled={busy || !githubToken.trim()}>
+                  {busy ? <Icon name="loader-circle" className="spin" /> : <Icon name="link" />}
+                  Connect
+                </button>
+                <button type="button" className="btn btn-quiet btn-sm" onClick={() => setGithubToken(null)} disabled={busy}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </li>
+        )}
         {settings.jira.connected && !account && (
           <li className="conn-row">
             <Icon name="jira" className="conn-icon is-jira" />
@@ -429,6 +564,16 @@ export function Connectors({
                   {label}
                 </button>
               ))}
+              <button
+                type="button"
+                className="menu-item"
+                role="menuitem"
+                disabled={Boolean(settings.github.account_login)}
+                onClick={startGitHub}
+              >
+                <Icon name="github" className="conn-icon is-github" />
+                Connect GitHub
+              </button>
               <button
                 type="button"
                 className="menu-item"

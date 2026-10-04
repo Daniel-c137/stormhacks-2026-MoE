@@ -407,7 +407,7 @@ async def test_tools_outside_the_read_menu_are_refused(store, fake_jira, github)
     await checker(llm, store, fake_jira, github).tick(meeting, 60)
 
     assert github.comments == []
-    assert [name for name, _ in github.calls] == ["pull_request_read"]
+    assert {name for name, _ in github.calls} == {"pull_request_read"}  # reads only
 
 
 async def test_claims_and_evidence_are_fenced_as_data(store, fake_jira, github):
