@@ -17,6 +17,7 @@ from contracts import (
     FactCheckResponse,
     InvokeRequest,
     InvokeResponse,
+    KeytermsResponse,
     SegmentsIngest,
     TranscriptSegment,
 )
@@ -30,6 +31,8 @@ from ..agent.timekeeping import (
     seconds_since_start,
     track_agenda,
 )
+from ..config import Settings
+from ..keyterms import meeting_keyterms
 from ..llm import LLM, LLMError, LLMUnavailable
 from ..store import Conflict, NotFound, Store
 from .deps import (
@@ -37,6 +40,7 @@ from .deps import (
     get_fact_checker,
     get_llm_factory,
     get_orchestrator,
+    get_settings,
     get_store,
     not_implemented,
     require_internal,
@@ -139,6 +143,22 @@ async def invoke(
         recent=body.recent_segments,
     )
     return InvokeResponse(answer=await ask_agent(orchestrator, question))
+
+
+@router.get("/meetings/{meeting_id}/keyterms")
+async def keyterms(
+    meeting_id: str,
+    store: Store = Depends(get_store),
+    settings: Settings = Depends(get_settings),
+) -> KeytermsResponse:
+    """The worker fetches these when it joins a meeting and passes them to every Scribe stream
+    it opens, reopens included: the agent's name first, then the team, its settings, the agenda
+    and open Jira issue keys, within Scribe Realtime's limits. Jira failing never fails this."""
+    try:
+        meeting = await store.meeting(meeting_id)
+    except NotFound:
+        raise HTTPException(status_code=404, detail="Meeting not found") from None
+    return KeytermsResponse(terms=await meeting_keyterms(store, settings, meeting))
 
 
 def meeting_lock(request: Request, kind: str, meeting_id: str) -> asyncio.Lock:

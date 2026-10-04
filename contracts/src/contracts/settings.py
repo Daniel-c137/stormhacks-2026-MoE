@@ -28,6 +28,7 @@ class Voice(BaseModel):
     name: str
     desc: str
     sample: str
+    default_label: str | None = None  # only on the agent's default voice, naming the agent
 
 
 class TeamSettings(BaseModel):

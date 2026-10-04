@@ -8,7 +8,7 @@ from contracts import ConnectorStatus, Person, ProfileUpdate, Team, TeamSettings
 from ..config import Settings
 from ..connectors import connector_statuses
 from ..store import NotFound, Store
-from ..voices import VoicesFailed, VoicesUnavailable, fetch_voices
+from ..voices import VoicesFailed, VoicesUnavailable, fetch_voices, with_default
 from ..zones import is_zone
 from .deps import current_user, get_http_transport, get_settings, get_store, user_team
 
@@ -186,13 +186,15 @@ async def list_voices(
     config: Settings = Depends(get_settings),
     transport: httpx.AsyncBaseTransport | None = Depends(get_http_transport),
 ) -> list[Voice]:
+    """The account's voices, the agent's default (ELEVENLABS_VOICE_ID) first and labelled."""
     await user_team(store, user)
     try:
-        return await fetch_voices(config, transport=transport)
+        voices = await fetch_voices(config, transport=transport)
     except VoicesUnavailable as e:
         raise HTTPException(status_code=503, detail=str(e)) from None
     except VoicesFailed as e:
         raise HTTPException(status_code=502, detail=str(e)) from None
+    return with_default(voices, config.elevenlabs_voice_id)
 
 
 def text(value: str | None) -> str | None:

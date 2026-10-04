@@ -34,7 +34,7 @@ def test_terms_are_trimmed_and_shortened_at_a_word_boundary():
     assert fit("Refund   the\tusers") == "Refund the users"
     assert fit("Refund the double-charged users") == "Refund the"
     assert fit("a" * MAX_KEYTERM_CHARS) == "a" * MAX_KEYTERM_CHARS
-    assert fit("Waitlist email, then the rollout") == "Waitlist email"
+    assert fit("Waitlist email, rollout plan") == "Waitlist email"
 
 
 def test_a_term_with_no_word_that_fits_is_dropped():
