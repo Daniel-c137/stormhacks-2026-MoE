@@ -22,3 +22,13 @@
 		reverse_proxy board:3000
 	}
 }
+
+# The opening page on its own name: the static files in landing/. Its SkyRoom link goes to
+# /home, which sends the browser on to the app.
+{$LANDING_DOMAIN} {
+	encode zstd gzip
+
+	redir /home https://{$DOMAIN}/
+	root * /srv/landing
+	file_server
+}

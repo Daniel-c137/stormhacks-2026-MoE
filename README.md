@@ -14,6 +14,7 @@ The product and agent names live in [`contracts/identity.json`](contracts/identi
 | `world/` | The demo world: mock GitHub, GitLab and Jira MCP servers over `mock-data/`, with a write journal (overlay) that `world-reset` clears. DropSubs has two GitHub repositories (`dropsubs/dropsubs`, `dropsubs/website`) and a GitLab project (`dropsubs/infra`). |
 | `contracts/` | Shared request, event and data shapes, in Python and TypeScript. |
 | `db/migrations` | SQL migrations for Postgres, applied by `brain migrate`. |
+| `landing/` | The opening page of the demo: one static file, no build step. Caddy serves it on `LANDING_DOMAIN`, and its SkyRoom link (`/home`) redirects to the app on `DOMAIN`. To look at it alone, open `landing/index.html` in a browser; the link only works behind Caddy. |
 
 ```
 browser ── /       ──> board
@@ -141,9 +142,9 @@ On a meeting's report, an admin then presses Push: each included draft becomes a
 
 ## Deploying to a server
 
-One machine with Docker runs everything from [`docker-compose.yml`](docker-compose.yml): Postgres (never published), a one-shot `migrate`, the brain, the realtime worker, the three mock MCP servers (GitHub, Jira, GitLab), the board, and Caddy on ports 80 and 443. Caddy serves the board at `/` and the brain at `/api/*` (prefix stripped), answers 404 for `/api/internal/*` (the worker calls the brain directly on the compose network), and hides `/api/docs` and `/api/openapi.json` unless `EXPOSE_API_DOCS=true`.
+One machine with Docker runs everything from [`docker-compose.yml`](docker-compose.yml): Postgres (never published), a one-shot `migrate`, the brain, the realtime worker, the three mock MCP servers (GitHub, Jira, GitLab), the board, and Caddy on ports 80 and 443. Caddy serves the board at `/` and the brain at `/api/*` (prefix stripped), the opening page from `landing/` on `LANDING_DOMAIN`, answers 404 for `/api/internal/*` (the worker calls the brain directly on the compose network), and hides `/api/docs` and `/api/openapi.json` unless `EXPOSE_API_DOCS=true`.
 
-1. Point the domain's DNS A/AAAA record at the server and open ports 80 and 443. Caddy gets the certificate itself.
+1. Point the domain's DNS A/AAAA record at the server and open ports 80 and 443. Caddy gets the certificate itself. For the opening page on its own subdomain, add a DNS record for that name too and set `LANDING_DOMAIN` in `deploy/.env`.
 2. On the server, clone the repo and write the settings:
    ```sh
    cp deploy/.env.example deploy/.env    # then fill it in; it explains each value

@@ -156,6 +156,7 @@ services:
     restart: unless-stopped
     environment:
       DOMAIN: ${DOMAIN:-localhost}
+      LANDING_DOMAIN: ${LANDING_DOMAIN:-landing.localhost}
       EXPOSE_API_DOCS: ${EXPOSE_API_DOCS:-false}
     ports:
       - "80:80"
@@ -163,6 +164,7 @@ services:
       - "443:443/udp"
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./landing:/srv/landing:ro
       - caddy-data:/data
       - caddy-config:/config
     depends_on:
