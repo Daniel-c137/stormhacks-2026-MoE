@@ -129,8 +129,6 @@ def test_terms_come_in_order_agent_team_settings_agenda_then_jira(worker, store,
     assert response.status_code == 200, response.text
     assert KeytermsResponse.model_validate(response.json()).terms == [
         AGENT,
-        "Hi Atlas",
-        "Hi",
         "Atlas",
         "Alex Chen",
         "Alex",
@@ -145,7 +143,29 @@ def test_terms_come_in_order_agent_team_settings_agenda_then_jira(worker, store,
     ]
     (search,) = jira.searches
     assert "DS" in search["jql"] and "done" in search["jql"].lower()
-    assert search["maxResults"] == MAX_KEYTERMS - 12
+    assert search["maxResults"] == MAX_KEYTERMS - 10
+
+
+def test_the_default_wake_phrase_is_the_agent_name_alone():
+    assert get_identity().wake_phrase == AGENT
+    assert Identity(product_name="Acme", agent_name="Nova").wake_phrase == "Nova"
+
+
+@pytest.mark.parametrize("phrase", ["Hey Atlas", "hi, Atlas", "OK Atlas", "Hello hey Atlas"])
+def test_a_greeting_before_a_custom_wake_phrase_takes_no_keyterm(worker, store, phrase):
+    meeting = setup(store, wake_phrase=phrase)
+
+    terms = keyterms(worker, meeting.id).json()["terms"]
+
+    assert terms[:3] == [AGENT, "Atlas", "Alex Chen"]
+
+
+def test_a_wake_phrase_that_is_only_a_greeting_adds_nothing(worker, store):
+    meeting = setup(store, wake_phrase="Hey")
+
+    terms = keyterms(worker, meeting.id).json()["terms"]
+
+    assert terms[:2] == [AGENT, "Alex Chen"]
 
 
 def test_the_agent_name_comes_from_the_identity_never_hard_coded(worker, store, monkeypatch):
@@ -178,7 +198,7 @@ def test_repeats_are_dropped_and_the_limits_hold(worker, store, jira):
     assert len(terms) == MAX_KEYTERMS
     assert all(0 < len(t) <= MAX_KEYTERM_CHARS for t in terms)
     assert len({t.casefold() for t in terms}) == len(terms)
-    assert terms[:5] == [AGENT, f"Hey {AGENT}", "Hey", "Alex Chen", "Alex"]
+    assert terms[:3] == [AGENT, "Alex Chen", "Alex"]
     assert jira.searches == []  # no room left, so Jira is not asked
 
 
