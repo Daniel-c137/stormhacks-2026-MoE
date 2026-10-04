@@ -39,5 +39,9 @@ class Settings(BaseSettings):
     jira_email: str | None = None
     jira_api_token: str | None = None
     jira_project_key: str | None = None
+    connector_timeout: float = 5.0  # seconds to reach an MCP server and list its tools
+
+    elevenlabs_api_key: str | None = None
+    elevenlabs_api_url: str = "https://api.elevenlabs.io"
 
     brain_internal_token: str | None = None
