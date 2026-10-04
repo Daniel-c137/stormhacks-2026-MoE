@@ -67,6 +67,9 @@ def test_report_names_the_model_that_answered(monkeypatch, tmp_path, capsys):
 def test_report_without_gemini_config_says_what_is_missing(monkeypatch, tmp_path):
     monkeypatch.setenv("GEMINI_API_KEY", "")
     monkeypatch.setenv("GEMINI_MODEL", "")
+    # nor the OpenRouter fallback, which a developer's .env may set
+    monkeypatch.setenv("OPENROUTER_API_KEY", "")
+    monkeypatch.setenv("OPENROUTER_MODELS", "")
 
     with pytest.raises(SystemExit) as exit_info:
         main(["report", str(FIXTURES / "standup.json"), "--out", str(tmp_path / "r.json")])
