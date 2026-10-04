@@ -11,25 +11,32 @@ from pydantic import BaseModel, ValidationError
 
 import contracts
 from contracts import (
+    MAX_CODE_REPOS,
     Agenda,
     AgendaItem,
     AgendaTrackRequest,
     AgendaTrackResponse,
     AgendaUpdate,
     AskRequest,
+    CodeRepo,
     ConnectorStatus,
     CreateAccountRequest,
     CreateAccountResponse,
+    ConnectorsUpdate,
     CreateMeetingRequest,
     FactCheck,
     FactCheckRequest,
     FactCheckResponse,
+    GitHubSettings,
+    GitLabSettings,
     LoginRequest,
     LoginResponse,
     Meeting,
     PasswordChange,
     Person,
     ReportProgress,
+    Source,
+    TeamSettings,
     Topic,
 )
 
@@ -197,6 +204,48 @@ def test_connector_status_names_only_known_connectors_and_states():
         ConnectorStatus(name="slack", state="connected")
     with pytest.raises(ValidationError):
         ConnectorStatus(name="jira", state="maybe")
+
+
+def test_old_single_repository_settings_still_parse_into_the_list():
+    old = TeamSettings.model_validate(
+        {
+            "team_id": "t1",
+            "github": {"repo": "acme/checkout", "ref": "main", "connected": True, "files": 9},
+            "jira": {"site": "acme.atlassian.net", "project": "DS"},
+        }
+    )
+    unset = GitHubSettings.model_validate({"repo": None, "ref": None, "connected": False})
+
+    assert old.github.repos == [CodeRepo(path="acme/checkout", ref="main", connected=True, files=9)]
+    assert old.gitlab == GitLabSettings(projects=[])
+    assert unset.repos == []
+    assert GitHubSettings(repo="  ").repos == []
+    assert GitHubSettings.model_validate(old.github.model_dump()) == old.github
+
+
+def test_settings_without_connectors_default_to_none_connected():
+    bare = TeamSettings(team_id="t1")
+
+    assert (bare.github.repos, bare.gitlab.projects, bare.jira.project) == ([], [], None)
+
+
+def test_a_team_connects_at_most_max_code_repos_each():
+    many = [{"path": f"acme/r{n}"} for n in range(MAX_CODE_REPOS + 1)]
+
+    with pytest.raises(ValidationError):
+        ConnectorsUpdate.model_validate({"github": many})
+    with pytest.raises(ValidationError):
+        ConnectorsUpdate.model_validate({"gitlab": many})
+    with pytest.raises(ValidationError):
+        GitHubSettings.model_validate({"repos": many})
+    update = ConnectorsUpdate.model_validate({"github": many[:MAX_CODE_REPOS]})
+    assert (len(update.github), update.gitlab, update.jira.site) == (MAX_CODE_REPOS, [], None)
+
+
+def test_gitlab_is_a_connector_and_its_items_are_sources():
+    assert ConnectorStatus(name="gitlab", state="failing").name == "gitlab"
+    for kind in ("gitlab_issue", "gitlab_mr", "gitlab_code", "gitlab_release"):
+        assert Source(kind=kind, label="dropsubs/infra!4").kind == kind
 
 
 def test_login_bodies_carry_no_password_back():

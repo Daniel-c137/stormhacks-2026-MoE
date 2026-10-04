@@ -42,11 +42,13 @@ from contracts import (
     Agenda,
     AgendaItem,
     ChatMessage,
+    CodeRepo,
     Decision,
     DecisionRelation,
     DecisionStep,
     FactCheck,
     GitHubSettings,
+    GitLabSettings,
     JiraSettings,
     Person,
     Report,
@@ -379,9 +381,10 @@ async def test_settings_default_to_the_teams_repo_and_project_until_saved(store)
 
     assert settings == TeamSettings(
         team_id=team.id,
-        github=GitHubSettings(repo="acme/checkout"),
+        github=GitHubSettings(repos=[CodeRepo(path="acme/checkout")]),
         jira=JiraSettings(project="DS"),
     )
+    assert settings.gitlab.projects == []
     assert settings.timezone == "UTC"
     with pytest.raises(NotFound):
         await store.settings(new_id())
@@ -391,7 +394,13 @@ async def test_saved_settings_are_read_back_per_team(store):
     team, _, _, other, _ = await two_teams(store)
     saved = TeamSettings(
         team_id=team.id,
-        github=GitHubSettings(repo="acme/checkout", ref="main"),
+        github=GitHubSettings(
+            repos=[
+                CodeRepo(path="acme/checkout", ref="main", connected=True, files=420),
+                CodeRepo(path="acme/website", indexed_at=datetime(2026, 10, 1, 12, tzinfo=UTC)),
+            ]
+        ),
+        gitlab=GitLabSettings(projects=[CodeRepo(path="acme/platform/infra", ref="prod")]),
         jira=JiraSettings(site="acme.atlassian.net", project="DS"),
         voice="voice-1",
         sensitivity="quiet",

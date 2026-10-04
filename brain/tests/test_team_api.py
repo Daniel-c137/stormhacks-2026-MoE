@@ -1,7 +1,7 @@
 """Profile, team and workspace settings over HTTP."""
 
 import pytest
-from api_support import ALEX, OUTSIDER, SARAH, TEAM
+from api_support import ADMIN, ALEX, OUTSIDER, SARAH, TEAM
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
 JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 64
@@ -162,8 +162,6 @@ def test_the_admin_saves_settings_that_teammates_then_read(client_as):
     assert response.status_code == 200
     saved = client_as(SARAH).get("/settings").json()
     assert saved == response.json()
-    assert saved["github"]["repo"] == "acme/checkout"
-    assert saved["jira"]["project"] == "DS"
     assert saved["voice"] == "voice-1"
     assert saved["wake_phrase"] == "Hey Omni"
     assert (saved["sensitivity"], saved["interrupt_minutes"], saved["who_can_allow"]) == (
@@ -183,15 +181,34 @@ def test_settings_are_always_saved_for_the_callers_own_team(client_as):
     assert client_as(ALEX).get("/settings").json()["voice"] is None
 
 
-def test_connection_state_cannot_be_set_by_the_client(client_as):
-    body = settings_body(github={"repo": "acme/checkout", "connected": True, "files": 9000})
-    body["jira"] = {"project": "DS", "connected": True}
+def test_settings_keep_the_connectors_whatever_the_body_says(client_as):
+    """Connectors change only at PUT /settings/connectors, which needs an admin."""
+    connectors = {
+        "github": [{"path": "acme/checkout", "ref": "main"}],
+        "gitlab": [{"path": "acme/infra"}],
+        "jira": {"site": "acme.atlassian.net", "project": "DS"},
+    }
+    assert client_as(ADMIN).put("/settings/connectors", json=connectors).status_code == 200
+    body = settings_body(
+        github={"repos": [{"path": "evil/repo", "connected": True, "files": 9000}]},
+        gitlab={"projects": []},
+        jira={"site": "evil.example", "project": "EV", "connected": True},
+    )
 
-    saved = client_as(ALEX).put("/settings", json=body).json()
+    saved = client_as(SARAH).put("/settings", json=body).json()
 
-    assert saved["github"]["connected"] is False
-    assert saved["github"]["files"] is None
-    assert saved["jira"]["connected"] is False
+    assert [r["path"] for r in saved["github"]["repos"]] == ["acme/checkout"]
+    assert saved["github"]["repos"][0]["connected"] is False
+    assert [p["path"] for p in saved["gitlab"]["projects"]] == ["acme/infra"]
+    assert (saved["jira"]["site"], saved["jira"]["project"]) == ("acme.atlassian.net", "DS")
+    assert client_as(ALEX).get("/settings").json() == saved
+
+
+def test_settings_may_leave_the_connectors_out_or_send_the_old_shape(client_as):
+    without = {k: v for k, v in settings_body().items() if k not in ("github", "jira")}
+
+    assert client_as(SARAH).put("/settings", json=without).status_code == 200
+    assert client_as(SARAH).put("/settings", json=settings_body()).status_code == 200
 
 
 def test_blank_text_settings_are_cleared(client_as):

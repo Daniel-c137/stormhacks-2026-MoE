@@ -219,14 +219,17 @@ async def test_unsupported_search_syntax_is_a_clear_error_not_everything(query):
 
 
 async def test_searches_sort_and_page():
-    oldest = await search("search_issues", "fee", sort="created", order="asc")
-    most_discussed = await search("search_issues", "fee", sort="comments", order="desc")
-    page_two = await search("search_issues", "fee", sort="created", order="asc", perPage=2, page=2)
+    scope = {"owner": OWNER, "repo": REPO}
+    oldest = await search("search_issues", "fee", sort="created", order="asc", **scope)
+    most_discussed = await search("search_issues", "fee", sort="comments", order="desc", **scope)
+    page_two = await search(
+        "search_issues", "fee", sort="created", order="asc", perPage=2, page=2, **scope
+    )
 
     assert oldest == [11, 20, 23, 37, 43, 47]
     assert most_discussed[0] == 37  # 8 comments
     assert page_two == oldest[2:4]
-    data = payload(await call("search_issues", query="fee", perPage=2))
+    data = payload(await call("search_issues", query="fee", perPage=2, **scope))
     assert data["total_count"] == 6 and len(data["items"]) == 2
 
 
@@ -673,3 +676,86 @@ def test_the_loader_returns_copies_of_the_github_data():
     pulls[0]["title"] = "changed"
 
     assert mock_records("github", "pull_requests") == raw("pull_requests")
+
+
+# A second repository
+
+
+SITE = "dropsubs/website"
+SITE_OWNER, SITE_REPO = SITE.split("/")
+SITE_WEB = f"https://github.com/{SITE}"
+
+
+def test_the_world_has_a_second_repository_with_its_own_records():
+    assert world_spec().github_repos == [FULL_NAME, SITE]
+    for kind in ("issues", "pull_requests", "commits", "comments"):
+        for record in mock_records("github", kind, SITE):
+            assert record["html_url"].startswith(f"{SITE_WEB}/"), (kind, record["html_url"])
+    head = json.loads((SNAPSHOTS_DIR / "demo/repos/github/dropsubs/website.json").read_text())
+    assert head["sha"] == mock_records("github", "commits", SITE)[0]["sha"]
+
+
+async def test_each_repository_answers_for_its_own_numbers():
+    site_issue = payload(
+        await call("issue_read", method="get", owner=SITE_OWNER, repo=SITE_REPO, issue_number=7)
+    )
+    main_issue = await read("issue_read", method="get", issue_number=7)
+
+    assert site_issue["title"] == "Landing page says the fee is 30%"
+    assert site_issue["html_url"] == f"{SITE_WEB}/issues/7"
+    assert main_issue["title"] == "Add error tracking"
+    assert [p["number"] for p in site_issue["closed_by_pull_requests"]["references"]] == [8]
+
+
+async def test_a_scoped_search_stays_in_its_repository_and_an_unscoped_one_spans_both():
+    site = await search("search_issues", "landing", owner=SITE_OWNER, repo=SITE_REPO)
+    main = await search("search_issues", "landing", owner=OWNER, repo=REPO)
+    everywhere = payload(await call("search_issues", query="fee org:dropsubs"))["items"]
+
+    assert site == [7]
+    assert main == []
+    assert {i["repository_url"] for i in everywhere} == {
+        f"https://api.github.com/repos/{FULL_NAME}",
+        f"https://api.github.com/repos/{SITE}",
+    }
+
+
+async def test_code_search_and_file_reads_cover_the_second_repository():
+    hits = payload(await call("search_code", query=f"SUCCESS_FEE_PERCENT repo:{SITE}"))["items"]
+    either = payload(
+        await call("search_code", query=f"SUCCESS_FEE_PERCENT repo:{FULL_NAME} repo:{SITE}")
+    )["items"]
+    result = await call(
+        "get_file_contents", owner=SITE_OWNER, repo=SITE_REPO, path="lib/pricing.ts"
+    )
+
+    assert {h["repository"] for h in hits} == {SITE}
+    assert "lib/pricing.ts" in [h["path"] for h in hits]
+    assert {h["repository"] for h in either} == {SITE}
+    assert not result.is_error
+    assert "SUCCESS_FEE_PERCENT = 20" in result.content[1].resource.text
+
+
+async def test_the_second_repository_has_no_releases():
+    releases = payload(await call("list_releases", owner=SITE_OWNER, repo=SITE_REPO))
+    latest = await call("get_latest_release", owner=SITE_OWNER, repo=SITE_REPO)
+
+    assert releases == []
+    assert latest.is_error
+
+
+async def test_a_comment_on_the_second_repository_is_journaled_with_its_name(overlay_dir):
+    await call(
+        "add_issue_comment", owner=SITE_OWNER, repo=SITE_REPO, issue_number=5, body="Approved!"
+    )
+
+    site = payload(
+        await call(
+            "issue_read", method="get_comments", owner=SITE_OWNER, repo=SITE_REPO, issue_number=5
+        )
+    )
+    main = await read("issue_read", method="get_comments", issue_number=5)
+    assert site[-1]["body"] == "Approved!"
+    assert "Approved!" not in [c["body"] for c in main]
+    (entry,) = JournalOverlay(overlay_dir, "demo").journal()
+    assert entry.target == f"{SITE}#5"

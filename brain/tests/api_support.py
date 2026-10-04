@@ -32,6 +32,15 @@ SARAH = Person(id="u-sarah", name="Sarah Kim", short="Sarah", initials="SK")
 OUTSIDER = Person(id="u-olga", name="Olga Petrova", short="Olga", initials="OP")
 NOBODY = Person(id="u-nobody", name="No Team", short="No", initials="NT")  # on no team
 TEAM = Team(id="t-1", name="Checkout", member_ids=[ALEX.id, SARAH.id])
+
+
+class Admin(Person):
+    """A team admin, as current_user returns one once Person.is_admin exists (admin accounts)."""
+
+    is_admin: bool = True
+
+
+ADMIN = Admin(**ALEX.model_dump(exclude={"is_admin"}))  # Alex, signed in as the team's admin
 OTHER_TEAM = Team(id="t-2", name="Elsewhere", member_ids=[OUTSIDER.id])
 
 
