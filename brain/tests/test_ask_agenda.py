@@ -19,7 +19,7 @@ from brain.agent.ask import (
 )
 from brain.config import Settings
 from brain.store import InMemoryStore, Store
-from contracts import Agenda, AgendaItem, Source, TranscriptSegment
+from contracts import Agenda, AgendaItem, AskTurn, Source, TranscriptSegment
 
 pytestmark = pytest.mark.anyio
 
@@ -238,3 +238,19 @@ async def test_the_agenda_is_one_evidence_item(store, settings):
     found = evidence(llm.calls[1].prompt)
     assert ids_for(llm.calls[1].prompt, "Agenda:") == ["e1"]
     assert len(found) == 1
+
+
+async def test_a_follow_up_drawn_from_the_agenda_stays_grounded(store, settings):
+    meeting = await meeting_with_agenda(store)
+    history = [
+        AskTurn(role="user", text=LEFT),
+        AskTurn(role="agent", text="Billing bug and Hiring plan are left."),
+    ]
+    llm = scripted(answer=citing("Agenda:", text="Hiring plan has a 15 min timebox."))
+
+    answer = await orchestrator(llm, store, settings).ask(
+        question("How long is the hiring one?", meeting_id=meeting.id, history=history)
+    )
+
+    assert answer.text == "Hiring plan has a 15 min timebox."
+    assert answer.sources == [Source(kind="meeting", label="Agenda", meeting_id=meeting.id)]
