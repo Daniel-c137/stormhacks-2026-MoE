@@ -4,7 +4,14 @@ import pytest
 
 from brain.memory import chunk_report, chunk_transcript
 from brain.report import TranscriptInput
-from contracts import Decision, Report, TaskDraft, TranscriptSegment
+from contracts import (
+    AGENT_PARTICIPANT_ID,
+    Decision,
+    Report,
+    TaskDraft,
+    TranscriptSegment,
+    get_identity,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -96,6 +103,30 @@ def test_chunk_ids_are_stable_and_unique():
     assert len({c.id for c in first}) == 3
 
 
+def agent_seg(n: int, text: str, t: float) -> TranscriptSegment:
+    return seg(n, "Bob", text, t).model_copy(
+        update={"speaker_id": AGENT_PARTICIPANT_ID, "speaker_name": get_identity().agent_name}
+    )
+
+
+def test_the_agents_own_words_are_never_chunked():
+    segments = [
+        seg(1, "Bob", "Is DS-104 done?", 0),
+        agent_seg(2, "DS-104 is still In Progress in Jira.", 5),
+        agent_seg(3, "The fix is merged though.", 10),
+        seg(4, "Bob", "Then I'll close it.", 15),
+    ]
+
+    chunks = chunk_transcript("t-1", "m-1", segments)
+
+    assert [c.text for c in chunks] == ["Bob: Is DS-104 done?", "Bob: Then I'll close it."]
+    assert all(c.speaker_id != AGENT_PARTICIPANT_ID for c in chunks)
+
+
+def test_a_transcript_of_only_the_agent_makes_no_chunks():
+    assert chunk_transcript("t-1", "m-1", [agent_seg(1, "Hello, I'm listening.", 0)]) == []
+
+
 def test_the_standup_has_one_chunk_per_turn():
     meeting = TranscriptInput.model_validate_json((FIXTURES / "standup.json").read_text())
 
@@ -106,9 +137,9 @@ def test_the_standup_has_one_chunk_per_turn():
         "p-bob",
         "p-carol",
         "p-alice",
-        "agent",
         "p-carol",
     ]
+    assert not any("In Progress" in c.text for c in chunks)
     bob = chunks[1]
     assert bob.text.startswith("Bob Okafor: ")
     assert "refund the 14 affected users" in bob.text
