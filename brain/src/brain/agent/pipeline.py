@@ -26,6 +26,7 @@ from ..memory import MeetingMemory, MemoryMisconfigured, UnusableMemory
 from ..report import TranscriptInput, build_report, link_decisions, memory_candidates
 from ..store import Store
 from ..zones import local_date, zone_of
+from .agenda import everyones_items
 
 logger = logging.getLogger(__name__)
 
@@ -185,8 +186,7 @@ class ReportPipeline:
             segments=await self.store.transcript(meeting_id),
             agent_joined=meeting.agent_joined_at is not None,
         )
-        agenda = await self.store.agenda(meeting_id)
-        return meeting, transcript, agenda.items if agenda else []
+        return meeting, transcript, await everyones_items(self.store, meeting)
 
     async def _links(
         self, llm: LLM, team_id: str, report: Report, zone: tzinfo
