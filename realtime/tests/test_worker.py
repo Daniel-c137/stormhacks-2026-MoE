@@ -7,8 +7,15 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from livekit.rtc.data_stream import TextStreamInfo
 
-from contracts import Meeting
-from realtime_worker.worker import CHAT_TOPIC, MeetingSession, RoomChat, meeting_clock
+from contracts import Meeting, TranslateResponse
+from realtime_worker.config import Settings
+from realtime_worker.worker import (
+    CHAT_TOPIC,
+    MeetingSession,
+    RoomChat,
+    meeting_clock,
+    speech_translator,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -105,3 +112,38 @@ def test_the_clock_counts_from_the_meetings_start():
     )
 
     assert 89 < meeting_clock(meeting)() < 92
+
+
+# live translation (#106)
+
+
+class TranslatingBrain:
+    def __init__(self):
+        self.calls: list[tuple[str, str, str | None]] = []
+
+    async def translate(self, meeting_id: str, text: str, language: str | None):
+        self.calls.append((meeting_id, text, language))
+        return TranslateResponse(language="es", text="Hello")
+
+
+async def test_speech_is_translated_through_the_brain_for_this_meeting():
+    brain = TranslatingBrain()
+
+    translate = speech_translator(Settings(_env_file=None), brain, "m-1")
+    answer = await translate("Hola", "es")
+
+    assert answer == TranslateResponse(language="es", text="Hello")
+    assert brain.calls == [("m-1", "Hola", "es")]
+
+
+def test_translation_can_be_switched_off():
+    settings = Settings(_env_file=None, translate_speech=False)
+
+    assert speech_translator(settings, TranslatingBrain(), "m-1") is None
+
+
+def test_translation_is_on_by_default_and_waits_one_and_a_half_seconds():
+    settings = Settings(_env_file=None)
+
+    assert settings.translate_speech is True
+    assert settings.translation_provisional_seconds == 1.5
