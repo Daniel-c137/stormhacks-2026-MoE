@@ -5,6 +5,7 @@
 import {
   AGENT_PARTICIPANT_ID,
   type Agenda,
+  type AgendaNudge,
   type AgentState,
   type ChatMessage,
   type FactCheck,
@@ -18,8 +19,8 @@ import {
 import { useChat as useLiveKitChat, useRoomContext } from "@livekit/components-react";
 import { type RemoteParticipant, RoomEvent } from "livekit-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getAgenda } from "@/lib/api";
 import { publish } from "@/lib/room";
-import { notImplemented } from "@/lib/stub";
 
 /** Set on a participant's LiveKit attributes while their hand is up. */
 export const HAND_ATTRIBUTE = "hand_raised";
@@ -193,9 +194,80 @@ export function useResponseCards(): ResponseCard[] {
   return cards;
 }
 
-/** Public fact-checks plus private ones addressed to this participant. */
-export const useFactChecks = (): FactCheck[] => notImplemented("useFactChecks");
-export const useAgenda = (): Agenda | null => notImplemented("useAgenda");
+/** Public fact-checks plus private ones addressed to this participant, oldest first. The worker
+ * sends a private one only to its recipient; one addressed to anyone else is dropped here too. */
+export function useFactChecks(): FactCheck[] {
+  const room = useRoomContext();
+  const [checks, setChecks] = useState<FactCheck[]>([]);
+  useTopic(Topic.FACT_CHECK, (check) => {
+    if (check.visibility !== "public" && check.recipient_id !== room.localParticipant.identity) return;
+    setChecks((list) => (list.some((c) => c.id === check.id) ? list.map((c) => (c.id === check.id ? check : c)) : [...list, check]));
+  });
+  return checks;
+}
+
+/** The meeting's agenda: the saved one, loaded once on joining so a late joiner sees it, then each
+ * update the agent publishes as it keeps time. A newer revision always wins over an older one. */
+export function useAgenda(meetingId: string): { agenda: Agenda | null; error: Error | null } {
+  const [agenda, setAgenda] = useState<Agenda | null>(null);
+  const [error, setError] = useState<Error | null>(null);
+  const newer = (next: Agenda) => (current: Agenda | null) =>
+    current && (current.revision ?? 0) > (next.revision ?? 0) ? current : next;
+  useEffect(() => {
+    let cancelled = false;
+    getAgenda(meetingId).then(
+      (saved) => {
+        if (cancelled) return;
+        setError(null);
+        // Only fill in or move forward: a live update may have arrived while this was loading.
+        setAgenda((current) => (current && (current.revision ?? 0) >= (saved.revision ?? 0) ? current : saved));
+      },
+      (err: Error) => {
+        if (!cancelled) setError(err);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [meetingId]);
+  useTopic(Topic.AGENDA, (next) => {
+    if (next.meeting_id !== meetingId) return;
+    setError(null);
+    setAgenda(newer(next));
+  });
+  return { agenda, error };
+}
+
+/** How long a timebox nudge stays up. */
+const NUDGE_MS = 12_000;
+
+export interface ShownNudge extends AgendaNudge {
+  key: string;
+}
+
+/** Timebox nudges from the agent, each shown for a while and then dropped. Never spoken. */
+export function useAgendaNudges(meetingId: string): { nudges: ShownNudge[]; dismiss: (key: string) => void } {
+  const [nudges, setNudges] = useState<ShownNudge[]>([]);
+  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const dismiss = useCallback((key: string) => {
+    clearTimeout(timers.current.get(key));
+    timers.current.delete(key);
+    setNudges((list) => list.filter((n) => n.key !== key));
+  }, []);
+  useTopic(Topic.AGENDA_NUDGE, (nudge) => {
+    if (nudge.meeting_id !== meetingId) return;
+    const key = `${nudge.item_id}:${crypto.randomUUID()}`;
+    setNudges((list) => [...list.filter((n) => n.item_id !== nudge.item_id), { ...nudge, key }]);
+    timers.current.set(key, setTimeout(() => dismiss(key), NUDGE_MS));
+  });
+  useEffect(() => {
+    const pending = timers.current;
+    return () => {
+      for (const timer of pending.values()) clearTimeout(timer);
+    };
+  }, []);
+  return { nudges, dismiss };
+}
 
 /** The snippet everyone is looking at, and a way to put one on stage or clear it. */
 export function useStage(): { stage: StagePayload; setStage: (snippetId: string | null) => Promise<void> } {

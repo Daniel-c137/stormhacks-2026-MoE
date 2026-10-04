@@ -274,6 +274,7 @@
     --primary: #4C3FD1; --on-primary: #FFFFFF; --primary-hover: #5B4EE0;
     --tip-bg: #F4F4F5; --tip-fg: #0E0E10; --hl-soft: #2C2814; --note-fg: #F2CF63;
     --coral-text: #FFB27A; --coral-tint: #33200F; --danger: #F43F5E; --danger-ink: #FF7088; --danger-tint: #2E1520;
+    --ok: #5BD69A; --ok-soft: #132A1F;
     --r-accent-glow: rgba(76,63,209,.22); --r-tile-a: #1E1E21; --r-tile-b: #141416; --r-camoff: #111113; --r-chip: rgba(14,14,16,.74);
     --r-chat: #161618; --r-mine: #2C2C31; --r-agent-bubble: #1F1F23; --r-code: #0A0A0B;
     color-scheme: dark;
@@ -318,6 +319,31 @@
   .card-pop .source { background: var(--soft); }
   .card-acts { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
   .card-acts .btn-outline { background: var(--soft); }
+
+  /* Fact-checks. The raised hand is the agent wanting attention (coral), and only a visual cue. A
+     private check is a quiet card for the one person it is about. */
+  .hand-up { padding: 0 12px 0 14px; gap: 6px; }
+  .hand-up .lead { margin-right: 0; }
+  .verdict { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; background: var(--soft-2); color: var(--ink-2); }
+  .verdict[data-verdict="contradicted"] { background: var(--coral-tint); color: var(--coral-text); }
+  .verdict[data-verdict="supported"] { background: var(--ok-soft); color: var(--ok); }
+  .fc-body { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .fc-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .fc-sev { font-size: 12px; font-weight: 700; color: var(--coral-text); }
+  .fc-t { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .fc-claim { font-size: 15px; line-height: 1.5; font-weight: 600; overflow-wrap: anywhere; }
+  .fc-body .source { background: var(--soft); }
+  .fc-none { font-size: 13px; color: var(--muted); }
+  .fc-conf { font-size: 12.5px; color: var(--muted); }
+  .room-notes { position: absolute; top: 76px; right: 18px; z-index: 4; width: min(360px, calc(100% - 36px)); display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+  .room-notes > * { pointer-events: auto; animation: pop .14s ease-out; }
+  .nudge { display: flex; align-items: flex-start; gap: 10px; padding: 10px 6px 10px 14px; border-radius: 14px; background: var(--card); box-shadow: 0 0 0 1px var(--line-2), 0 10px 24px rgba(0,0,0,.4); font-size: 13.5px; font-weight: 600; line-height: 1.45; }
+  .nudge > i { margin-top: 2px; color: var(--note-fg); }
+  .nudge > span { flex: 1; min-width: 0; }
+  .nudge .icon-btn { margin: -4px 0; }
+  .fc-quiet { padding: 10px 12px 14px 14px; border-radius: 16px; background: var(--card); box-shadow: 0 0 0 1px var(--line), 0 10px 24px rgba(0,0,0,.35); max-height: 46vh; overflow: auto; }
+  .fc-quiet-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: -2px -4px 4px 0; }
+  .fc-quiet-from { font-size: 12px; font-weight: 700; color: var(--muted); }
 
   /* Speaker view: whoever is talking (or sharing) fills the stage, everyone else stacks in a filmstrip. */
   .stage { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
@@ -382,6 +408,34 @@
   .chat-tabs .icon-btn { margin-left: auto; }
   .chat-tab { height: 58px; border: 0; background: none; border-bottom: 2px solid transparent; font-family: var(--font-display); font-size: 17px; font-weight: 800; letter-spacing: -.01em; color: var(--ink); }
   .chat-tab[aria-selected="true"] { border-color: var(--primary); }
+  .chat-tab[aria-selected="false"] { color: var(--muted); }
+  .chat-tab[aria-selected="false"]:hover { color: var(--ink); }
+  .tab-n { display: inline-grid; place-items: center; min-width: 20px; height: 20px; margin-left: 6px; padding: 0 6px; border-radius: 999px; background: var(--soft-2); font-family: var(--font-ui); font-size: 11.5px; font-weight: 700; vertical-align: 2px; }
+  .chat-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .chat-pane[hidden] { display: none; }
+  .fc-list { display: flex; flex-direction: column; gap: 10px; }
+  .fc-item { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 16px; background: var(--soft); }
+  .fc-item[data-hand="true"] { box-shadow: inset 0 0 0 1.5px var(--coral); }
+  .fc-head .msg-ts { margin-left: auto; }
+  .la { display: flex; flex-direction: column; gap: 12px; }
+  .la-now { font-size: 13.5px; color: var(--muted); }
+  .la-now b { color: var(--ink); }
+  .la-list { display: flex; flex-direction: column; gap: 6px; }
+  .la-item { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 14px; background: var(--soft); }
+  .la-ic { margin-top: 2px; font-size: 16px; color: var(--muted); }
+  .la-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+  .la-title { font-size: 14.5px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+  .la-meta { font-size: 12.5px; color: var(--muted); }
+  .la-time { font-family: var(--font-mono); font-size: 12px; }
+  .la-time[data-over="true"] { color: var(--coral-text); font-weight: 700; }
+  .la-bar { display: block; height: 4px; margin-top: 4px; border-radius: 999px; background: var(--soft-2); overflow: hidden; }
+  .la-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--primary); transition: width .4s; }
+  .la-bar[data-over="true"] > span { background: var(--coral); }
+  .la-item[data-state="current"] { background: var(--r-agent-bubble); box-shadow: inset 0 0 0 1.5px var(--primary); }
+  .la-item[data-state="current"] .la-ic { color: var(--primary-hover); }
+  .la-item[data-state="covered"] .la-ic { color: var(--ok); }
+  .la-item[data-state="covered"] .la-title { color: var(--ink-2); }
+  .la-item[data-state="skipped"] .la-title { color: var(--muted); text-decoration: line-through; }
   .msgs { flex: 1; min-height: 0; overflow: auto; padding: 16px 14px; display: flex; flex-direction: column; gap: 10px; }
   .msgs-empty { margin: auto; text-align: center; font-size: 14px; color: var(--muted); padding: 0 24px; }
   .msg { display: flex; align-items: flex-end; gap: 8px; }
@@ -573,6 +627,7 @@
     .chatcard { width: auto; margin: 0 12px 12px; height: 560px; }
     .atlas-label { display: none; }
     .card-pop { right: -46px; }
+    .room-notes { right: 12px; width: min(360px, calc(100% - 24px)); }
     .task-fields, .two, .srow, .sched-grid { grid-template-columns: minmax(0,1fr); }
     .rep-wrap, .settings-body { padding-left: 16px; padding-right: 16px; }
     .rcard { padding: 20px; }
