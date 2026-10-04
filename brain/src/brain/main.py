@@ -1,7 +1,11 @@
+import math
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
 from contracts import get_identity
 
@@ -36,8 +40,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await pool.close()
 
 
+async def validation_failed(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """FastAPI's 422, except that a non-finite number in the echoed input (JSON bodies may say
+    Infinity or NaN, but responses cannot) is shown as text instead of failing with a 500."""
+    finite = {float: lambda x: x if math.isfinite(x) else str(x)}
+    errors = jsonable_encoder(exc.errors(), custom_encoder=finite)
+    return JSONResponse(status_code=422, content={"detail": errors})
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title=f"{get_identity().product_name} brain", lifespan=lifespan)
+    app.add_exception_handler(RequestValidationError, validation_failed)
     app.state.pipeline_runner = PipelineRunner()
     for router in routers:
         app.include_router(router)

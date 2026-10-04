@@ -86,19 +86,19 @@ async def update_agenda(
         existing = {item.id: item for item in saved.items} if saved else {}
         items: list[AgendaItem] = []
         for n, edit in enumerate(body.items):
-            changes = {"title": edit.title.strip(), "minutes": edit.minutes}
+            changes: dict = {"title": edit.title.strip(), "minutes": edit.minutes}
+            if edit.status is not None:  # e.g. undoing a wrong "covered"
+                changes["status"] = edit.status
             if edit.id and edit.id in existing:
                 items.append(existing[edit.id].model_copy(update=changes))
             else:
                 item_id = new_ids.setdefault(n, uuid4().hex)
                 items.append(AgendaItem(id=item_id, added_by=user.id, **changes))
-        if saved is None:
-            agenda = Agenda(meeting_id=meeting.id, items=items, generated_at=now, updated_at=now)
-            return await store.save_agenda(agenda)
         # Timekeeping state stays: discussed time and nudges on the items, and the tracked
         # point and current item (unless it was removed) on the agenda.
-        current = saved.current_item_id
-        agenda = saved.model_copy(
+        base = saved or Agenda(meeting_id=meeting.id, items=[], generated_at=now)
+        current = base.current_item_id
+        agenda = base.model_copy(
             update={
                 "items": items,
                 "updated_at": now,
@@ -106,8 +106,8 @@ async def update_agenda(
             }
         )
         try:
-            return await store.save_agenda_if(agenda, tracked_until=saved.tracked_until)
-        except Conflict:  # a timekeeping tick saved meanwhile; apply the edit to its result
+            return await store.save_agenda_if(agenda)
+        except Conflict:  # a tick or another edit saved meanwhile; apply this edit to theirs
             continue
     raise HTTPException(status_code=409, detail="The agenda kept changing; try again")
 
