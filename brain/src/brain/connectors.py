@@ -32,7 +32,14 @@ async def connector_statuses(config: Settings, team: TeamSettings) -> list[Conne
 
     async def check(name: McpServerName) -> None:
         url, url_name, scope, scope_name = targets[name]
-        if not url:
+        if not url and name == "jira" and team.jira.connected:
+            # The team's own Jira account is connected for pushing; only reading needs the server.
+            detail = (
+                f"Approved tasks are pushed as {team.jira.account_email}. "
+                f"Reading issues needs {url_name} on the server"
+            )
+            found[name] = ConnectorStatus(name=name, state="connected", detail=detail)
+        elif not url:
             found[name] = not_configured(name, f"Set {url_name} on the server")
         elif not scope:
             found[name] = not_configured(name, f"No {scope_name} is set in workspace settings")

@@ -265,3 +265,18 @@ def test_a_token_sealed_with_an_old_server_secret_must_be_connected_again(
     assert response.status_code == 409
     assert "Connect Jira again" in response.json()["detail"]
     assert jira.created == []
+
+
+# the connector status
+
+
+def test_a_connected_account_shows_jira_as_connected_and_says_what_is_missing(client_as, jira):
+    alex = client_as(ALEX)
+    before = {c["name"]: c for c in alex.get("/settings/connectors").json()}
+    connect(alex)
+
+    after = {c["name"]: c for c in alex.get("/settings/connectors").json()}
+
+    assert before["jira"]["state"] == "not_configured"
+    assert after["jira"]["state"] == "connected"
+    assert EMAIL in after["jira"]["detail"] and "JIRA_MCP_URL" in after["jira"]["detail"]

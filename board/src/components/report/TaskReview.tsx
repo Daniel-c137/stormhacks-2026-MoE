@@ -1,4 +1,5 @@
 import type { Person, TaskDestination, TaskDraft } from "@moe/contracts";
+import type { ReactNode } from "react";
 import { Icon, Spinner } from "@/components/ui/Icon";
 import { fmtT } from "@/lib/format";
 
@@ -23,8 +24,11 @@ export interface TaskReviewProps {
   onPush: () => void;
   /** Show the moment a task came from in the transcript; null when there is no transcript. */
   onJump: ((t: number) => void) | null;
-  /** Only the meeting's host or an admin approves a push; everyone may edit the drafts. */
+  /** Only an admin approves a push; everyone may edit the drafts. */
   canPush: boolean;
+  /** Why the push can't be made as things stand (no Jira account connected), shown instead of
+   * the count of selected tasks; null when it can. */
+  blocked: ReactNode | null;
 }
 
 /** Edit title, owner, due and description; include or exclude; then push. */
@@ -143,7 +147,7 @@ export function TaskReview(props: TaskReviewProps) {
             type="button"
             className={pushed ? "btn btn-primary pushed" : "btn btn-primary"}
             onClick={props.onPush}
-            disabled={pushed || pushing || included === 0}
+            disabled={pushed || pushing || included === 0 || props.blocked !== null}
           >
             {pushing ? <Spinner size={16} /> : <Icon name={pushed ? "circle-check" : "upload"} />}
             {pushing
@@ -164,9 +168,12 @@ export function TaskReview(props: TaskReviewProps) {
             </select>
           )}
           <span className="push-st" role="status">
-            {props.status}
+            {!pushed && props.blocked ? props.blocked : props.status}
           </span>
         </div>
+      )}
+      {tasks.length > 0 && !props.canPush && !pushed && (
+        <p className="push-st push-note">Only an admin can push these tasks to Jira.</p>
       )}
     </>
   );

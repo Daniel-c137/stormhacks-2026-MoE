@@ -559,7 +559,8 @@ function ReportView({ meeting, onPushed }: { meeting: Meeting; onPushed: () => v
   );
 }
 
-/** The drafts as the reviewer is editing them, and the one approved push to Jira or GitHub. */
+/** The drafts as the reviewer is editing them, and the one push an admin approves: to the Jira
+ * account connected in Settings. */
 function Tasks({
   meeting,
   report,
@@ -580,6 +581,7 @@ function Tasks({
   const [justPushed, setJustPushed] = useState(false);
   const [urls, setUrls] = useState<Record<string, string>>({});
   const [problem, setProblem] = useState("");
+  const [warnings, setWarnings] = useState<string[]>([]);
 
   const pushed = meeting.status === "pushed" || justPushed;
   const included = tasks.filter((t) => t.include);
@@ -603,6 +605,8 @@ function Tasks({
       await Promise.all(tasks.map((t) => updateTask(meeting.id, t)));
       const results = await pushTasks(meeting.id, { task_ids: included.map((t) => t.id), destination, approved_by: me.id });
       const failed = results.filter((x) => x.error);
+      // An issue created without its owner or due date says so; it is still created.
+      setWarnings(results.flatMap((x) => (x.key && x.warning ? [`${x.key} was ${x.warning}.`] : [])));
       setTasks((list) => list.map((t) => ({ ...t, key: results.find((x) => x.task_id === t.id)?.key ?? t.key })));
       setUrls((prev) => ({ ...prev, ...Object.fromEntries(results.flatMap((x) => (x.url ? [[x.task_id, x.url]] : []))) }));
       if (failed.length) {
@@ -622,7 +626,7 @@ function Tasks({
     ? problem
     : pushed
       ? keys.length
-        ? `${keys.join(", ")} in ${destinationLabel}.`
+        ? [`${keys.join(", ")} in ${destinationLabel}.`, ...warnings].join(" ")
         : ""
       : included.length === 0
         ? "Select at least one task."
@@ -644,7 +648,18 @@ function Tasks({
       onDestination={setDestination}
       onPush={() => void push()}
       onJump={onJump}
-      canPush={hostOrAdmin(meeting, me)}
+      canPush={me.is_admin === true}
+      blocked={
+        destination === "jira" && settings && !settings.jira.connected ? (
+          <>
+            No Jira account is connected. Connect one in{" "}
+            <Link className="link" href="/settings">
+              Settings
+            </Link>
+            , under Connectors, to push these tasks.
+          </>
+        ) : null
+      }
     />
   );
 }

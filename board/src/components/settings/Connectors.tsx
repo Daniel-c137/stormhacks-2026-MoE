@@ -13,7 +13,7 @@ import { type FormEvent, useCallback, useRef, useState } from "react";
 import { Icon } from "@/components/ui/Icon";
 import { useDismiss } from "@/hooks/useDismiss";
 import type { useConnectors } from "@/hooks/useApi";
-import { describeError, updateConnectors } from "@/lib/api";
+import { connectJiraAccount, describeError, disconnectJiraAccount, updateConnectors } from "@/lib/api";
 
 type Statuses = ReturnType<typeof useConnectors>;
 type Host = "github" | "gitlab";
@@ -40,6 +40,16 @@ interface Draft {
   ref: string;
 }
 
+/** The Jira account being connected: where, as whom, and the project issues go to. */
+interface AccountDraft {
+  site: string;
+  project: string;
+  email: string;
+  token: string;
+}
+
+const TOKENS_URL = "https://id.atlassian.com/manage-profile/security/api-tokens";
+
 const choices = (repos: CodeRepo[]): CodeRepoChoice[] => repos.map(({ path, ref }) => ({ path, ref }));
 
 /** The choice as saved, for PUT /settings/connectors (which replaces it whole). */
@@ -62,7 +72,8 @@ function State({ name, statuses }: { name: ConnectorName; statuses: Statuses }) 
 }
 
 /** One row per connected repository, project and Jira; admins add, edit and remove them inline.
- * Each change is saved at once (PUT /settings/connectors) and the states are checked again. */
+ * Each change is saved at once (PUT /settings/connectors) and the states are checked again.
+ * The Jira row also carries the account an admin connects, which approved tasks are pushed as. */
 export function Connectors({
   settings,
   statuses,
@@ -75,6 +86,7 @@ export function Connectors({
   onSaved: (saved: TeamSettings) => void;
 }) {
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [account, setAccount] = useState<AccountDraft | null>(null);
   const [adding, setAdding] = useState(false);
   const [menu, setMenu] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -93,6 +105,55 @@ export function Connectors({
       statuses.reload();
     } catch (err) {
       setProblem(`Not saved. ${describeError(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const startAccount = () => {
+    setMenu(null);
+    setDraft(null);
+    setProblem("");
+    setAccount({
+      site: settings.jira.site ?? "",
+      project: settings.jira.project ?? "",
+      email: settings.jira.account_email ?? "",
+      token: "",
+    });
+  };
+
+  const connectAccount = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!account) return;
+    setBusy(true);
+    setProblem("");
+    try {
+      onSaved(
+        await connectJiraAccount({
+          site: account.site.trim(),
+          project: account.project.trim().toUpperCase(),
+          email: account.email.trim(),
+          api_token: account.token.trim(),
+        }),
+      );
+      setAccount(null);
+      statuses.reload();
+    } catch (err) {
+      setProblem(`Not connected. ${describeError(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const disconnectAccount = async () => {
+    setMenu(null);
+    setBusy(true);
+    setProblem("");
+    try {
+      onSaved(await disconnectJiraAccount());
+      statuses.reload();
+    } catch (err) {
+      setProblem(`Not disconnected. ${describeError(err)}`);
     } finally {
       setBusy(false);
     }
@@ -125,6 +186,7 @@ export function Connectors({
   const start = (name: ConnectorName, index: number | null = null) => {
     setAdding(false);
     setMenu(null);
+    setAccount(null);
     setProblem("");
     if (name === "jira") {
       setDraft({ name, index: 0, path: settings.jira.project ?? "", ref: settings.jira.site ?? "" });
@@ -138,7 +200,17 @@ export function Connectors({
     ...settings.github.repos.map((r, index) => ({ name: "github" as const, index, label: r.path, detail: r.ref ?? null })),
     ...settings.gitlab.projects.map((r, index) => ({ name: "gitlab" as const, index, label: r.path, detail: r.ref ?? null })),
     ...(settings.jira.project
-      ? [{ name: "jira" as const, index: 0, label: settings.jira.project, detail: settings.jira.site ?? null }]
+      ? [
+          {
+            name: "jira" as const,
+            index: 0,
+            label: settings.jira.project,
+            // Who approved tasks are pushed as, or that no account is connected for it yet.
+            detail: [settings.jira.site, settings.jira.connected ? `pushes as ${settings.jira.account_email}` : "no account for pushing"]
+              .filter(Boolean)
+              .join(" · "),
+          },
+        ]
       : []),
   ];
   const full: Record<ConnectorName, boolean> = {
@@ -210,6 +282,18 @@ export function Connectors({
                         <Icon name="pencil" />
                         Edit
                       </button>
+                      {row.name === "jira" && (
+                        <button type="button" className="menu-item" role="menuitem" onClick={startAccount}>
+                          <Icon name="link" />
+                          {settings.jira.connected ? "Change account" : "Connect account"}
+                        </button>
+                      )}
+                      {row.name === "jira" && settings.jira.connected && (
+                        <button type="button" className="menu-item" role="menuitem" onClick={() => void disconnectAccount()}>
+                          <Icon name="log-out" />
+                          Disconnect account
+                        </button>
+                      )}
                       <button type="button" className="menu-item danger" role="menuitem" onClick={() => remove(row.name, row.index)}>
                         <Icon name="trash-2" />
                         Remove
@@ -223,6 +307,78 @@ export function Connectors({
         })}
         {draft && draft.index === null && <li>{form(draft)}</li>}
         {draft?.name === "jira" && !settings.jira.project && <li>{form(draft)}</li>}
+        {account && (
+          <li>
+            <form className="conn-account" onSubmit={(e) => void connectAccount(e)} aria-label="Connect a Jira account">
+              <h3>Connect a Jira account</h3>
+              <label className="label">
+                Jira site
+                <input
+                  className="field mono"
+                  value={account.site}
+                  onChange={(e) => setAccount({ ...account, site: e.target.value })}
+                  placeholder="your-team.atlassian.net"
+                  autoFocus
+                  required
+                />
+              </label>
+              <label className="label">
+                Project key
+                <input
+                  className="field mono"
+                  value={account.project}
+                  onChange={(e) => setAccount({ ...account, project: e.target.value })}
+                  placeholder="KEY"
+                  style={{ textTransform: "uppercase" }}
+                  required
+                />
+              </label>
+              <label className="label">
+                Atlassian account email
+                <input
+                  className="field"
+                  type="email"
+                  value={account.email}
+                  onChange={(e) => setAccount({ ...account, email: e.target.value })}
+                  placeholder="you@company.com"
+                  autoComplete="off"
+                  required
+                />
+              </label>
+              <label className="label">
+                API token
+                <input
+                  className="field mono"
+                  type="password"
+                  value={account.token}
+                  onChange={(e) => setAccount({ ...account, token: e.target.value })}
+                  autoComplete="new-password"
+                  required
+                />
+              </label>
+              <p className="note">
+                Approved tasks are created in this project as this account. Create a token at{" "}
+                <a className="link" href={TOKENS_URL} target="_blank" rel="noopener noreferrer">
+                  id.atlassian.com
+                </a>{" "}
+                (Security, API tokens). It is checked with Jira, stored encrypted and never shown again.
+              </p>
+              <div className="conn-account-actions">
+                <button
+                  type="submit"
+                  className="btn btn-primary btn-sm"
+                  disabled={busy || !account.site.trim() || !account.project.trim() || !account.email.trim() || !account.token.trim()}
+                >
+                  {busy ? <Icon name="loader-circle" className="spin" /> : <Icon name="link" />}
+                  Connect
+                </button>
+                <button type="button" className="btn btn-quiet btn-sm" onClick={() => setAccount(null)} disabled={busy}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </li>
+        )}
       </ul>
       {canEdit && (
         <div className="conn-add" ref={addRef}>
