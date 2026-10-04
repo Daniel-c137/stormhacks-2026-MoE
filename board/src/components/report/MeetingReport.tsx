@@ -7,6 +7,7 @@ import {
   type TaskDestination,
   type TaskDraft,
   type TeamSettings,
+  type TranscriptSegment,
   identity,
 } from "@moe/contracts";
 import Link from "next/link";
@@ -462,15 +463,7 @@ function ReportView({ meeting, onPushed }: { meeting: Meeting; onPushed: () => v
                     <li key={g.seg_id} id={`seg-${g.seg_id}`} className="line" data-hl={highlighted === g.seg_id}>
                       <span className="tm">{fmtT(g.t_start)}</span>
                       <span className="who">{speakerName(g.speaker_id, g.speaker_name)}</span>
-                      <span className="tx">
-                        {mark(g.text)}
-                        {translationNote(g) && (
-                          <span className="tx-note" title={g.original_text ?? undefined}>
-                            {" "}
-                            · {translationNote(g)}
-                          </span>
-                        )}
-                      </span>
+                      <TranscriptText seg={g} marked={mark(g.text)} />
                     </li>
                   ))}
                 </ol>
@@ -567,5 +560,32 @@ function Tasks({
       onDestination={setDestination}
       onPush={() => void push()}
     />
+  );
+}
+
+/** A saved line's text, with how its English came about (#106): the words as said can be shown
+ * with a button, so keyboard and touch users reach them too. Text sits in <bdi dir="auto"> so
+ * Persian or Arabic reads right to left beside the English note. */
+function TranscriptText({ seg, marked }: { seg: TranscriptSegment; marked: ReactNode }) {
+  const [showOriginal, setShowOriginal] = useState(false);
+  const note = translationNote(seg);
+  return (
+    <span className="tx">
+      <bdi dir="auto">{marked}</bdi>
+      {note && <span className="tx-note"> · {note}</span>}
+      {seg.original_text && (
+        <>
+          {" "}
+          <button type="button" className="link tx-orig-btn" aria-expanded={showOriginal} onClick={() => setShowOriginal((v) => !v)}>
+            {showOriginal ? "Hide original" : "Show original"}
+          </button>
+          {showOriginal && (
+            <bdi dir="auto" className="tx-orig">
+              {seg.original_text}
+            </bdi>
+          )}
+        </>
+      )}
+    </span>
   );
 }

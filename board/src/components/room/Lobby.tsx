@@ -13,6 +13,7 @@ import { useSettings } from "@/hooks/useApi";
 import { useDismiss } from "@/hooks/useDismiss";
 import { joinNames } from "@/lib/format";
 import { LobbyAgenda } from "./LobbyAgenda";
+import { LobbyTranslation } from "./LobbyTranslation";
 
 /** What the person chose in the lobby, carried into the room. */
 export interface DeviceChoices {
@@ -338,6 +339,7 @@ export function Lobby({ code, meeting, lookupError, joining, error, onJoin }: Lo
           {error}
         </span>
         {lookupError && !meeting && <Notice error={lookupError}>This meeting&apos;s details can&apos;t be loaded.</Notice>}
+        {meeting && !ended && <LobbyTranslation meeting={meeting} />}
         {meeting && !ended && <LobbyAgenda meetingId={meeting.id} />}
       </aside>
     </main>

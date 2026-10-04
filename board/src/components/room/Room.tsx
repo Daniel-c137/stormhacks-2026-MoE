@@ -485,7 +485,7 @@ function RoomView({
             <div className="captions" role="region" aria-label="Live captions" aria-live="polite">
               {caption && captionFresh ? (
                 <p>
-                  <b>{captionWho}:</b> {captionText}
+                  <b>{captionWho}:</b> <bdi dir="auto">{captionText}</bdi>
                   {captionNote && <span className="cap-note"> · {captionNote}</span>}
                 </p>
               ) : (
