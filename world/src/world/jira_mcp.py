@@ -614,4 +614,5 @@ def addCommentToJiraIssue(cloudId: str, issueIdOrKey: str, commentBody: str) -> 
 
 
 def main() -> None:
-    server.run("streamable-http", port=Settings().world_jira_mcp_port)
+    settings = Settings()
+    server.run("streamable-http", host=settings.world_mcp_host, port=settings.world_jira_mcp_port)
