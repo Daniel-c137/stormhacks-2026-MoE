@@ -23,7 +23,7 @@ from contracts import DecisionRelation, Person
 from world import seed
 from world.config import MOCK_DATA_DIR
 from world.past_meetings import MeetingFileError, load_meeting, load_meetings, snapshot_meetings
-from world.seed import SeedError, seed_people, seed_world
+from world.seed import PacedEmbedder, SeedError, seed_people, seed_world
 
 # The brain's embedded Postgres fixtures (pgserver), shared rather than copied. Imported here, not
 # from a conftest: a second module named conftest would shadow the brain tests' own.
@@ -589,9 +589,9 @@ settings = BrainSettings()
 )
 async def test_the_earliest_meeting_is_written_up_by_the_real_models():
     store = InMemoryStore()
-    memory = MeetingMemory(
-        make_embedder(settings), InMemoryMemoryStore(dim=settings.gemini_embedding_dim)
-    )
+    # Gemini's free tier counts each embedded text against 100 a minute; a meeting has ~350.
+    embedder = PacedEmbedder(make_embedder(settings), per_minute=90)
+    memory = MeetingMemory(embedder, InMemoryMemoryStore(dim=settings.gemini_embedding_dim))
 
     (seeded,) = await seed_world(store, memory, lambda: make_llm(settings), DEMO[:1])
     print(f"answered by {', '.join(seeded.models)}; OpenRouter cost {seeded.cost}")
@@ -606,3 +606,76 @@ async def test_the_earliest_meeting_is_written_up_by_the_real_models():
     assert all(t.owner_id is None or t.owner_id in members for t in report.tasks)
     hits = await memory.search(TEAM, "iPhone app App Store submission", k=5)
     assert hits and all(h.chunk.meeting_id == meeting.id for h in hits)
+
+
+# pacing embeddings to a per-minute quota
+
+
+class Clock:
+    def __init__(self):
+        self.now = 1000.0
+        self.slept: list[float] = []
+
+    def __call__(self) -> float:
+        return self.now
+
+    async def sleep(self, seconds: float) -> None:
+        self.slept.append(seconds)
+        self.now += seconds
+
+
+class CountingEmbedder(MockEmbedder):
+    def __init__(self, clock: Clock, models: list[str] | None = None):
+        super().__init__()
+        self.clock = clock
+        self.batches: list[tuple[float, int]] = []
+        self.models = models
+
+    async def embed(self, texts, *, task="document"):
+        self.batches.append((self.clock.now, len(texts)))
+        out = await super().embed(texts, task=task)
+        if self.models:
+            out = out.model_copy(update={"model": self.models[len(self.batches) - 1]})
+        return out
+
+
+async def test_paced_embeddings_never_send_more_texts_in_a_minute_than_allowed():
+    clock = Clock()
+    inner = CountingEmbedder(clock)
+    paced = PacedEmbedder(inner, per_minute=100, clock=clock, sleep=clock.sleep)
+    texts = [f"text {i}" for i in range(250)]
+
+    embedded = await paced.embed(texts)
+    again = await paced.embed(["one more"], task="query")
+
+    assert embedded == await MockEmbedder().embed(texts)  # same vectors, in order, one model
+    assert again.vectors == (await MockEmbedder().embed(["one more"])).vectors
+    assert inner.batches == [(1000.0, 100), (1060.0, 100), (1120.0, 50), (1180.0, 1)]
+    assert paced.dim == inner.dim
+    assert inner.calls[-1] == (["one more"], "query")
+
+
+async def test_paced_embeddings_from_two_models_are_refused():
+    clock = Clock()
+    inner = CountingEmbedder(clock, models=["a", "b"])
+    paced = PacedEmbedder(inner, per_minute=2, clock=clock, sleep=clock.sleep)
+
+    with pytest.raises(LLMError, match="different models"):
+        await paced.embed(["x", "y", "z"])
+
+
+def test_the_command_paces_embeddings_when_asked(pg_dsn, monkeypatch, capsys, mock_models):
+    monkeypatch.setenv("DATABASE_URL", pg_dsn)
+    monkeypatch.setenv("WORLD_SEED_EMBEDS_PER_MINUTE", "100000")
+    made: list[PacedEmbedder] = []
+
+    def paced(inner, per_minute):
+        made.append(PacedEmbedder(inner, per_minute=per_minute))
+        return made[-1]
+
+    monkeypatch.setattr(seed, "PacedEmbedder", paced)
+
+    assert seed.main(["--snapshot", "demo"]) == 0
+
+    assert [p.per_minute for p in made] == [100000]
+    assert "seeded: 2026-09-23" in capsys.readouterr().out
