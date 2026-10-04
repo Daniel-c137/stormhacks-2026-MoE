@@ -69,7 +69,7 @@ def test_the_moves_the_meeting_needs_are_allowed():
         ("hand_raised", "working"),  # a new question while an answer waits
         ("hand_raised", "capturing"),  # an Ask while an answer waits
         ("hand_raised", "idle"),  # the card was posted or dismissed
-        ("idle", "hand_raised"),  # a fact-check raised the hand
+        ("idle", "hand_raised"),  # an answer card is waiting
         ("idle", "speaking"),  # Speak on a card after the hand went down
         ("speaking", "idle"),
         ("speaking", "hand_raised"),  # another answer is still waiting

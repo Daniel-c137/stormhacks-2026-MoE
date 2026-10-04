@@ -59,7 +59,6 @@ class FactCheckState(BaseModel):
     meeting_id: str
     checked_until: float | None = None  # transcript checked so far; None before any
     checked_at: float | None = None  # the latest model check, for the rate limit
-    hand_raised_at: float | None = None  # the latest raised hand, for interrupt_minutes
 
 
 class Store(Protocol):
@@ -231,7 +230,8 @@ class Store(Protocol):
     # fact-checks
 
     async def add_fact_check(self, meeting_id: str, check: FactCheck) -> None:
-        """Public checks only (ValueError otherwise); an id already saved is ignored."""
+        """The copy kept for the write-up: whom it was sent to is never stored, so a check with a
+        recipient_id is refused (ValueError). An id already saved is ignored."""
         ...
 
     async def fact_checks(self, meeting_id: str) -> list[FactCheck]:
@@ -632,8 +632,8 @@ class InMemoryStore:
     # fact-checks
 
     async def add_fact_check(self, meeting_id: str, check: FactCheck) -> None:
-        if check.visibility != "public" or check.recipient_id is not None:
-            raise ValueError("Private fact-checks are never stored")
+        if check.recipient_id is not None:
+            raise ValueError("Whom a fact-check was sent to is never stored")
         self._meeting(meeting_id)
         self._fact_checks.setdefault(meeting_id, {}).setdefault(check.id, _copy(check))
 

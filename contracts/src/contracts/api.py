@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from .agenda import Agenda, AgendaItemStatus, AgendaNudge
-from .agent import AgentState, Answer, CodeSnippet, FactCheck, Invocation, Visibility
+from .agent import Answer, CodeSnippet, FactCheck, Invocation, Visibility
 from .meeting import Meeting, Person
 from .transcript import TranscriptSegment
 
@@ -115,13 +115,11 @@ class FactCheckRequest(BaseModel):
 
 
 class FactCheckResponse(BaseModel):
-    """The worker publishes each check on Topic.FACT_CHECK: a public one to the room, a private
-    one only to its recipient_id. `agent_state`, set only when a check raises the hand, goes on
-    Topic.AGENT_STATE; the hand is a visual cue and nothing is spoken. `snippets` are the code
-    the checks' snippet_ids name, for whoever sees those checks."""
+    """The worker sends each check to its recipient_id only, as a private chat message from the
+    agent (Topic.PRIVATE_CHAT), never stored, spoken or shown to the room. `snippets` are the code
+    the checks' snippet_ids name."""
 
     checks: list[FactCheck] = []
-    agent_state: AgentState | None = None
     snippets: list[CodeSnippet] = []
 
 

@@ -1031,7 +1031,7 @@ def fact_check(claim: str, **fields) -> FactCheck:
     return FactCheck(id=new_id(), claim=claim, speaker_name="Sarah Kim", **(defaults | fields))
 
 
-async def test_public_fact_checks_are_kept_once_in_the_order_they_were_added(store):
+async def test_fact_checks_are_kept_once_in_the_order_they_were_added(store):
     team, alex, *_ = await two_teams(store)
     meeting = await store.create_meeting(team.id, "Standup", alex.id)
     other = await store.create_meeting(team.id, "Planning", alex.id)
@@ -1044,7 +1044,7 @@ async def test_public_fact_checks_are_kept_once_in_the_order_they_were_added(sto
             Source(kind="github_release", label="dropsubs/app@v0.9.3"),
         ],
         snippet_ids=["snip-1"],
-        raised_hand=True,
+        finding="PR #41 was merged after the latest release.",
         t=12.5,
         created_at=at(1),
     )
@@ -1054,17 +1054,14 @@ async def test_public_fact_checks_are_kept_once_in_the_order_they_were_added(sto
     await store.add_fact_check(meeting.id, released.model_copy(update={"claim": "changed"}))
 
     assert await store.fact_checks(meeting.id) == [released, closed]
+    assert (await store.fact_checks(meeting.id))[0].finding == released.finding
     assert await store.fact_checks(other.id) == []
 
 
-async def test_a_private_fact_check_is_never_stored(store):
+async def test_whom_a_fact_check_was_sent_to_is_never_stored(store):
     team, alex, sarah, *_ = await two_teams(store)
     meeting = await store.create_meeting(team.id, "Standup", alex.id)
 
-    with pytest.raises(ValueError):
-        await store.add_fact_check(
-            meeting.id, fact_check("x", visibility="private", recipient_id=sarah.id)
-        )
     with pytest.raises(ValueError):
         await store.add_fact_check(meeting.id, fact_check("x", recipient_id=sarah.id))
 
@@ -1097,9 +1094,7 @@ async def test_fact_check_state_saves_only_from_the_expected_point(store):
             first.model_copy(update={"checked_until": 85.0}), checked_until=50.0
         )
 
-    second = FactCheckState(
-        meeting_id=meeting.id, checked_until=115.0, checked_at=120.0, hand_raised_at=120.0
-    )
+    second = FactCheckState(meeting_id=meeting.id, checked_until=115.0, checked_at=120.0)
     assert await store.save_fact_check_state_if(second, checked_until=55.0) == second
     assert await store.fact_check_state(meeting.id) == second
 

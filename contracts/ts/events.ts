@@ -1,9 +1,10 @@
 // LiveKit data-channel topics and the payload each one carries.
 // Public chat uses LiveKit's built-in chat topic. Private questions and answers with the agent go
-// over HTTP to the brain, never through a room broadcast. A private message between two people is
-// sent to that one participant only and is never stored.
+// over HTTP to the brain, never through a room broadcast. A private message, between two people or
+// a fact-check from the agent to whoever made the claim, is sent to that one participant only and
+// is never stored.
 import type { Agenda, AgendaNudge } from "./agenda";
-import type { AgentState, FactCheck, ResponseAction, ResponseCard } from "./agent";
+import type { AgentState, ResponseAction, ResponseCard } from "./agent";
 import type { ChatMessage } from "./chat";
 import type { TranscriptSegment } from "./transcript";
 
@@ -13,11 +14,10 @@ export const Topic = {
   ASK: "agent.ask", // board -> realtime: the Ask button; the presser's next final segment is the question
   RESPONSE_CARD: "agent.card", // realtime -> room
   RESPONSE_ACTION: "agent.card.action", // board -> realtime
-  FACT_CHECK: "agent.fact_check", // realtime -> room, or one participant when private
   AGENDA: "agent.agenda", // realtime -> room
   AGENDA_NUDGE: "agent.agenda.nudge", // realtime -> room
   STAGE: "stage", // board -> room: snippet id shown on stage, or null
-  PRIVATE_CHAT: "chat.private", // board -> one participant; ephemeral
+  PRIVATE_CHAT: "chat.private", // board or realtime -> one participant; ephemeral
 } as const;
 export type Topic = (typeof Topic)[keyof typeof Topic];
 
@@ -36,7 +36,6 @@ export interface TopicPayloads {
   [Topic.ASK]: AskSignal;
   [Topic.RESPONSE_CARD]: ResponseCard;
   [Topic.RESPONSE_ACTION]: ResponseAction;
-  [Topic.FACT_CHECK]: FactCheck;
   [Topic.AGENDA]: Agenda;
   [Topic.AGENDA_NUDGE]: AgendaNudge;
   [Topic.STAGE]: StagePayload;
