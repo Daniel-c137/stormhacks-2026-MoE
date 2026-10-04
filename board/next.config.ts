@@ -4,8 +4,9 @@ import type { NextConfig } from "next";
 
 const repoRoot = path.resolve(process.cwd(), "..");
 
-// One .env at the repo root serves every part.
-loadEnvConfig(repoRoot);
+// One .env at the repo root serves every part. Next has already loaded (and cached) the board
+// folder's env files by the time this runs, so the root .env needs a forced reload to be read.
+loadEnvConfig(repoRoot, process.env.NODE_ENV !== "production", undefined, true);
 
 // With a relative NEXT_PUBLIC_API_URL (e.g. /api, as production serves the brain on the board's
 // origin), `next dev` forwards that path to BRAIN_URL itself, so no reverse proxy is needed locally.
