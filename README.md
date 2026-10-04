@@ -8,12 +8,12 @@ The product and agent names live in [`contracts/identity.json`](contracts/identi
 
 | Folder | What it is |
 | --- | --- |
-| `board/` | The web app (Next.js). Calls the brain over HTTP at `NEXT_PUBLIC_API_URL` and joins LiveKit rooms with tokens the brain issues. |
+| `board/` | The web app (Next.js). Calls the brain over HTTP at `NEXT_PUBLIC_API_URL` (`/api` in production) and joins LiveKit rooms with tokens the brain issues. Its screens, the login form included, are still being wired to the brain. |
 | `brain/` | The API (FastAPI): meetings, asking Polaris, the after-meeting write-up, meeting memory. Stores everything in Postgres with pgvector; reasons with Gemini (OpenRouter as a fallback); reads GitHub and Jira through MCP servers; uses ElevenLabs for voices and the report read aloud. CLI: `brain`. |
 | `realtime/` | The LiveKit agent worker: transcribes each speaker with ElevenLabs, sends final transcript segments and invocations to the brain's `/internal` routes (authenticated with `BRAIN_INTERNAL_TOKEN`), and speaks an answer when a participant chooses Speak. |
 | `world/` | The demo world: mock GitHub and Jira MCP servers over `mock-data/`, with a write journal (overlay) that `world-reset` clears. |
 | `contracts/` | Shared request, event and data shapes, in Python and TypeScript. |
-| migrations | SQL migrations for Postgres, applied by `brain migrate` (in `db/migrations` once #81 lands). |
+| `db/migrations` | SQL migrations for Postgres, applied by `brain migrate`. |
 
 ```
 browser ── /       ──> board
@@ -75,15 +75,20 @@ Live tests call real services and spend quota. They skip unless `.env` has what 
 uv run pytest brain -m live -k <name> -rs
 ```
 
-## Demo data and accounts
+## Teams, accounts and demo data
 
-These commands arrive with #82 (seed) and #81 (accounts); check them against those PRs once merged.
+There is no public sign-up. Create a team and its people with the brain's CLI; `add-user` prints a one-time password unless you pipe one in with `--password-stdin`:
 
 ```sh
-uv run world-seed --snapshot demo                   # #82: the DropSubs team, settings, past meetings
-uv run world-seed --snapshot demo --reset           # #82: remove the seeded team first
-uv run brain add-team --id <id> --name <name>       # #81
-uv run brain add-user --team <id> --name <name> --email <email>   # #81: prints a one-time password
+uv run brain add-team --id <team-id> --name "<team name>"
+uv run brain add-user --team <team-id> --name "<full name>" --email <email>
+```
+
+The demo seed arrives with #82 (re-check these once it merges):
+
+```sh
+uv run world-seed --snapshot demo                   # the DropSubs team, settings and past meetings
+uv run world-seed --snapshot demo --reset           # remove the seeded team first
 ```
 
 ## Deploying to a server
@@ -101,11 +106,14 @@ One machine with Docker runs everything from [`docker-compose.yml`](docker-compo
    docker compose --env-file deploy/.env ps
    ```
    To apply migrations by hand: `docker compose --env-file deploy/.env run --rm migrate`.
-4. Load the demo and create the first account (from #82 and #81; the brain image includes the world CLIs):
+4. Create the first team and account (`add-user` prints a one-time password):
    ```sh
-   docker compose --env-file deploy/.env run --rm brain world-seed --snapshot demo
-   docker compose --env-file deploy/.env run --rm brain brain add-team --id <id> --name <name>
-   docker compose --env-file deploy/.env run --rm brain brain add-user --team <id> --name <name> --email <email>
+   docker compose --env-file deploy/.env exec brain brain add-team --id <team-id> --name "<team name>"
+   docker compose --env-file deploy/.env exec brain brain add-user --team <team-id> --name "<full name>" --email <email>
+   ```
+   Or load the demo instead (from #82; the brain image includes the world CLIs):
+   ```sh
+   docker compose --env-file deploy/.env exec brain world-seed --snapshot demo
    ```
 
 Clear the mock servers' write journal with `docker compose --env-file deploy/.env exec world-github world-reset`. Logs: `docker compose --env-file deploy/.env logs -f brain`.
