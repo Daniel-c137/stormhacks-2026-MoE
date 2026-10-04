@@ -28,7 +28,7 @@ export function AppHeader() {
       <header className="topbar">
         <Link className="brand" href="/" aria-label={`${identity.product_name}, meetings home`}>
           <span className="mark-slot">
-            <Mark size={30} />
+            <Mark size={40} />
           </span>
           <span className="wordmark">{identity.product_name}</span>
         </Link>
