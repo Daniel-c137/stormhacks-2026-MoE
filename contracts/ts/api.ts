@@ -77,6 +77,11 @@ export interface JoinMeetingResponse {
   token: string;
 }
 
+/** GET /meetings/{id}/presence: who is connected to the meeting's room right now, in join order, for the lobby. Meeting.participant_ids is everyone who ever joined. Empty unless live; never the agent. */
+export interface MeetingPresence {
+  person_ids: string[];
+}
+
 export interface InviteRequest {
   person_ids: string[];
 }

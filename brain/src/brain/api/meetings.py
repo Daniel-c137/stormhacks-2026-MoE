@@ -14,6 +14,7 @@ from contracts import (
     InviteRequest,
     JoinMeetingResponse,
     Meeting,
+    MeetingPresence,
     Person,
     TranslationUpdate,
 )
@@ -164,6 +165,29 @@ async def join_meeting(
         ttl=timedelta(seconds=settings.livekit_token_ttl_seconds),
     )
     return JoinMeetingResponse(meeting=meeting, livekit_url=settings.livekit_url, token=token)
+
+
+@router.get("/{meeting_id}/presence")
+async def presence(
+    meeting_id: str,
+    user: Person = Depends(current_user),
+    store: Store = Depends(get_store),
+    rooms: Rooms = Depends(get_rooms),
+) -> MeetingPresence:
+    """Who is in the meeting's LiveKit room now, for the lobby. participant_ids keeps everyone
+    who ever joined, so it can't say who left. Only people who joined are listed, which leaves
+    out the agent. 503 when LiveKit can't be reached: nobody is guessed present or absent."""
+    meeting = await team_meeting(store, user, meeting_id)
+    if meeting.status != "live":
+        return MeetingPresence(person_ids=[])
+    try:
+        connected = set(await rooms.identities(meeting.id))
+    except Exception:
+        logger.warning("Could not list LiveKit room %s", meeting.id, exc_info=True)
+        raise HTTPException(
+            status_code=503, detail="Who is in the meeting can't be checked right now"
+        ) from None
+    return MeetingPresence(person_ids=[i for i in meeting.participant_ids if i in connected])
 
 
 @router.post("/{meeting_id}/end")

@@ -7,9 +7,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTeam } from "@/components/AuthProvider";
 import { Avatar } from "@/components/ui/Avatar";
 import { Icon } from "@/components/ui/Icon";
-import { Mark } from "@/components/ui/Mark";
 import { Notice } from "@/components/ui/Notice";
-import { useSettings } from "@/hooks/useApi";
+import { usePresence, useSettings } from "@/hooks/useApi";
 import { useDismiss } from "@/hooks/useDismiss";
 import { joinNames } from "@/lib/format";
 import { hostOrAdmin } from "@/lib/roles";
@@ -23,6 +22,9 @@ export interface DeviceChoices {
   micId?: string;
   camId?: string;
 }
+
+/** How often the lobby asks who is in the room, so people who leave drop off the list. */
+const PRESENCE_POLL_MS = 5000;
 
 export interface LobbyProps {
   code: string;
@@ -126,9 +128,11 @@ export function Lobby({ code, meeting, lookupError, joining, error, onJoin }: Lo
     void LiveKitRoom.getLocalDevices("audioinput", true).then(setMics, () => setMics([]));
   };
 
-  const others = (meeting?.participant_ids ?? []).filter((id) => id !== me.id).map(person);
-  const inRoom = meeting?.status === "live" ? others : [];
   const ended = meeting && meeting.status !== "live" && meeting.status !== "scheduled";
+  // Who is connected now, from LiveKit; participant_ids also keeps everyone who has left.
+  const presence = usePresence(meeting && !ended ? meeting.id : null, PRESENCE_POLL_MS);
+  const present = presence.error ? undefined : presence.data;
+  const inRoom = (present?.person_ids ?? []).filter((id) => id !== me.id).map(person);
   const isHost = meeting ? hostOrAdmin(meeting, me) : false;
   const hostOnly = settings.data?.who_can_allow === "host";
   const wake = settings.data?.wake_phrase || wakePhrase();
@@ -166,9 +170,6 @@ export function Lobby({ code, meeting, lookupError, joining, error, onJoin }: Lo
               aria-expanded={infoOpen}
               aria-label={`${agent} transcription is on. Show details`}
             >
-              <span className="mark-slot">
-                <Mark size={22} tile />
-              </span>
               <Icon name="scroll-text" />
             </button>
             {!infoOpen && (
@@ -328,7 +329,11 @@ export function Lobby({ code, meeting, lookupError, joining, error, onJoin }: Lo
             <span className="already-text">
               {inRoom.length
                 ? `${joinNames(inRoom.map((p) => p.short))} ${inRoom.length === 1 ? "is" : "are"} already in.`
-                : "No one's here yet."}
+                : present
+                  ? "No one's here yet."
+                  : presence.error
+                    ? "Who's here can't be checked right now."
+                    : "Checking who's here…"}
             </span>
           </div>
         )}

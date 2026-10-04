@@ -150,7 +150,7 @@ def get_push_locks(request: Request) -> MeetingLocks:
 
 
 def get_rooms(settings: Settings = Depends(get_settings)) -> Rooms:
-    """LiveKit's room service, to close a meeting's room when it ends."""
+    """LiveKit's room service: who is in a meeting's room, and closing it when the meeting ends."""
     return rooms_from_settings(settings)
 
 

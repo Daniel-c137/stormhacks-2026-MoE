@@ -21,16 +21,14 @@ interface Drafted {
   unavailable: string[];
 }
 
-const MINUTES_MIN = 1;
-const MINUTES_MAX = 240;
-
 const fromAgenda = (agenda: Agenda): Topic[] =>
   agenda.items.map((item) => ({ key: item.id, id: item.id, title: item.title, minutes: item.minutes ?? null }));
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** Topics for the meeting. People add their own, or ask the agent to draft some from the team's open
- * work; either way they become the same ordinary items: rename, timebox, reorder, reword, delete.
+ * work; either way they become the same ordinary items: rename, reorder, reword, delete. No timeboxes:
+ * drafted items come in without the minutes the agent suggests.
  * Saved with the meeting (PUT /meetings/{id}/agenda takes the whole list; items without an id are new). */
 export function LobbyAgenda({ meetingId }: { meetingId: string }) {
   const agent = identity.agent_name;
@@ -47,8 +45,6 @@ export function LobbyAgenda({ meetingId }: { meetingId: string }) {
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
-  const [timing, setTiming] = useState<string | null>(null);
-  const [timeDraft, setTimeDraft] = useState("");
   // The person chose "Add your own items" on an empty agenda.
   const [manual, setManual] = useState(false);
   const [drafting, setDrafting] = useState(false);
@@ -158,7 +154,6 @@ export function LobbyAgenda({ meetingId }: { meetingId: string }) {
     const added: Topic[] = draftedTopics(current, result.items).map((item) => ({
       key: crypto.randomUUID(),
       title: item.title,
-      minutes: item.minutes ?? null,
     }));
     if (added.length) commit([...current, ...added]);
     const kept = new Set(added.map((t) => agendaTitleKey(t.title)));
@@ -182,19 +177,6 @@ export function LobbyAgenda({ meetingId }: { meetingId: string }) {
     const topic = items.find((x) => x.key === key);
     if (title && topic && title !== topic.title) save(items.map((x) => (x.key === key ? { ...x, title } : x)));
     setEditing(null);
-  };
-
-  const saveTime = (key: string) => {
-    if (timing !== key) return;
-    setTiming(null);
-    const text = timeDraft.trim();
-    const minutes = text ? Number(text) : null;
-    if (minutes !== null && !(Number.isInteger(minutes) && minutes >= MINUTES_MIN && minutes <= MINUTES_MAX)) {
-      setError(`A timebox is ${MINUTES_MIN} to ${MINUTES_MAX} minutes, or none.`);
-      return;
-    }
-    const topic = items.find((x) => x.key === key);
-    if (topic && (topic.minutes ?? null) !== minutes) save(items.map((x) => (x.key === key ? { ...x, minutes } : x)));
   };
 
   const move = (key: string, by: -1 | 1) => {
@@ -266,44 +248,6 @@ export function LobbyAgenda({ meetingId }: { meetingId: string }) {
                       />
                     ) : (
                       <span className="text">{item.title}</span>
-                    )}
-                    {timing === item.key ? (
-                      <span className="agenda-time-edit">
-                        <input
-                          inputMode="numeric"
-                          maxLength={3}
-                          aria-label={`Minutes for “${item.title}”`}
-                          // focused with the minutes selected, so typing replaces them
-                          ref={(el) => {
-                            if (el && document.activeElement !== el) {
-                              el.focus();
-                              el.select();
-                            }
-                          }}
-                          value={timeDraft}
-                          onChange={(e) => setTimeDraft(e.target.value)}
-                          onKeyDown={(e) => onFieldKey(e, () => setTiming(null))}
-                          onBlur={() => saveTime(item.key)}
-                        />
-                        min
-                      </span>
-                    ) : (
-                      editing !== item.key && (
-                        <button
-                          type="button"
-                          className="agenda-time"
-                          data-empty={!item.minutes}
-                          onClick={() => {
-                            setTiming(item.key);
-                            setTimeDraft(item.minutes ? String(item.minutes) : "");
-                          }}
-                          aria-label={item.minutes ? `Timebox: ${item.minutes} min. Change` : `Add a timebox to “${item.title}”`}
-                          title={item.minutes ? "Change the timebox" : "Add a timebox"}
-                        >
-                          <Icon name="clock" />
-                          {item.minutes ? `${item.minutes} min` : null}
-                        </button>
-                      )
                     )}
                     {editing !== item.key && (
                       <button

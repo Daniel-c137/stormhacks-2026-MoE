@@ -42,16 +42,25 @@ def user_from_test_header(request: Request, x_test_user: str = Header()) -> Pers
 
 
 class FakeRooms:
-    """Records LiveKit rooms closed; fail=True makes closing raise like an unreachable LiveKit."""
+    """Records LiveKit rooms closed and answers who is connected from `connected` (room ->
+    identities); fail=True makes both raise like an unreachable LiveKit."""
 
     def __init__(self, fail: bool = False):
         self.fail = fail
         self.closed: list[str] = []
+        self.connected: dict[str, list[str]] = {}
+        self.asked: list[str] = []
 
     async def close(self, room: str) -> None:
         if self.fail:
             raise RuntimeError("LiveKit unreachable")
         self.closed.append(room)
+
+    async def identities(self, room: str) -> list[str]:
+        self.asked.append(room)
+        if self.fail:
+            raise RuntimeError("LiveKit unreachable")
+        return self.connected.get(room, [])
 
 
 @pytest.fixture
