@@ -22,9 +22,10 @@ from api_support import ALEX, AUTH_SECRET, TEAM
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 from test_auth import base_settings, bearer
+from test_signup_api import stale_reads
 
 from brain.api.deps import get_http_transport, get_settings
-from brain.auth import hash_password
+from brain.auth import hash_password, verify_password
 from brain.google_auth import safe_next
 from brain.store import NotFound
 from contracts import LoginResponse, Person
@@ -218,6 +219,26 @@ def test_an_invited_email_creates_its_account_with_google(client, google, store)
         json={"name": "Not Priya", "email": "priya@example.com", "password": "x" * 12},
     )
     assert taken.status_code == 409
+
+
+def test_google_racing_a_password_sign_up_doesnt_replace_its_password(
+    client, google, store, monkeypatch
+):
+    """Priya signs up with a password while a Google sign-in for her email is past its checks:
+    reserving her login for Google must not replace the password she just set."""
+    password = "priya-password-1"
+    response = client.post(
+        "/auth/signup",
+        json={"name": "Priya Shah", "email": "priya@example.com", "password": password},
+    )
+    assert response.status_code == 201, response.text
+    stale_reads(store, monkeypatch, PRIYA)
+    google.email = "priya@example.com"
+
+    sign_in_with_google(client, google)
+
+    monkeypatch.undo()
+    assert verify_password(asyncio.run(store.login(PRIYA.id)).password_hash, password)
 
 
 def test_a_google_account_nobody_invited_is_turned_away(client, google, store):

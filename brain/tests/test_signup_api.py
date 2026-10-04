@@ -121,6 +121,46 @@ def test_an_email_that_already_has_an_account_is_told_to_sign_in(client):
     assert sign_up(client, email="alex@example.com").status_code == 409
 
 
+def stale_reads(store, monkeypatch, person: Person) -> None:
+    """The store as a second request saw it before the first one wrote: no login for the email
+    yet, and the person still invited."""
+
+    async def no_login(email: str):
+        raise NotFound(email)
+
+    async def still_invited(email: str) -> list[Person]:
+        return [person]
+
+    monkeypatch.setattr(store, "login_by_email", no_login)
+    monkeypatch.setattr(store, "invited_people", still_invited)
+
+
+def test_a_sign_up_that_loses_a_race_doesnt_replace_the_winners_account(client, store, monkeypatch):
+    """Two sign-ups for one invited email can both pass the checks before either writes. Only
+    the first gets the account: the second may not replace its password or its name."""
+    assert sign_up(client).status_code == 201
+    stale_reads(store, monkeypatch, PRIYA)
+
+    second = sign_up(client, name="Mallory", password="mallory-password-9")
+
+    monkeypatch.undo()
+    assert second.status_code == 409, second.text
+    login = asyncio.run(store.login(PRIYA.id))
+    assert verify_password(login.password_hash, PASSWORD)
+    assert asyncio.run(store.person(PRIYA.id)).name == "Priya Shah"
+
+
+def test_signing_up_keeps_the_email_as_the_admin_invited_it(client, store):
+    """Priya was invited as Priya.Shah@Example.com and types it in lower case: the team keeps
+    the invited email, as Google sign-in does."""
+    response = sign_up(client, email="priya.shah@example.com")
+
+    assert response.status_code == 201, response.text
+    assert response.json()["person"]["email"] == PRIYA.email
+    assert asyncio.run(store.person(PRIYA.id)).email == PRIYA.email
+    assert asyncio.run(store.login(PRIYA.id)).email == PRIYA.email
+
+
 def test_repeated_refusals_lock_the_email(client):
     for _ in range(5):
         assert sign_up(client, email="stranger@example.com").status_code == 403

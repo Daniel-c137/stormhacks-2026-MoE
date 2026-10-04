@@ -535,6 +535,29 @@ async def test_an_email_used_by_another_person_is_a_conflict(store):
     assert await store.login_by_email("alex@example.com") == recased
 
 
+async def test_adding_a_login_never_replaces_one(store):
+    """Sign-up and Google claim an invited person's login with add_login, so two of them racing
+    for one person can't both win, and the loser can't replace the winner's password."""
+    _, alex, sarah, *_ = await two_teams(store)
+
+    saved = await store.add_login(alex.id, "Alex@Example.com", "hash-1")
+
+    assert (saved.person_id, saved.email, saved.password_hash) == (
+        alex.id,
+        "Alex@Example.com",
+        "hash-1",
+    )
+    with pytest.raises(Conflict):
+        await store.add_login(alex.id, "alex@example.com", "hash-2")  # has one already
+    with pytest.raises(Conflict):
+        await store.add_login(sarah.id, "ALEX@example.com", "hash-3")  # another's email
+    assert (await store.login(alex.id)).password_hash == "hash-1"
+    with pytest.raises(NotFound):
+        await store.login(sarah.id)
+    with pytest.raises(NotFound):
+        await store.add_login(new_id(), "ghost@example.com", "hash-4")
+
+
 async def test_a_login_needs_an_existing_person(store):
     with pytest.raises(NotFound):
         await store.set_login(new_id(), "ghost@example.com", "hash-1")

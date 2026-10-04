@@ -15,6 +15,7 @@ from test_google_auth_api import CLIENT_ID, CLIENT_SECRET, REDIRECT_URL, FakeGoo
 from brain.api.deps import get_http_transport, get_settings
 from brain.auth import hash_password
 from brain.store import NotFound
+from contracts import Person
 
 PASSWORD = "priya-password-1"
 OLGA_ADMIN = OUTSIDER.model_copy(update={"is_admin": True})  # the other team's admin
@@ -160,18 +161,48 @@ def test_an_email_nobody_invited_is_403(app, client_as):
     assert "invite" in response.json()["detail"].lower()
 
 
-def test_an_email_invited_by_two_teams_is_409_until_an_admin_sorts_it_out(app, client_as, store):
-    first = invite(client_as(ALEX)).json()["person"]
-    second = invite(client_as(OLGA_ADMIN))
-    assert second.status_code == 201, second.text  # not a login, nor Olga's teammate
+def test_an_email_another_team_invited_cant_be_invited_or_given_an_account(app, client_as, store):
+    """Two teams inviting one email would leave it unable to sign up, and nobody can remove a
+    member yet; giving it a password on a second team would strand the first invite. Both are
+    refused, and the first team's invite still works."""
+    first = invite(client_as(OLGA_ADMIN)).json()["person"]
+    alex = client_as(ALEX)
+
+    again = invite(alex, email="PRIYA@example.com")
+    with_password = alex.post(
+        "/team/accounts", json={"name": "Priya Natarajan", "email": "priya@example.com"}
+    )
+
+    assert again.status_code == 409, again.text
+    assert with_password.status_code == 409, with_password.text
+    assert "another team" in again.json()["detail"].lower()
+    assert len(run(store.team(TEAM.id)).member_ids) == 2
+    response = sign_up(app)
+    assert response.status_code == 201, response.text
+    assert response.json()["person"]["id"] == first["id"]
+
+
+def two_invites(store) -> list[Person]:
+    """The same email on both teams with no login, as a race between two invites leaves it."""
+    people = [
+        Person(id=f"u-priya-{team.id}", name="Priya", short="Priya", initials="P", email=email)
+        for team, email in ((TEAM, "priya@example.com"), (OTHER_TEAM, "PRIYA@example.com"))
+    ]
+    for person, team in zip(people, (TEAM, OTHER_TEAM), strict=True):
+        run(store.upsert_person(person, team.id))
+    return people
+
+
+def test_an_email_invited_by_two_teams_is_409_until_an_admin_sorts_it_out(app, store):
+    people = two_invites(store)
 
     response = sign_up(app)
 
     assert response.status_code == 409
     assert "Ask your team's admin" in response.json()["detail"]
-    for person in (first, second.json()["person"]):
+    for person in people:
         with pytest.raises(NotFound):
-            run(store.login(person["id"]))
+            run(store.login(person.id))
 
 
 # Google
@@ -221,9 +252,8 @@ def test_google_turns_away_an_email_nobody_invited(app, google):
     assert google_sign_in(app, google, "stranger@example.com") == {"google_error": "not_invited"}
 
 
-def test_google_refuses_an_email_invited_by_two_teams(app, client_as, google, store):
-    invite(client_as(ALEX))
-    invite(client_as(OLGA_ADMIN))
+def test_google_refuses_an_email_invited_by_two_teams(app, google, store):
+    two_invites(store)
 
     assert google_sign_in(app, google, "priya@example.com") == {"google_error": "ambiguous"}
     assert len(run(store.invited_people("priya@example.com"))) == 2  # no login reserved

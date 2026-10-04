@@ -495,6 +495,23 @@ def test_set_admin_refuses_to_revoke_the_teams_last_admin(db):
     assert is_admin(db, "alex@example.com")
 
 
+def test_an_invited_admin_doesnt_count_as_the_teams_admin_until_they_sign_up(db):
+    """An admin invited with no login can't sign in, so revoking the only admin who can would
+    leave the team with nobody to manage it."""
+    main(["add-team", "--id", "t-1", "--name", "Checkout"])
+    add_alex("--admin")
+    invited = Person(
+        id="u-priya", name="Priya", short="Priya", initials="P", email="priya@example.com"
+    )
+    asyncio.run(db.upsert_person(invited.model_copy(update={"is_admin": True}), "t-1"))
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(["set-admin", "--email", "alex@example.com", "--revoke"])
+
+    assert "last admin" in str(exit_info.value.code)
+    assert is_admin(db, "alex@example.com")
+
+
 def test_set_admin_revoking_someone_who_is_no_admin_changes_nothing(db):
     main(["add-team", "--id", "t-1", "--name", "Checkout"])
     add_sam()
