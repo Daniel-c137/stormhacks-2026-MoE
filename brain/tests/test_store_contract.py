@@ -32,6 +32,7 @@ from brain.store import (
     Conflict,
     FactCheckState,
     InMemoryStore,
+    JiraAccount,
     Login,
     NotFound,
     ReportAudio,
@@ -478,6 +479,50 @@ async def test_a_deleted_team_can_be_created_again_empty(store):
 async def test_deleting_a_missing_team_is_not_found(store):
     with pytest.raises(NotFound):
         await store.delete_team(new_id())
+
+
+# the team's Jira account
+
+
+def jira_account(team_id: str, by: Person, **changes) -> JiraAccount:
+    account = JiraAccount(
+        team_id=team_id,
+        site="acme.atlassian.net",
+        email="admin@acme.example",
+        sealed_token="sealed-1",
+        connected_by=by.id,
+        connected_at=at(0),
+    )
+    return account.model_copy(update=changes)
+
+
+async def test_a_teams_jira_account_is_saved_replaced_and_removed(store):
+    team, alex, _, other, _ = await two_teams(store)
+    assert await store.jira_account(team.id) is None
+
+    first = await store.save_jira_account(jira_account(team.id, alex))
+    assert await store.jira_account(team.id) == first
+    assert await store.jira_account(other.id) is None
+
+    second = jira_account(team.id, alex, email="ops@acme.example", sealed_token="sealed-2")
+    await store.save_jira_account(second)
+    assert await store.jira_account(team.id) == second
+
+    await store.delete_jira_account(team.id)
+    await store.delete_jira_account(team.id)  # removing none is not an error
+    assert await store.jira_account(team.id) is None
+
+
+async def test_a_jira_account_needs_its_team_and_goes_with_it(store):
+    team, alex, *_ = await two_teams(store)
+    with pytest.raises(NotFound):
+        await store.save_jira_account(jira_account(new_id(), alex))
+
+    await store.save_jira_account(jira_account(team.id, alex))
+    await store.delete_team(team.id)
+    await store.create_team(team.model_copy(update={"member_ids": []}))
+
+    assert await store.jira_account(team.id) is None
 
 
 # logins (email and password sign-in; the store only ever sees the hash)
