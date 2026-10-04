@@ -148,7 +148,7 @@ def test_someone_on_no_team_is_refused(client_as, method, path):
     if "join" in path:
         path = f"/meetings/join/{meeting['code']}"
 
-    response = getattr(client_as(NOBODY), method)(path, json={"title": "Mine"})
+    response = client_as(NOBODY).request(method.upper(), path, json={"title": "Mine"})
 
     assert response.status_code == 403
 
