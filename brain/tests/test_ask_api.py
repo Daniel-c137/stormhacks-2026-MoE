@@ -38,7 +38,7 @@ def memory(app, rows) -> MeetingMemory:
 @pytest.fixture
 def llm(app):
     """The model's two calls: search meeting memory, then cite the waitlist decision."""
-    llm = scripted(SEARCH, answer=citing("waitlist email", text="Hold it until v0.9.4."))
+    llm = scripted(SEARCH, answer=citing("hold the waitlist email", text="Hold it until v0.9.4."))
     app.dependency_overrides[get_llm] = lambda: llm
     return llm
 

@@ -27,15 +27,21 @@ JIRA_ACCOUNTS: list[dict[str, str]] = [
 
 
 class FakeJira:
-    """Stand-in for the Jira MCP server's createJiraIssue, lookupJiraAccountId,
-    searchJiraIssuesUsingJql and getJiraIssue. A summary starting with FAIL is rejected the way
-    Jira rejects an invalid field. Searches return `issues` (in Atlassian's shape) or fail with
-    `search_error`; reads find an issue in `issues` by key. Lookups match any account whose name
-    or email contains the search string; set `lookup_error` to make the lookup tool fail. Lookups
-    answer {"users": [...]}, the shape the brain expects (unverified against Atlassian's
-    server)."""
+    """Stand-in for the Jira MCP server's createJiraIssue, lookupJiraAccountId and
+    searchJiraIssuesUsingJql, and with `issue_reads` getJiraIssue too. A summary starting with
+    FAIL is rejected the way Jira rejects an invalid field. Searches return `issues` (in
+    Atlassian's shape) or fail with `search_error`; reads find an issue in `issues` by key.
+    Lookups match any account whose name or email contains the search string; set `lookup_error`
+    to make the lookup tool fail. Lookups answer {"users": [...]}, the shape the brain expects
+    (unverified against Atlassian's server)."""
 
-    def __init__(self, first_number: int = 117, accounts: list[dict[str, str]] | None = None):
+    def __init__(
+        self,
+        first_number: int = 117,
+        accounts: list[dict[str, str]] | None = None,
+        *,
+        issue_reads: bool = False,
+    ):
         self.created: list[dict[str, Any]] = []
         self.accounts = list(JIRA_ACCOUNTS if accounts is None else accounts)
         self.lookups: list[str] = []
@@ -75,7 +81,6 @@ class FakeJira:
                 raise ToolError(self.search_error)
             return {"issues": self.issues[: maxResults or None], "isLast": True}
 
-        @self.server.tool()
         def getJiraIssue(
             cloudId: str, issueIdOrKey: str, fields: list[str] | None = None
         ) -> dict[str, Any]:
@@ -84,6 +89,9 @@ class FakeJira:
                 if issue["key"] == issueIdOrKey:
                     return issue
             raise ToolError(f"Issue {issueIdOrKey} does not exist")
+
+        if issue_reads:
+            self.server.tool()(getJiraIssue)
 
         @self.server.tool()
         def createJiraIssue(

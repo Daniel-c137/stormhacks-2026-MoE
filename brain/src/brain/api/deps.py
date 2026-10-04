@@ -6,12 +6,14 @@ from typing import NoReturn
 import httpx
 from fastapi import Depends, Header, HTTPException, Request
 
-from contracts import Meeting, Person, Team
+from contracts import Answer, Meeting, Person, Team
 
+from ..agent.ask import Question, ToolOrchestrator
 from ..auth import AuthNotConfigured, InvalidToken, KeysUnavailable, TokenVerifier
 from ..config import Settings
 from ..jira import JiraPusher, jira_config
-from ..llm import LLM, LLMUnavailable, make_llm
+from ..llm import LLM, LLMError, LLMUnavailable, make_embedder, make_llm
+from ..memory import MeetingMemory, PgMemoryStore
 from ..store import NotFound, Store
 
 
@@ -44,6 +46,31 @@ async def get_llm(settings: Settings = Depends(get_settings)) -> LLM:
         return make_llm(settings)
     except LLMUnavailable as e:
         raise HTTPException(status_code=503, detail=str(e)) from None
+
+
+def get_memory(
+    request: Request, settings: Settings = Depends(get_settings)
+) -> MeetingMemory | None:
+    """Meeting memory in the app's Postgres pool with Gemini embeddings. None without a database
+    or embeddings; the agent then reports memory as unavailable instead of failing."""
+    pool = getattr(request.app.state, "db_pool", None)
+    if pool is None:
+        return None
+    try:
+        embedder = make_embedder(settings)
+    except LLMUnavailable:
+        return None
+    return MeetingMemory(embedder, PgMemoryStore(pool))
+
+
+def get_orchestrator(
+    llm: LLM = Depends(get_llm),
+    store: Store = Depends(get_store),
+    memory: MeetingMemory | None = Depends(get_memory),
+    settings: Settings = Depends(get_settings),
+) -> ToolOrchestrator:
+    """The agent for deliberate questions. Read-only; GitHub and Jira when configured."""
+    return ToolOrchestrator(llm, store, settings=settings, memory=memory)
 
 
 def get_verifier(request: Request, settings: Settings = Depends(get_settings)) -> TokenVerifier:
@@ -130,3 +157,11 @@ async def team_meeting(store: Store, user: Person, meeting_id: str) -> Meeting:
     if meeting is None or meeting.team_id != team.id:
         raise HTTPException(status_code=404, detail="Meeting not found")
     return meeting
+
+
+async def ask_agent(orchestrator: ToolOrchestrator, question: Question) -> Answer:
+    """The agent's answer; 502 when the model fails. Nothing about the question is kept."""
+    try:
+        return await orchestrator.ask(question)
+    except LLMError as e:
+        raise HTTPException(status_code=502, detail=f"Could not answer: {e}") from e

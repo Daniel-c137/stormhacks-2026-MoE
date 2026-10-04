@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from api_support import ALEX, OTHER_TEAM, OUTSIDER, SARAH, TEAM
 from ask_support import citing, evidence, scripted
+from conftest import FakeJira
 
 from brain.agent.ask import (
     MAX_TOOL_CALLS,
@@ -47,6 +48,11 @@ WAITLIST = "What did we decide about the waitlist email?"
 @pytest.fixture
 def store() -> InMemoryStore:
     return InMemoryStore(teams=[TEAM, OTHER_TEAM], people=[ALEX, SARAH, OUTSIDER])
+
+
+@pytest.fixture
+def fake_jira() -> FakeJira:
+    return FakeJira(issue_reads=True)
 
 
 @pytest.fixture
@@ -315,6 +321,7 @@ async def test_tools_outside_the_read_menu_are_refused(store, settings, fake_jir
 
 
 async def test_the_mcp_reader_refuses_anything_not_on_the_read_allowlist(fake_jira, fake_github):
+    fake_jira.issues = list(JIRA_ISSUES)
     jira = McpReader("jira", fake_jira.server)
     github = McpReader("github", fake_github.server)
 

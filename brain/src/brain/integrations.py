@@ -1,7 +1,11 @@
 """GitHub and Jira over MCP: the world mocks or the real servers, with the same tool names."""
 
-from typing import Literal
+import json
+from typing import Any, Literal
 
+from mcp import Client
+from mcp.server.mcpserver import MCPServer
+from mcp.types import TextContent
 from pydantic import BaseModel
 
 McpServerName = Literal["github", "jira"]
@@ -49,3 +53,36 @@ WRITE_TOOLS: dict[McpServerName, frozenset[str]] = {
         }
     ),
 }
+
+
+class ToolRefused(PermissionError):
+    """A tool that is not on the server's read allowlist."""
+
+
+class McpToolError(RuntimeError):
+    """The MCP server answered the call with an error."""
+
+
+class McpReader:
+    """Calls one MCP server's read tools, and nothing else: anything off READ_TOOLS is refused
+    before a connection is made."""
+
+    def __init__(self, server: McpServerName, target: str | MCPServer):
+        self.server = server
+        self.target = target
+
+    async def call(self, tool: str, arguments: dict[str, Any]) -> Any:
+        """The tool's structured result, or its text parsed as JSON, or the text itself."""
+        if tool not in READ_TOOLS[self.server]:
+            raise ToolRefused(f"{tool} is not a {self.server} read tool")
+        async with Client(self.target) as client:
+            result = await client.call_tool(tool, arguments)
+        text = "\n".join(c.text for c in result.content if isinstance(c, TextContent))
+        if result.is_error:
+            raise McpToolError(text or f"{tool} failed")
+        if result.structured_content is not None:
+            return result.structured_content
+        try:
+            return json.loads(text)
+        except ValueError:
+            return text

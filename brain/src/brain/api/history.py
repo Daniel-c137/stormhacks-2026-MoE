@@ -1,6 +1,7 @@
 """After the meeting: transcript, report, task review and history Q&A (board -> brain)."""
 
 from collections.abc import Callable
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -17,14 +18,16 @@ from contracts import (
     TranscriptSegment,
 )
 
+from ..agent.ask import Question, ToolOrchestrator
 from ..jira import ApprovalRequired, JiraPusher, JiraUnavailable, apply_results
 from ..report import ProcessedMeeting
 from ..store import Conflict, NotFound, Store
 from .deps import (
+    ask_agent,
     current_user,
     get_jira_pusher,
+    get_orchestrator,
     get_store,
-    not_implemented,
     team_meeting,
     user_team,
 )
@@ -181,6 +184,22 @@ async def list_tasks(
 
 
 @router.post("/ask")
-async def ask_history(body: AskRequest, user: Person = Depends(current_user)) -> Answer:
-    """Q&A across the team's previous meetings, GitHub and Jira, outside a live meeting."""
-    not_implemented()
+async def ask_history(
+    body: AskRequest,
+    user: Person = Depends(current_user),
+    store: Store = Depends(get_store),
+    orchestrator: ToolOrchestrator = Depends(get_orchestrator),
+) -> Answer:
+    """Home's chat: Q&A across the caller's team's meetings, decisions, tasks, GitHub and Jira,
+    with `history` for follow-ups. Nothing about the question is stored."""
+    team = await user_team(store, user)
+    question = Question(
+        id=str(uuid4()),
+        team_id=team.id,
+        text=body.question,
+        asker_id=user.id,
+        asker_name=user.name,
+        visibility=body.visibility,
+        history=body.history,
+    )
+    return await ask_agent(orchestrator, question)
