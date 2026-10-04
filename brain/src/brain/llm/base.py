@@ -1,4 +1,4 @@
-from typing import Protocol
+from typing import Literal, Protocol
 
 from pydantic import BaseModel
 
@@ -22,9 +22,20 @@ class LLM(Protocol):
     ) -> T: ...
 
 
+EmbedTask = Literal["document", "query"]
+
+
+class Embeddings(BaseModel):
+    """One vector per text, all from `model`. Vectors from different models are not comparable."""
+
+    model: str
+    vectors: list[list[float]]
+
+
 class Embedder(Protocol):
-    """Same model and dimensions for indexing and querying."""
+    """Same model and dimensions for indexing and querying. `task` lets a provider embed stored
+    documents and search queries differently."""
 
     dim: int
 
-    async def embed(self, texts: list[str]) -> list[list[float]]: ...
+    async def embed(self, texts: list[str], *, task: EmbedTask = "document") -> Embeddings: ...

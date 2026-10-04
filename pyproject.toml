@@ -2,7 +2,7 @@
 members = ["contracts", "brain", "realtime", "world"]
 
 [dependency-groups]
-dev = ["ruff", "pytest"]
+dev = ["ruff", "pytest", "pgserver"]
 
 [tool.pytest.ini_options]
 markers = [

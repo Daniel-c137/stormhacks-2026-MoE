@@ -12,6 +12,8 @@ dependencies = [
     "supabase",
     "livekit-api",
     "mcp",
+    "psycopg[binary]",
+    "psycopg-pool",
 ]
 
 [project.scripts]
