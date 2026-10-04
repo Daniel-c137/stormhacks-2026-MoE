@@ -22,7 +22,7 @@ import anyio
 from pydantic import BaseModel, Field
 
 from brain.config import Settings
-from brain.github_account import github_endpoint
+from brain.github_account import github_endpoints
 from brain.llm import LLM
 from brain.memory import MeetingMemory
 from brain.report.decisions import terms
@@ -194,6 +194,7 @@ class ToolOrchestrator:
         jira_target: Any = None,
         github_target: Any = None,
         gitlab_target: Any = None,
+        jira_transport: Any = None,
         max_calls: int = MAX_TOOL_CALLS,
         max_evidence: int = MAX_EVIDENCE,
         timeout: float = DEFAULT_TIMEOUT,
@@ -205,6 +206,7 @@ class ToolOrchestrator:
         self.jira_target = jira_target
         self.github_target = github_target
         self.gitlab_target = gitlab_target
+        self.jira_transport = jira_transport  # how a connected account's Jira site is reached
         self.max_calls = max_calls
         self.max_evidence = max_evidence
         self.timeout = timeout
@@ -237,14 +239,21 @@ class ToolOrchestrator:
         team_settings = await self.store.settings(team_id)
         github = None
         if self.github_target is None:
-            github = github_endpoint(self.settings, await self.store.github_account(team_id))
+            github = github_endpoints(self.settings, await self.store.github_accounts(team_id))
+        jira = jira_reader(
+            self.settings,
+            team_settings,
+            self.jira_target,
+            await self.store.jira_account(team_id),
+            self.jira_transport,
+        )
         return TeamToolbox(
             team_id,
             asker_id,
             self.store,
             members=await self.store.members(team_id),
             memory=self.memory,
-            jira=jira_reader(self.settings, team_settings, self.jira_target),
+            jira=jira,
             github=github_readers(self.settings, team_settings, self.github_target, github),
             gitlab=gitlab_readers(self.settings, team_settings, self.gitlab_target),
             timeout=self.timeout,

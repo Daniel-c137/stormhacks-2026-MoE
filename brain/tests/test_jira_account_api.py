@@ -1,7 +1,7 @@
-"""An admin connects the team's Jira account in Settings; approved task drafts then become real
-issues on that site, pushed by an admin. The account's site and project are its own: the Jira
-project the agent reads (Settings, Connectors) is left as it is. Alex is the team's admin; Sarah
-is a member."""
+"""An admin connects the team's Jira project in Settings with the account it is read and pushed
+with: the agent then reads that project on its site as the account, and approved task drafts
+become real issues there, pushed by an admin. The demo world's projects (MOCK_JIRA_PROJECTS)
+take any account and stay on the mock. Alex is the team's admin; Sarah is a member."""
 
 import asyncio
 from datetime import UTC, datetime
@@ -11,10 +11,23 @@ import httpx
 import pytest
 from api_support import ALEX, AUTH_SECRET, OTHER_TEAM, OUTSIDER, SARAH, TEAM, create
 from fastapi.testclient import TestClient
-from jira_cloud_support import EMAIL, SITE, STORY, SUBTASK, TOKEN, FakeJiraCloud, text_of
+from jira_cloud_support import (
+    EMAIL,
+    SITE,
+    STORY,
+    SUBTASK,
+    TOKEN,
+    FakeJiraCloud,
+    rest_issue,
+    text_of,
+)
 from test_report_review_api import processed, push, task
 
+from brain.agent.ask import ToolOrchestrator
+from brain.agent.team_tools import jira_reader
 from brain.api.deps import get_http_transport, get_settings
+from brain.jira import JiraError
+from brain.jira_rest import JiraRestReader
 from brain.sealing import Unsealable, unseal
 from brain.store import JiraAccount
 
@@ -53,8 +66,8 @@ def test_an_admin_connects_the_teams_jira_account(client_as, store, jira):
 
     assert response.status_code == 200, response.text
     assert response.json()["jira"] == {
-        "site": None,
-        "project": None,
+        "site": SITE,
+        "project": "DS",
         "connected": True,
         "account_email": EMAIL,
         "account_site": SITE,
@@ -83,7 +96,7 @@ def test_the_token_is_kept_sealed_and_never_sent_back(client_as, store, jira):
     assert seen_by_member.json()["jira"]["account_email"] == EMAIL
 
 
-def test_connecting_leaves_the_project_the_agent_reads_as_it_is(client_as, jira):
+def test_connecting_makes_it_the_project_the_agent_reads(client_as, jira):
     alex = client_as(ALEX)
     alex.put("/settings/connectors", json={"jira": READ_FROM})
 
@@ -91,8 +104,19 @@ def test_connecting_leaves_the_project_the_agent_reads_as_it_is(client_as, jira)
 
     assert response.status_code == 200, response.text
     saved = response.json()["jira"]
-    assert (saved["site"], saved["project"]) == (READ_FROM["site"], READ_FROM["project"])
+    assert (saved["site"], saved["project"]) == (SITE, "DS")
     assert (saved["account_site"], saved["account_project"]) == (SITE, "DS")
+
+
+def test_a_refused_account_leaves_the_project_the_agent_reads_as_it_is(client_as, jira):
+    alex = client_as(ALEX)
+    alex.put("/settings/connectors", json={"jira": READ_FROM})
+
+    response = connect(alex, api_token="wrong")
+
+    assert response.status_code == 422
+    saved = alex.get("/settings").json()["jira"]
+    assert (saved["site"], saved["project"]) == (READ_FROM["site"], READ_FROM["project"])
 
 
 def test_a_pasted_site_link_and_a_lowercase_key_are_tidied(client_as, jira):
@@ -217,7 +241,7 @@ def test_a_site_that_cannot_be_reached_is_a_502(client_as, store, jira):
     assert account(store) is None
 
 
-def test_an_admin_disconnects_the_account(client_as, store, jira):
+def test_an_admin_removes_the_project_and_its_account(client_as, store, jira):
     alex = client_as(ALEX)
     connect(alex)
 
@@ -225,6 +249,22 @@ def test_an_admin_disconnects_the_account(client_as, store, jira):
 
     assert response.status_code == 200, response.text
     assert response.json()["jira"] == {"site": None, "project": None} | NOT_CONNECTED
+    assert account(store) is None
+
+
+def test_a_project_read_apart_from_the_account_stays_when_it_is_disconnected(
+    client_as, store, jira
+):
+    """As connected before the project read and the account were one."""
+    alex = client_as(ALEX)
+    connect(alex)
+    alex.put("/settings/connectors", json={"jira": READ_FROM})
+
+    response = alex.delete("/settings/jira/account")
+
+    saved = response.json()["jira"]
+    assert (saved["site"], saved["project"]) == (READ_FROM["site"], READ_FROM["project"])
+    assert saved["connected"] is False
     assert account(store) is None
 
 
@@ -319,7 +359,7 @@ def test_an_admins_push_creates_real_issues_with_the_connected_account(client_as
     assert alex.get(f"/meetings/{meeting['id']}").json()["status"] == "pushed"
 
 
-def test_the_push_goes_to_the_accounts_project_not_the_one_the_agent_reads(client_as, store, jira):
+def test_the_push_goes_to_the_accounts_project(client_as, store, jira):
     jira.projects.add("OPS")
     alex = client_as(ALEX)
     alex.put("/settings/connectors", json={"jira": READ_FROM})
@@ -434,3 +474,169 @@ def prepared_meeting(alex: TestClient, store):
     draft = task(meeting["id"], 1)
     processed(store, meeting, draft)
     return meeting, draft
+
+
+# the demo world's projects: any account, read and pushed through the mock
+
+
+@pytest.fixture
+def demo_world(settings):
+    settings.mock_jira_projects = "demo, OTHER"
+
+
+def test_a_demo_project_takes_any_account_unchecked_and_unkept(client_as, store, jira, demo_world):
+    response = connect(client_as(ALEX), project="demo", api_token="anything", email="me@x.y")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["jira"] == {"site": SITE, "project": "DEMO"} | NOT_CONNECTED
+    assert jira.requests == []
+    assert account(store) is None
+
+
+def test_switching_to_a_demo_project_forgets_the_real_account(client_as, store, jira, demo_world):
+    alex = client_as(ALEX)
+    connect(alex)
+
+    response = connect(alex, project="DEMO", api_token="x")
+
+    assert response.json()["jira"]["project"] == "DEMO"
+    assert response.json()["jira"]["connected"] is False
+    assert account(store) is None
+
+
+def test_a_demo_project_is_read_through_the_mock(client_as, store, settings, jira, demo_world):
+    connect(client_as(ALEX), project="DEMO", api_token="x")
+    team = asyncio.run(store.settings(TEAM.id))
+    settings.jira_mcp_url, settings.jira_cloud_id = "http://mock.invalid/mcp", "cloud"
+
+    reader = jira_reader(settings, team, account=account(store))
+
+    assert not isinstance(reader, JiraRestReader | str)
+    assert reader.project == "DEMO"
+
+
+# reading: the connected project is read on its site as the account
+
+
+def read(store, settings, jira: FakeJiraCloud, call: str, **arguments):
+    async def go():
+        tools = ToolOrchestrator(None, store, settings=settings, jira_transport=jira.transport)
+        toolbox = await tools.toolbox(TEAM.id, ALEX.id)
+        if isinstance(toolbox.jira, str):
+            return toolbox.jira
+        return await getattr(toolbox, call)(**arguments)
+
+    return anyio.run(go)
+
+
+def test_the_agent_searches_the_connected_project_on_its_site(client_as, store, settings, jira):
+    jira.issues = [
+        rest_issue("DS-7", "Refund the double-charged users", description="Stripe sent it twice"),
+        rest_issue("DS-8", "Rotate the staging keys"),
+    ]
+    connect(client_as(ALEX))
+    jira.requests.clear()
+
+    findings = read(store, settings, jira, "jira_search", query="refund")
+
+    assert [f.source.label for f in findings] == ["DS-7"]
+    assert findings[0].source.url == f"https://{SITE}/browse/DS-7"
+    assert "Stripe sent it twice" in findings[0].text  # rich text read as plain text
+    assert "Sarah Kim" in findings[0].text
+    (search,) = jira.searches
+    assert 'project = "DS"' in search["jql"] and "refund" in search["jql"]
+    assert all(r.headers["authorization"].startswith("Basic ") for r in jira.requests)
+
+
+def test_the_agent_reads_one_issue_of_the_connected_project(client_as, store, settings, jira):
+    jira.issues = [rest_issue("DS-7", "Refund the double-charged users", done=True)]
+    connect(client_as(ALEX))
+
+    (finding,) = read(store, settings, jira, "jira_issue", key="ds-7")
+
+    assert finding.source.label == "DS-7"
+    assert "status Done" in finding.text
+
+
+def test_a_missing_issue_is_a_read_error_not_an_empty_answer(client_as, store, settings, jira):
+    connect(client_as(ALEX))
+
+    with pytest.raises(JiraError, match="DS-404 was not found"):
+        read(store, settings, jira, "jira_issue", key="DS-404")
+
+
+def test_unfinished_work_of_the_connected_project_is_read_on_its_site(
+    client_as, store, settings, jira
+):
+    jira.issues = [rest_issue("DS-1", "Open work"), rest_issue("DS-2", "Old work", done=True)]
+    connect(client_as(ALEX))
+    team = asyncio.run(store.settings(TEAM.id))
+    reader = jira_reader(settings, team, account=account(store), transport=jira.transport)
+
+    issues = anyio.run(reader.unfinished)
+
+    assert [issue.key for issue in issues] == ["DS-1"]
+
+
+def test_a_project_read_apart_from_the_account_is_read_through_the_mcp_server(
+    client_as, store, settings, jira
+):
+    alex = client_as(ALEX)
+    connect(alex)
+    alex.put("/settings/connectors", json={"jira": READ_FROM})
+    settings.jira_mcp_url, settings.jira_cloud_id = "http://mock.invalid/mcp", "cloud"
+
+    reader = jira_reader(settings, asyncio.run(store.settings(TEAM.id)), account=account(store))
+
+    assert not isinstance(reader, JiraRestReader | str)
+    assert reader.project == "DEMO"
+
+
+def test_a_token_sealed_with_an_old_server_secret_is_not_read(client_as, store, settings, jira):
+    connect(client_as(ALEX))
+    changed = settings.model_copy(update={"auth_secret": AUTH_SECRET + "-rotated"})
+
+    problem = read(store, changed, jira, "jira_search", query="refund")
+
+    assert "connect Jira again" in problem
+    assert jira.searches == []
+
+
+# status: the connected project is checked on its site
+
+
+def jira_status(client: TestClient) -> dict:
+    response = client.get("/settings/connectors")
+    assert response.status_code == 200, response.text
+    (status,) = [s for s in response.json() if s["name"] == "jira"]
+    return status
+
+
+def test_the_connected_project_is_checked_on_its_site(client_as, jira):
+    connect(client_as(ALEX))
+    jira.requests.clear()
+
+    status = jira_status(client_as(SARAH))
+
+    assert status["state"] == "connected", status
+    assert [r.url.path for r in jira.requests] == ["/rest/api/3/project/DS"]
+
+
+def test_a_project_the_account_no_longer_sees_is_failing(client_as, jira):
+    connect(client_as(ALEX))
+    jira.projects.discard("DS")
+
+    status = jira_status(client_as(ALEX))
+
+    assert status["state"] == "failing"
+    assert "DS" in status["detail"]
+
+
+def test_an_unreachable_site_is_failing(client_as, jira):
+    connect(client_as(ALEX))
+    jira.down = True
+
+    status = jira_status(client_as(ALEX))
+
+    assert status["state"] == "failing"
+    assert SITE in status["detail"]

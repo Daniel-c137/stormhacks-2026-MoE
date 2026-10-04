@@ -22,14 +22,15 @@ class CodeRepo(BaseModel):
     connected: bool = False
     indexed_at: datetime | None = None
     files: int | None = None
+    # GitHub only: the account whose token this repository was connected with (PUT
+    # /settings/github/repos), by its login; it is read through GitHub's hosted MCP server with
+    # that token. None: read from the server's GITHUB_MCP_URL with no credentials. The token
+    # never leaves the brain.
+    login: str | None = None
 
 
 class GitHubSettings(BaseModel):
     repos: list[CodeRepo] = Field(default=[], max_length=MAX_CODE_REPOS)  # owner/name each
-    # The GitHub account whose token an admin connected (PUT /settings/github/account), by its
-    # login: the team's reads then go to GitHub's hosted MCP server with that token. None: the
-    # server's GITHUB_MCP_URL, with no credentials. The token never leaves the brain.
-    account_login: str | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -55,10 +56,10 @@ class JiraSettings(BaseModel):
     # The project the agent reads (answers, agenda suggestions, fact checks) and its site.
     site: str | None = None
     project: str | None = None
-    # The account an admin connected for pushing (PUT /settings/jira/account): approved task
-    # drafts become issues in `account_project` on `account_site`, as `account_email`. Its own
-    # site and project, so connecting it changes nothing the agent reads. Its API token never
-    # leaves the brain.
+    # The account an admin connected the project with (PUT /settings/jira/account): approved
+    # task drafts become issues in `account_project` on `account_site`, as `account_email`, and
+    # when that is the project above the agent reads it with the account too. Its API token
+    # never leaves the brain.
     connected: bool = False
     account_email: str | None = None
     account_site: str | None = None
@@ -100,9 +101,10 @@ class JiraChoice(BaseModel):
 
 
 class JiraAccountConnect(BaseModel):
-    """PUT /settings/jira/account (admins only): the Jira Cloud site (name.atlassian.net), the
-    Atlassian account's email and API token, and the project issues are created in. The brain
-    checks them against Jira before saving; the token is stored encrypted and never returned."""
+    """PUT /settings/jira/account (admins only): the team's Jira project, which the agent reads
+    and approved tasks are created in, with the Jira Cloud site (name.atlassian.net) and the
+    Atlassian account's email and API token. The brain checks them against Jira before saving;
+    the token is stored encrypted and never returned."""
 
     site: str
     email: str
@@ -110,12 +112,16 @@ class JiraAccountConnect(BaseModel):
     project: str
 
 
-class GitHubAccountConnect(BaseModel):
-    """PUT /settings/github/account (admins only): a fine-grained personal access token with
-    read access to the team's repositories. The brain checks it with GitHub before saving; it is
-    stored encrypted and never returned."""
+class GitHubRepoConnect(BaseModel):
+    """PUT /settings/github/repos (admins only): a repository to connect, or one already
+    connected to change (matched by path), with the branch or tag it is read at and the
+    fine-grained personal access token it is read with. The brain checks that the token reads
+    the repository before saving; it is stored encrypted and never returned. A blank token keeps
+    the one a connected repository has."""
 
-    token: str
+    repo: str
+    ref: str | None = None
+    token: str = ""
 
 
 class ConnectorsUpdate(BaseModel):
@@ -129,8 +135,10 @@ class ConnectorsUpdate(BaseModel):
 
 
 class ConnectorStatus(BaseModel):
-    """Whether an integration can be used right now. Failing and unconfigured are never hidden."""
+    """Whether an integration can be used right now. Failing and unconfigured are never hidden.
+    GitHub has one per repository, each read with its own token: `repo` names it."""
 
     name: ConnectorName
     state: ConnectorState
     detail: str | None = None
+    repo: str | None = None

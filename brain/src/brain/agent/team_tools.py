@@ -7,18 +7,21 @@ from datetime import UTC, date, tzinfo
 from typing import Any, Literal
 
 import anyio
+import httpx
 from pydantic import BaseModel
 
 from brain.config import Settings
 from brain.github import GitHubItem, GitHubReader, GitHubRelease
+from brain.github_account import Unusable, repo_target
 from brain.gitlab import GitLabDiff, GitLabItem, GitLabReader, web_address
 from brain.integrations import McpEndpoint, ToolRefused
 from brain.jira import JiraConfig, JiraIssue, JiraReader, root_cause
+from brain.jira_rest import JiraRestReader, account_access, reads_with_account
 from brain.memory import Chunk, MeetingMemory
 from brain.memory.chunking import Turn, people_turns, turn_text
 from brain.report.decisions import terms
 from brain.report.extraction import clock
-from brain.store import NotFound, Store
+from brain.store import JiraAccount, NotFound, Store
 from brain.zones import local_date
 from brain.zones import today as team_today
 from contracts import (
@@ -239,10 +242,30 @@ RELEASE_LIMIT = 5
 SOURCE_NAMES = {spec.name: name for spec, name in SPECS}
 
 
-def jira_reader(settings: Settings, team: TeamSettings, target: Any = None) -> JiraReader | str:
-    """A reader for the team's Jira project, or why there is none. A team without its own
-    project uses the deployment's JIRA_PROJECT_KEY, as the push flow does (one team per
-    deployment)."""
+JIRA_CONNECT_AGAIN = (
+    "Jira is not reachable: the token the project was connected with can't be read on this "
+    "server: an admin must connect Jira again"
+)
+
+
+def jira_reader(
+    settings: Settings,
+    team: TeamSettings,
+    target: Any = None,
+    account: JiraAccount | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> JiraReader | str:
+    """A reader for the team's Jira project, or why there is none. The project the team's
+    account was connected with is read on its own site with that account (unless it is one of
+    the demo world's, MOCK_JIRA_PROJECTS); any other through JIRA_MCP_URL. A team without its
+    own project uses the deployment's JIRA_PROJECT_KEY, as the push flow does (one team per
+    deployment). `target` (tests) stands in for the MCP server."""
+    if target is None and reads_with_account(settings, team.jira.project, team.jira.site, account):
+        assert account is not None
+        access = account_access(settings, account)
+        if access is None:
+            return JIRA_CONNECT_AGAIN
+        return JiraRestReader(access, transport=transport)
     cloud_id = settings.jira_cloud_id or settings.jira_base_url
     project = team.jira.project or settings.jira_project_key
     missing = [
@@ -278,27 +301,31 @@ def github_readers(
     settings: Settings,
     team: TeamSettings,
     target: Any = None,
-    endpoint: McpEndpoint | str | None = None,
+    endpoints: dict[str, McpEndpoint | str] | None = None,
 ) -> list[GitHubReader] | str:
     """A reader for each of the team's repositories at its ref (default branch when unset), or
-    why there is none. `endpoint` is the team's own connection (github_account.github_endpoint):
-    GitHub's hosted server with its token, or why its token can't be used; None reads
-    GITHUB_MCP_URL with no credentials. `target` (tests) stands in for the server."""
+    why there is none. `endpoints` are the repositories connected with a token
+    (github_account.github_endpoints), read through GitHub's hosted server with it; the demo
+    world's (MOCK_GITHUB_OWNERS) and any without one are read from GITHUB_MCP_URL with no
+    credentials. `target` (tests) stands in for whichever server a repository is read from."""
     repos = code_repos(team, settings)
-    if isinstance(endpoint, str):
-        return f"GitHub is not reachable: {endpoint}"
-    if not (endpoint or settings.github_mcp_url):
-        return "GitHub is not configured: connect GitHub in Settings, or set GITHUB_MCP_URL"
-    server = target or endpoint or settings.github_mcp_url
+    if not repos and not settings.github_mcp_url:
+        return (
+            "GitHub is not configured: connect a repository with its token in Settings, or set "
+            "GITHUB_MCP_URL"
+        )
     if not repos:
         return "GitHub is not configured: no repository is set in workspace settings or GITHUB_REPO"
     readers, problems = [], []
     for repo in repos:
         try:
-            readers.append(GitHubReader(repo.path, server, ref=repo.ref))
-        except ValueError as e:
+            server = repo_target(settings, repo.path, endpoints or {})
+            readers.append(GitHubReader(repo.path, target or server, ref=repo.ref))
+        except Unusable as e:
             problems.append(str(e))
-    return readers or f"GitHub is not configured: {problems[0]}"
+        except ValueError as e:
+            problems.append(f"GitHub is not configured: {e}")
+    return readers or problems[0]
 
 
 def gitlab_readers(

@@ -537,12 +537,13 @@ async def test_a_jira_account_needs_its_team_and_goes_with_it(store):
     assert await store.jira_account(team.id) is None
 
 
-# the team's GitHub account (its token sealed)
+# the GitHub accounts a team's repositories were connected with (their tokens sealed)
 
 
 def github_account(team_id: str, by: Person, **changes) -> GitHubAccount:
     account = GitHubAccount(
         team_id=team_id,
+        repo="acme/checkout",
         login="acme-reader",
         sealed_token="sealed-1",
         connected_by=by.id,
@@ -551,21 +552,33 @@ def github_account(team_id: str, by: Person, **changes) -> GitHubAccount:
     return account.model_copy(update=changes)
 
 
-async def test_a_teams_github_account_is_saved_replaced_and_removed(store):
+async def test_a_repositorys_github_account_is_saved_replaced_and_removed(store):
     team, alex, _, other, _ = await two_teams(store)
-    assert await store.github_account(team.id) is None
+    assert await store.github_accounts(team.id) == []
 
     first = await store.save_github_account(github_account(team.id, alex))
-    assert await store.github_account(team.id) == first
-    assert await store.github_account(other.id) is None
+    assert await store.github_accounts(team.id) == [first]
+    assert await store.github_accounts(other.id) == []
 
     second = github_account(team.id, alex, login="acme-bot", sealed_token="sealed-2")
     await store.save_github_account(second)
-    assert await store.github_account(team.id) == second
+    assert await store.github_accounts(team.id) == [second]
 
-    await store.delete_github_account(team.id)
-    await store.delete_github_account(team.id)  # removing none is not an error
-    assert await store.github_account(team.id) is None
+    await store.delete_github_account(team.id, "acme/checkout")
+    await store.delete_github_account(team.id, "acme/checkout")  # removing none is not an error
+    assert await store.github_accounts(team.id) == []
+
+
+async def test_each_repository_keeps_its_own_account_listed_by_repository(store):
+    team, alex, _, other, _ = await two_teams(store)
+    site = await store.save_github_account(github_account(team.id, alex, repo="acme/website"))
+    checkout = await store.save_github_account(github_account(team.id, alex, login="bot"))
+    theirs = await store.save_github_account(github_account(other.id, alex))
+
+    assert await store.github_accounts(team.id) == [checkout, site]
+    await store.delete_github_account(team.id, "acme/website")
+    assert await store.github_accounts(team.id) == [checkout]
+    assert await store.github_accounts(other.id) == [theirs]
 
 
 async def test_a_github_account_needs_its_team_and_goes_with_it(store):
@@ -577,7 +590,7 @@ async def test_a_github_account_needs_its_team_and_goes_with_it(store):
     await store.delete_team(team.id)
     await store.create_team(team.model_copy(update={"member_ids": []}))
 
-    assert await store.github_account(team.id) is None
+    assert await store.github_accounts(team.id) == []
 
 
 # logins (email and password sign-in; the store only ever sees the hash)

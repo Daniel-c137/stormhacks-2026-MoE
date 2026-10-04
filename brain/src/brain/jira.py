@@ -224,8 +224,10 @@ MAX_DESCRIPTION = 400
 
 
 class JiraReader:
-    """Read-only searches and reads of the configured project. Every call goes through the read
-    allowlist, so a write tool is refused before Jira is reached."""
+    """Read-only searches and reads of the configured project through the Jira MCP server. Every
+    call goes through the read allowlist, so a write tool is refused before Jira is reached.
+    brain.jira_rest.JiraRestReader reads a connected account's project the same way over the
+    site's REST API."""
 
     def __init__(self, config: JiraConfig, *, target: str | MCPServer | None = None):
         self.config = config
@@ -256,16 +258,19 @@ class JiraReader:
         key = key.strip().upper()
         if not re.fullmatch(rf"{re.escape(self.project.upper())}-\d+", key):
             raise JiraError(f"{key} is not an issue of the {self.project} project")
+        issue = self.issue(await self._issue(key))
+        if issue is None:
+            raise JiraError(f"Jira returned no issue for {key}")
+        return issue
+
+    async def _issue(self, key: str) -> object:
         data = await self._call(
             "getJiraIssue",
             {"cloudId": self.config.cloud_id, "issueIdOrKey": key, "fields": ISSUE_FIELDS},
         )
         if isinstance(data, dict) and "key" not in data and isinstance(data.get("result"), dict):
             data = data["result"]
-        issue = self.issue(data)
-        if issue is None:
-            raise JiraError(f"Jira returned no issue for {key}")
-        return issue
+        return data
 
     async def _search(self, jql: str, limit: int, fields: list[str]) -> list[JiraIssue]:
         data = await self._call(

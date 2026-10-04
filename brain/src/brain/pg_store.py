@@ -77,7 +77,7 @@ LOGIN = "person_id, email, password_hash, created_at, updated_at"
 JIRA_ACCOUNT = (
     "team_id, site, project, issue_type_id, email, sealed_token, connected_by, connected_at"
 )
-GITHUB_ACCOUNT = "team_id, login, sealed_token, connected_by, connected_at"
+GITHUB_ACCOUNT = "team_id, repo, login, sealed_token, connected_by, connected_at"
 # Newest first by started_at, or scheduled_start before it starts; ties in creation order.
 NEWEST_MEETING_FIRST = "coalesce(m.started_at, m.scheduled_start) desc nulls last, m.seq"
 REPORT_ROWS = ("meeting_id", "summary", "tasks", "decisions")
@@ -311,28 +311,32 @@ class PostgresStore:
         async with self._tx() as cur:
             await cur.execute("delete from jira_accounts where team_id = %s", [team_id])
 
-    async def github_account(self, team_id: str) -> GitHubAccount | None:
+    async def github_accounts(self, team_id: str) -> list[GitHubAccount]:
         async with self._tx() as cur:
-            row = await self._one(
-                cur, f"select {GITHUB_ACCOUNT} from github_accounts where team_id = %s", [team_id]
+            rows = await self._all(
+                cur,
+                f"select {GITHUB_ACCOUNT} from github_accounts where team_id = %s order by repo",
+                [team_id],
             )
-        return GitHubAccount.model_validate(_utc(row)) if row else None
+        return [GitHubAccount.model_validate(_utc(row)) for row in rows]
 
     async def save_github_account(self, account: GitHubAccount) -> GitHubAccount:
         async with self._tx() as cur:
             await self._team(cur, account.team_id)
             await cur.execute(
                 f"insert into github_accounts ({GITHUB_ACCOUNT})"
-                " values (%(team_id)s, %(login)s, %(sealed_token)s, %(connected_by)s,"
+                " values (%(team_id)s, %(repo)s, %(login)s, %(sealed_token)s, %(connected_by)s,"
                 " %(connected_at)s)"
-                f" on conflict (team_id) do update set {_from_excluded(GITHUB_ACCOUNT)}",
+                f" on conflict (team_id, repo) do update set {_from_excluded(GITHUB_ACCOUNT)}",
                 account.model_dump(),
             )
         return account.model_copy()
 
-    async def delete_github_account(self, team_id: str) -> None:
+    async def delete_github_account(self, team_id: str, repo: str) -> None:
         async with self._tx() as cur:
-            await cur.execute("delete from github_accounts where team_id = %s", [team_id])
+            await cur.execute(
+                "delete from github_accounts where team_id = %s and repo = %s", [team_id, repo]
+            )
 
     # logins
 
