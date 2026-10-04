@@ -5,7 +5,7 @@ Both are suggestions only; a person decides what goes on the agenda.
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, tzinfo
 from typing import Protocol
 from uuid import uuid4
 
@@ -15,6 +15,7 @@ from brain.jira import JiraIssue
 from brain.llm import LLM, LLMError
 from brain.store import NotFound, Store
 from brain.text import one_line
+from brain.zones import local_date
 from contracts import (
     Agenda,
     AgendaItem,
@@ -100,16 +101,18 @@ class AgendaSuggestionDraft(BaseModel):
     items: list[SuggestedItem] = []
 
 
-def meeting_label(meeting: Meeting) -> str:
-    when = meeting.started_at or meeting.scheduled_start
-    return f"{meeting.title} ({when:%Y-%m-%d})" if when else meeting.title
+def meeting_label(meeting: Meeting, zone: tzinfo = UTC) -> str:
+    """The meeting's title and its day in the team's zone."""
+    day = local_date(meeting.started_at or meeting.scheduled_start, zone)
+    return f"{meeting.title} ({day.isoformat()})" if day else meeting.title
 
 
 async def store_inputs(
-    store: Store, team_id: str, meeting_id: str, today: date
+    store: Store, team_id: str, meeting_id: str, today: date, zone: tzinfo = UTC
 ) -> list[SuggestionInput]:
     """Open questions, blockers, risks and flagged decisions from the team's recent reports, then
-    open task drafts and overdue tasks. Never the meeting being planned."""
+    open task drafts and overdue tasks. Never the meeting being planned. `today` and the meetings'
+    days are the team's, in `zone`."""
     meetings = {m.id: m for m in await store.meetings(team_id) if m.id != meeting_id}
     inputs: list[SuggestionInput] = []
     reports = 0
@@ -121,7 +124,7 @@ async def store_inputs(
         except NotFound:
             continue
         reports += 1
-        inputs += report_inputs(meeting, report)
+        inputs += report_inputs(meeting, report, zone)
 
     tasks = 0
     for task in await store.tasks(team_id):
@@ -137,15 +140,16 @@ async def store_inputs(
             details.append(f"{task.key}, {task.jira_status}")
         text = task.title + (f" ({'; '.join(details)})" if details else "")
         source = Source(
-            kind="meeting", label=meeting_label(meeting), meeting_id=meeting.id, t=task.t
+            kind="meeting", label=meeting_label(meeting, zone), meeting_id=meeting.id, t=task.t
         )
         inputs.append(SuggestionInput("Overdue task" if overdue else "Open task", text, source))
     return inputs
 
 
-def report_inputs(meeting: Meeting, report: Report) -> list[SuggestionInput]:
+def report_inputs(meeting: Meeting, report: Report, zone: tzinfo = UTC) -> list[SuggestionInput]:
     def source(t: float | None = None) -> Source:
-        return Source(kind="meeting", label=meeting_label(meeting), meeting_id=meeting.id, t=t)
+        label = meeting_label(meeting, zone)
+        return Source(kind="meeting", label=label, meeting_id=meeting.id, t=t)
 
     inputs = [SuggestionInput("Open question", q, source()) for q in report.open_questions]
     inputs += [SuggestionInput("Blocker", b, source()) for b in report.blockers]

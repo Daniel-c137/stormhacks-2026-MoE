@@ -16,6 +16,7 @@ from brain.config import Settings
 from brain.integrations import McpReader, McpToolError, ToolRefused, search_words
 from brain.report import ProcessedMeeting
 from brain.report.extraction import clock
+from brain.zones import local_date, team_zone
 from contracts import TaskDraft, TaskPushRequest, TaskPushResult
 
 
@@ -274,7 +275,8 @@ def apply_results(tasks: list[TaskDraft], results: list[TaskPushResult]) -> list
 
 
 def describe(draft: TaskDraft, meeting: ProcessedMeeting, approved_by: str) -> str:
-    on = f" ({meeting.started_at:%Y-%m-%d})" if meeting.started_at else ""
+    day = local_date(meeting.started_at, team_zone(meeting.timezone))
+    on = f" ({day.isoformat()})" if day else ""
     at = f" at {clock(draft.t)}" if draft.t is not None else ""
     names = {person.id: person.name for person in meeting.members}
     parts = [draft.description] if draft.description else []

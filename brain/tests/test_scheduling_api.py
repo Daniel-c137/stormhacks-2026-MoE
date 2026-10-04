@@ -397,3 +397,14 @@ def test_directory_limit_caps_the_results(client_as):
 @pytest.mark.parametrize("limit", [0, 101])
 def test_directory_limit_must_be_sane(client_as, limit):
     assert client_as(ALEX).get("/directory", params={"limit": limit}).status_code == 422
+
+
+def test_the_start_time_is_told_in_the_teams_time_zone(client_as):
+    alex = client_as(ALEX)
+    team_settings = alex.get("/settings").json() | {"timezone": "America/Vancouver"}
+    assert alex.put("/settings", json=team_settings).status_code == 200
+    meeting = schedule(alex)
+
+    detail = client_as(SARAH).post(f"/meetings/join/{meeting['code']}").json()["detail"]
+
+    assert "2026-10-05T09:30:00-07:00" in detail  # START, 16:30 UTC

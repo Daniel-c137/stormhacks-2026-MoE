@@ -1,5 +1,6 @@
 """Profile, team and workspace settings over HTTP."""
 
+import pytest
 from api_support import ALEX, OUTSIDER, SARAH, TEAM
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
@@ -140,6 +141,7 @@ def settings_body(**changes) -> dict:
         "sensitivity": "quiet",
         "interrupt_minutes": 3,
         "who_can_allow": "host",
+        "timezone": "America/Vancouver",
     }
     return body | changes
 
@@ -151,6 +153,7 @@ def test_settings_default_until_saved(client_as):
     assert settings["sensitivity"] == "balanced"
     assert settings["interrupt_minutes"] == 5
     assert settings["who_can_allow"] == "everyone"
+    assert settings["timezone"] == "UTC"
 
 
 def test_any_member_saves_settings_that_teammates_then_read(client_as):
@@ -168,6 +171,7 @@ def test_any_member_saves_settings_that_teammates_then_read(client_as):
         3,
         "host",
     )
+    assert saved["timezone"] == "America/Vancouver"
 
 
 def test_settings_are_always_saved_for_the_callers_own_team(client_as):
@@ -208,3 +212,26 @@ def test_invalid_settings_are_rejected(client_as):
         assert alex.put("/settings", json=settings_body(**bad)).status_code == 422, bad
     assert alex.put("/settings", json=settings_body(interrupt_minutes=1)).status_code == 200
     assert alex.put("/settings", json=settings_body(interrupt_minutes=15)).status_code == 200
+
+
+@pytest.mark.parametrize(
+    "zone", ["Mars/Olympus_Mons", "", "PST", "america/vancouver", "../../etc/passwd", "Vancouver"]
+)
+def test_a_time_zone_that_is_not_an_iana_name_is_rejected(client_as, zone):
+    alex = client_as(ALEX)
+
+    response = alex.put("/settings", json=settings_body(timezone=zone))
+
+    assert response.status_code == 422, zone
+    assert "time zone" in response.json()["detail"]
+    assert alex.get("/settings").json()["timezone"] == "UTC"
+
+
+def test_a_time_zone_is_saved_trimmed_and_utc_is_accepted(client_as):
+    alex = client_as(ALEX)
+
+    assert (
+        alex.put("/settings", json=settings_body(timezone=" Europe/Berlin ")).json()["timezone"]
+        == "Europe/Berlin"
+    )
+    assert alex.put("/settings", json=settings_body(timezone="UTC")).json()["timezone"] == "UTC"

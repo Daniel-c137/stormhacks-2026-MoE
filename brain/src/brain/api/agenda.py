@@ -31,6 +31,8 @@ from ..config import Settings
 from ..jira import JiraError, JiraReader, JiraUnavailable, jira_config
 from ..llm import LLM, LLMError
 from ..store import Conflict, Store
+from ..zones import today as team_today
+from ..zones import zone_of
 from .deps import current_user, get_llm, get_settings, get_store, team_meeting
 
 router = APIRouter(tags=["agenda"])
@@ -138,8 +140,9 @@ async def suggest_agenda(
     """Proposed items from the team's earlier reports, open and overdue tasks and unfinished
     Jira work, each with why and its sources. Nothing is saved."""
     meeting = await team_meeting(store, user, meeting_id)
-    today = datetime.now(UTC).date()
-    inputs = await store_inputs(store, meeting.team_id, meeting.id, today)
+    zone = await zone_of(store, meeting.team_id)
+    today = team_today(zone)
+    inputs = await store_inputs(store, meeting.team_id, meeting.id, today, zone)
     unavailable = [GITHUB_NOT_READ]
     try:
         issues = await JiraReader(jira_config(settings)).unfinished()

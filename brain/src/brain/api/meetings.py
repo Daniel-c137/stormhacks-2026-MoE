@@ -23,6 +23,7 @@ from ..config import Settings
 from ..livekit_rooms import Rooms
 from ..livekit_tokens import participant_token
 from ..store import Conflict, NotFound, Store
+from ..zones import zone_of
 from .deps import (
     ask_agent,
     current_user,
@@ -136,7 +137,9 @@ async def join_meeting(
         raise HTTPException(status_code=403, detail="Only team members can join this meeting")
     if meeting.status == "scheduled":
         if meeting.host_id != user.id:
-            when = meeting.scheduled_start.isoformat() if meeting.scheduled_start else "later"
+            start = meeting.scheduled_start
+            zone = await zone_of(store, team.id)
+            when = start.astimezone(zone).isoformat() if start else "later"
             raise HTTPException(
                 status_code=409, detail=f"This meeting has not started yet; it starts at {when}"
             )

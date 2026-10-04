@@ -346,6 +346,7 @@ async def test_settings_default_to_the_teams_repo_and_project_until_saved(store)
         github=GitHubSettings(repo="acme/checkout"),
         jira=JiraSettings(project="DS"),
     )
+    assert settings.timezone == "UTC"
     with pytest.raises(NotFound):
         await store.settings(new_id())
 
@@ -358,12 +359,14 @@ async def test_saved_settings_are_read_back_per_team(store):
         jira=JiraSettings(site="acme.atlassian.net", project="DS"),
         voice="voice-1",
         sensitivity="quiet",
+        timezone="America/Vancouver",
     )
 
     assert await store.save_settings(saved) == saved
 
     assert await store.settings(team.id) == saved
     assert (await store.settings(other.id)).voice is None
+    assert (await store.settings(other.id)).timezone == "UTC"
     with pytest.raises(NotFound):
         await store.save_settings(saved.model_copy(update={"team_id": new_id()}))
 

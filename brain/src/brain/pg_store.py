@@ -241,7 +241,7 @@ class PostgresStore:
             row = await self._one(
                 cur,
                 "select team_id, github, jira, voice, wake_phrase, sensitivity,"
-                " interrupt_minutes, who_can_allow from team_settings where team_id = %s",
+                " interrupt_minutes, who_can_allow, timezone from team_settings where team_id = %s",
                 [team_id],
             )
         if row is None:
@@ -258,14 +258,14 @@ class PostgresStore:
         async with self._tx() as cur:
             await cur.execute(
                 "insert into team_settings (team_id, github, jira, voice, wake_phrase,"
-                " sensitivity, interrupt_minutes, who_can_allow)"
+                " sensitivity, interrupt_minutes, who_can_allow, timezone)"
                 " values (%(team_id)s, %(github)s, %(jira)s, %(voice)s, %(wake_phrase)s,"
-                " %(sensitivity)s, %(interrupt_minutes)s, %(who_can_allow)s)"
+                " %(sensitivity)s, %(interrupt_minutes)s, %(who_can_allow)s, %(timezone)s)"
                 " on conflict (team_id) do update set github = excluded.github,"
                 " jira = excluded.jira, voice = excluded.voice,"
                 " wake_phrase = excluded.wake_phrase, sensitivity = excluded.sensitivity,"
                 " interrupt_minutes = excluded.interrupt_minutes,"
-                " who_can_allow = excluded.who_can_allow",
+                " who_can_allow = excluded.who_can_allow, timezone = excluded.timezone",
                 values,
             )
         return settings.model_copy(deep=True)
