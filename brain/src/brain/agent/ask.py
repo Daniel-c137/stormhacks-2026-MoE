@@ -316,11 +316,26 @@ def number(
     return evidence, total - len(kept)
 
 
+FIGURES = re.compile(r"[\w.]*\d[\w.]*")
+NEGATIONS = re.compile(r"\b(?:not|no|never|none|nothing|nobody|neither|nor|cannot)\b|n't\b")
+
+
 def backed_by(text: str, history: Sequence[AskTurn]) -> bool:
-    """Whether most of the answer's words were already said in the conversation."""
-    said = set().union(*(terms(turn.text) for turn in history)) if history else set()
-    words = terms(text)
-    return bool(said and words) and len(words & said) * 2 >= len(words)
+    """Whether the answer restates what the agent itself said earlier: nearly all its words, and
+    every figure (version, date, count) and negation, were in the agent's earlier turns. The
+    asker's own turns never count, so a premise in a question cannot back an answer."""
+    said = " ".join(turn.text for turn in history if turn.role == "agent").casefold()
+    answer = text.casefold()
+    words, known = terms(answer), terms(said)
+    if not (words and known) or len(words & known) < 0.8 * len(words):
+        return False
+    return figures(answer) <= figures(said) and set(NEGATIONS.findall(answer)) <= set(
+        NEGATIONS.findall(said)
+    )
+
+
+def figures(text: str) -> set[str]:
+    return {f.strip(".") for f in FIGURES.findall(text)}
 
 
 MARKERS = re.compile(r"\s*\[\s*e\d+(?:\s*,\s*e\d+)*\s*\]", re.IGNORECASE)
@@ -442,7 +457,7 @@ def render_plan_prompt(
     if recent:
         lines += ["", "Recent transcript of this meeting ([time] speaker: text):"]
         lines += fenced(f"[{clock(s.t_start)}] {speaker(s, agent)}: {clip(s.text)}" for s in recent)
-    lines += ["", f"Question: {unfence(question.text)}", "", f"Tools (at most {max_calls} calls):"]
+    lines += ["", f"Question: {oneline(question.text)}", "", f"Tools (at most {max_calls} calls):"]
     lines += [render_tool(spec, toolbox.unavailable(spec.name)) for spec in toolbox.specs()]
     return "\n".join(lines)
 
@@ -456,7 +471,7 @@ def render_tool(spec: ToolSpec, unavailable: str | None) -> str:
 def render_answer_prompt(
     context: list[str], question: Question, evidence: list[Evidence], unavailable: list[str]
 ) -> str:
-    lines = [*context, "", f"Question: {unfence(question.text)}", ""]
+    lines = [*context, "", f"Question: {oneline(question.text)}", ""]
     if evidence:
         lines.append("Evidence ([id] source: content):")
         lines += fenced(
