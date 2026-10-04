@@ -51,6 +51,7 @@ def main(argv: list[str] | None = None) -> int:
 def run_report(args: argparse.Namespace) -> int:
     meeting = load_transcript(args.transcript, started_at=args.date)
     llm: LLM
+    source: str | None
     if args.mock_response:
         scripted = ReportExtraction.model_validate_json(args.mock_response.read_text())
         llm = MockLLM(structured={ReportExtraction: scripted})
@@ -60,12 +61,13 @@ def run_report(args: argparse.Namespace) -> int:
             llm = make_llm()
         except LLMError as e:
             sys.exit(f"brain report: {e}")
-        source = "Gemini"
+        source = None
 
     try:
         report = asyncio.run(build_report(llm, meeting))
     except (LLMError, ValueError) as e:
         sys.exit(f"brain report: {e}")
+    source = source or f"Gemini {llm.last_model}"
 
     out = args.out or args.transcript.with_suffix(".review.json")
     review = ProcessedMeeting(
