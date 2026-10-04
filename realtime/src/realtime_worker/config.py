@@ -34,9 +34,10 @@ class Settings(BaseSettings):
     brain_url: str | None = None
     brain_internal_token: str | None = None
 
-    # The brain expects its ticks every 30-60 s, never per utterance; it rate-limits the model
-    # calls behind them itself.
-    agenda_tick_seconds: float = Field(default=30, gt=0)
+    # Timer ticks, never per utterance; the brain rate-limits the model calls behind them itself.
+    # The agenda's is short so a finished item is ticked within seconds: the brain asks its model
+    # only once a tick's new stretch holds enough talk.
+    agenda_tick_seconds: float = Field(default=10, gt=0)
     fact_check_tick_seconds: float = Field(default=60, gt=0)
     # A spoken answer stops after the last whole sentence within this many characters.
     spoken_answer_max_chars: int = Field(default=600, gt=0)

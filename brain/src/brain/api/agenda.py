@@ -95,6 +95,10 @@ async def update_agenda(
                 changes["status"] = edit.status
                 if edit.status != "covered":
                     changes |= {"covered_by": None, "covered_t": None}
+                    if before is not None and before.status == "covered":
+                        # Reopened by a person: the tracker leaves it open until it comes up
+                        # again, whatever was said about it before.
+                        changes["last_discussed_t"] = None
                 elif before is None or before.status != "covered":  # this person checked it
                     started = meeting.started_at is not None
                     changes |= {

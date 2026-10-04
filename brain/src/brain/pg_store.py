@@ -648,7 +648,7 @@ class PostgresStore:
             items = await self._all(
                 cur,
                 "select id, title, why, owner_id, sources, status, minutes, added_by,"
-                " discussed_s, nudged_t, covered_by, covered_t from agenda_items"
+                " discussed_s, nudged_t, last_discussed_t, covered_by, covered_t from agenda_items"
                 " where meeting_id = %s order by ord",
                 [meeting_id],
             )
@@ -700,11 +700,11 @@ class PostgresStore:
         if agenda.items:
             await cur.executemany(
                 "insert into agenda_items (meeting_id, ord, id, title, why, owner_id,"
-                " sources, status, minutes, added_by, discussed_s, nudged_t, covered_by,"
-                " covered_t)"
+                " sources, status, minutes, added_by, discussed_s, nudged_t, last_discussed_t,"
+                " covered_by, covered_t)"
                 " values (%(meeting_id)s, %(ord)s, %(id)s, %(title)s, %(why)s, %(owner_id)s,"
                 " %(sources)s, %(status)s, %(minutes)s, %(added_by)s, %(discussed_s)s,"
-                " %(nudged_t)s, %(covered_by)s, %(covered_t)s)",
+                " %(nudged_t)s, %(last_discussed_t)s, %(covered_by)s, %(covered_t)s)",
                 [
                     self._agenda_item(agenda.meeting_id, i, item)
                     for i, item in enumerate(agenda.items)

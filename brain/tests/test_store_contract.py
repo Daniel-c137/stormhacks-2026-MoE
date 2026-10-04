@@ -1178,7 +1178,13 @@ async def test_an_agendas_timekeeping_state_is_saved_with_it(store):
     tracked = Agenda(
         meeting_id=meeting.id,
         items=[
-            AgendaItem(id="a1", title="Waitlist email", minutes=10, discussed_s=312.5),
+            AgendaItem(
+                id="a1",
+                title="Waitlist email",
+                minutes=10,
+                discussed_s=312.5,
+                last_discussed_t=1240.5,
+            ),
             AgendaItem(id="a2", title="Refund policy", minutes=5, nudged_t=1260.0),
             AgendaItem(
                 id="a3", title="Launch date", status="covered", covered_by="agent", covered_t=95.0
@@ -1196,6 +1202,7 @@ async def test_an_agendas_timekeeping_state_is_saved_with_it(store):
     assert (saved.current_item_id, saved.tracked_until) == ("a1", 1265.25)
     assert [(i.discussed_s, i.nudged_t) for i in saved.items][:2] == [(312.5, None), (0, 1260.0)]
     assert (saved.items[2].covered_by, saved.items[2].covered_t) == ("agent", 95.0)
+    assert [i.last_discussed_t for i in saved.items] == [1240.5, None, None]
 
 
 async def test_a_conditional_save_goes_through_only_at_the_revision_it_read(store):
