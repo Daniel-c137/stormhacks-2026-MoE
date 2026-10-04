@@ -1,6 +1,7 @@
 """Polaris in one meeting: the Ask button, deliberate invocations to the brain, the shared answer
 card and what people choose to do with it, public chat, and the timekeeping and fact-check ticks.
-Polaris never speaks unless someone clicks Speak, and private things go only to their person."""
+Polaris never speaks unless someone clicks Speak, and private things go only to their person: a
+fact-check is a private chat message to whoever made the claim."""
 
 import asyncio
 import logging
@@ -14,7 +15,6 @@ from contracts import (
     AgendaItem,
     AgendaNudge,
     AgendaTrackResponse,
-    AgentState,
     Answer,
     AskSignal,
     ChatMessage,
@@ -29,6 +29,7 @@ from contracts import (
     TranscriptSegment,
     WorkerMeetingResponse,
 )
+from realtime_worker import meeting_agent
 from realtime_worker.brain_client import BrainRejected, BrainUnavailable
 from realtime_worker.elevenlabs_tts import SpeechFailed
 from realtime_worker.meeting_agent import MeetingAgent
@@ -226,17 +227,22 @@ def agenda_response(*, current: str | None = None, nudges=()) -> AgendaTrackResp
     )
 
 
-def check(n: int, visibility="public", recipient_id=None) -> FactCheck:
-    return FactCheck(
-        id=f"f-{n}",
-        claim="PR 41 is released",
-        speaker_name="Bob",
-        verdict="contradicted",
-        confidence=0.9,
-        severity="high",
-        visibility=visibility,
-        recipient_id=recipient_id,
-    )
+PR_41 = Source(kind="github_pr", label="dropsubs/app#41", url="https://github.com/d/a/pull/41")
+RELEASE = Source(kind="github_release", label="dropsubs/app@v0.9.3")
+
+
+def check(n: int, recipient_id: str | None = "u-sarah", **fields) -> FactCheck:
+    defaults = {
+        "claim": "PR 41 is released",
+        "speaker_name": "Sarah Kim",
+        "verdict": "contradicted",
+        "confidence": 0.9,
+        "severity": "high",
+        "finding": "PR #41 was merged after the latest release, v0.9.3.",
+        "sources": [PR_41, RELEASE],
+        "t": 75.0,
+    }
+    return FactCheck(id=f"f-{n}", recipient_id=recipient_id, **(defaults | fields))
 
 
 async def until(condition, timeout: float = 1.0) -> None:
@@ -683,52 +689,100 @@ async def test_an_unchanged_agenda_is_not_published_again(agent, bus, brain):
     assert len(bus.on(Topic.AGENDA)) == 1
 
 
-async def test_fact_checks_go_to_everyone_or_only_to_their_participant(agent, bus, brain):
+async def test_a_contradicted_check_is_one_private_chat_message_to_the_claimant(
+    agent, bus, brain, chat, tts
+):
+    brain.fact_ticks = [FactCheckResponse(checks=[check(1)])]
+
+    await agent.tick_fact_check()
+
+    [(message, to)] = bus.on(Topic.PRIVATE_CHAT)
+    assert to == ["u-sarah"]
+    assert message.text == (
+        'You said "PR 41 is released" (at 01:15). The records disagree: PR #41 was merged after '
+        "the latest release, v0.9.3.\n"
+        "Sources: dropsubs/app#41 (https://github.com/d/a/pull/41), dropsubs/app@v0.9.3"
+    )
+    assert (message.meeting_id, message.recipient_id, message.visibility) == (
+        MEETING,
+        "u-sarah",
+        "private",
+    )
+    assert (message.sender_id, message.sender_name, message.is_agent) == (
+        AGENT_PARTICIPANT_ID,
+        "Polaris",
+        True,
+    )
+    assert [(topic, to) for topic, _, to in bus.published] == [
+        (Topic.PRIVATE_CHAT, ["u-sarah"])
+    ]  # nothing to the room, no raised hand
+    assert brain.chat == [] and chat.sent == []  # never stored, never in public chat
+    assert tts.calls == []  # never spoken
+
+
+async def test_each_check_goes_only_to_its_own_claimant(agent, bus, brain):
+    brain.fact_ticks = [
+        FactCheckResponse(checks=[check(1), check(2, "u-alex", claim="DS-104 is closed")])
+    ]
+
+    await agent.tick_fact_check()
+
+    sent = [(m.recipient_id, to, m.text.split(" (at")[0]) for m, to in bus.on(Topic.PRIVATE_CHAT)]
+    assert sent == [
+        ("u-sarah", ["u-sarah"], 'You said "PR 41 is released"'),
+        ("u-alex", ["u-alex"], 'You said "DS-104 is closed"'),
+    ]
+
+
+async def test_an_unverified_check_says_it_could_not_be_confirmed(agent, bus, brain):
     brain.fact_ticks = [
         FactCheckResponse(
             checks=[
-                check(1),
-                check(2, visibility="private", recipient_id="u-sarah"),
-                check(3, visibility="private", recipient_id=None),  # nobody to send it to
+                check(1, verdict="unknown", finding="No release lists PR 41.", sources=[RELEASE]),
+                check(2, verdict="unknown", finding="", sources=[], t=3725.0),
             ]
         )
     ]
 
     await agent.tick_fact_check()
 
-    assert [(c.id, to) for c, to in bus.on(Topic.FACT_CHECK)] == [
-        ("f-1", None),
-        ("f-2", ["u-sarah"]),
+    assert [m.text for m, _ in bus.on(Topic.PRIVATE_CHAT)] == [
+        'You said "PR 41 is released" (at 01:15). I couldn\'t confirm this: No release lists PR '
+        "41.\nSources: dropsubs/app@v0.9.3",
+        "You said \"PR 41 is released\" (at 1:02:05). I couldn't confirm this: the team's records "
+        "don't settle it.",
     ]
 
 
-async def test_a_raised_hand_from_a_fact_check_is_shown_when_polaris_is_idle(agent, bus, brain):
-    hand = AgentState(state="hand_raised", detail="A claim needs checking", hand_urgency="critical")
-    brain.fact_ticks = [FactCheckResponse(checks=[check(1)], agent_state=hand)]
+async def test_a_check_with_no_claimant_is_dropped(agent, bus, brain, caplog):
+    brain.fact_ticks = [FactCheckResponse(checks=[check(1, recipient_id=None)])]
 
-    await agent.tick_fact_check()
+    with caplog.at_level(logging.WARNING):
+        await agent.tick_fact_check()
 
-    assert bus.on(Topic.AGENT_STATE) == [(hand, None)]
+    assert bus.published == []
+    assert "f-1" in caplog.text and "PR 41" not in caplog.text
 
 
-async def test_a_raised_hand_never_interrupts_a_spoken_answer(agent, bus, brain, speaker):
+def test_only_what_someone_got_wrong_or_unconfirmed_is_worded():
+    assert meeting_agent.fact_check_text(check(1, verdict="supported")) is None
+    contradicted = meeting_agent.fact_check_text(check(1, finding="", sources=[], t=None))
+    assert contradicted == 'You said "PR 41 is released". The records disagree with it.'
+
+
+async def test_a_fact_check_never_changes_what_polaris_is_doing(agent, bus, brain, speaker):
     card = await card_for(agent, bus)
     speaker.hold = asyncio.Event()
     task = asyncio.create_task(bus.deliver(Topic.RESPONSE_ACTION, act(card, "speak"), "u-sarah"))
     await speaker.started.wait()
-    brain.fact_ticks = [
-        FactCheckResponse(
-            checks=[check(1)],
-            agent_state=AgentState(state="hand_raised", detail="x", hand_urgency="critical"),
-        )
-    ]
+    brain.fact_ticks = [FactCheckResponse(checks=[check(1)])]
 
     await agent.tick_fact_check()
     speaker.hold.set()
     await task
 
     assert bus.states() == ["working", "hand_raised", "speaking", "idle"]
-    assert [c.id for c, _ in bus.on(Topic.FACT_CHECK)] == ["f-1"]  # the check itself still shows
+    assert [to for _, to in bus.on(Topic.PRIVATE_CHAT)] == [["u-sarah"]]
 
 
 async def test_a_failing_tick_is_logged_and_the_next_one_tries_again(
@@ -742,7 +796,7 @@ async def test_a_failing_tick_is_logged_and_the_next_one_tries_again(
 
     with caplog.at_level(logging.WARNING):
         make_agent(agenda_tick_seconds=0.01, fact_check_tick_seconds=0.01)
-        await until(lambda: bus.on(Topic.AGENDA) and bus.on(Topic.FACT_CHECK))
+        await until(lambda: bus.on(Topic.AGENDA) and bus.on(Topic.PRIVATE_CHAT))
 
     assert brain.agenda_calls >= 2 and brain.fact_calls >= 2
     assert "tick" in caplog.text.lower()

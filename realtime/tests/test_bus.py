@@ -143,7 +143,7 @@ async def test_the_sender_comes_from_livekit_not_from_the_payload(bus, received)
 
 @pytest.mark.parametrize(
     "topic",
-    ["transcript", "agent.state", "agent.card", "agent.fact_check", "agent.agenda"],
+    ["transcript", "agent.state", "agent.card", "agent.agenda"],
 )
 async def test_agent_topics_from_a_participant_are_ignored(bus, received, topic):
     """Only the agent publishes these; a participant sending one is forging it."""

@@ -3,10 +3,11 @@
 Polaris reasons only when someone asks deliberately: by name, with the Ask button or with a public
 @mention. A spoken question's answer is a shared card that stays silent until a participant
 chooses Speak, Post in chat or Dismiss; a chat mention is answered in chat. On timers it asks the
-brain to keep time against the agenda and to fact-check, and publishes what comes back, a private
-fact-check only to its participant. Someone joining 5 minutes or more late, or back after 5 minutes
-or more away, gets a private catch-up from the brain as a chat message only to them. People's
-private chat never passes through here.
+brain to keep time against the agenda and to fact-check. The agenda goes to the room; a fact-check
+goes only to whoever made the claim, as a private chat message from the agent that is never
+stored, spoken or shown to anyone else. Someone joining 5 minutes or more late, or back after 5
+minutes or more away, gets a private catch-up from the brain the same way, only to them. Other
+people's private chat never passes through here.
 """
 
 import asyncio
@@ -24,13 +25,15 @@ from contracts import (
     Answer,
     AskSignal,
     ChatMessage,
+    FactCheck,
     Invocation,
     ResponseAction,
     ResponseCard,
+    Source,
     Topic,
     TranscriptSegment,
 )
-from contracts.agent import AgentStateName, ResponseCardStatus
+from contracts.agent import AgentStateName, ResponseCardStatus, Verdict
 
 from .brain_client import BrainClient
 from .elevenlabs_tts import spoken_text
@@ -384,17 +387,15 @@ class MeetingAgent:
             await self.bus.publish(Topic.AGENDA_NUDGE, nudge)
 
     async def tick_fact_check(self) -> None:
+        """Each check goes to whoever made the claim and nobody else, as a private chat message
+        from the agent. It is never stored, spoken or broadcast."""
         checked = await self.brain.fact_check(self.meeting_id)
         for check in checked.checks:
-            if check.visibility == "public":
-                await self.bus.publish(Topic.FACT_CHECK, check)
-            elif check.recipient_id:
-                await self.bus.publish(Topic.FACT_CHECK, check, to=[check.recipient_id])
-            else:
-                log.warning("Dropped private fact-check %s with no recipient", check.id)
-        hand = checked.agent_state
-        if hand and self.state.current.state == "idle" and self.state.can_move(hand.state):
-            await self.state.move(hand)
+            if not check.recipient_id:
+                log.warning("Dropped fact-check %s: nobody to send it to", check.id)
+                continue
+            if (text := fact_check_text(check)) is not None:
+                await self.send_private(check.recipient_id, text)
 
     async def _every(self, seconds: float, tick: Callable[[], Awaitable[None]], name: str):
         while True:
@@ -436,11 +437,45 @@ def chat_text(answer: Answer) -> str:
     """The answer with its evidence, as Polaris posts it in public chat."""
     lines = [answer.text.strip()]
     if answer.sources:
-        cited = ", ".join(f"{s.label} ({s.url})" if s.url else s.label for s in answer.sources)
-        lines.append(f"Sources: {cited}")
+        lines.append(f"Sources: {cited(answer.sources)}")
     if answer.unavailable:
         lines.append(f"Unavailable: {', '.join(answer.unavailable)}")
     return "\n\n".join(lines)
+
+
+# How a fact-check opens, per verdict, and what it says when the brain gave no finding. A
+# supported claim is not worded: nobody said anything wrong.
+FACT_CHECK_LEADS: dict[Verdict, tuple[str, str]] = {
+    "contradicted": ("The records disagree", "The records disagree with it"),
+    "unknown": (
+        "I couldn't confirm this",
+        "I couldn't confirm this: the team's records don't settle it",
+    ),
+}
+
+
+def fact_check_text(check: FactCheck) -> str | None:
+    """The private message to whoever made the claim: what they said and when, what the records
+    show, and the sources. None for a verdict that is not worth telling."""
+    if check.verdict not in FACT_CHECK_LEADS:
+        return None
+    lead, bare = FACT_CHECK_LEADS[check.verdict]
+    when = f" (at {clock(check.t)})" if check.t is not None else ""
+    finding = " ".join(check.finding.split()).rstrip(".")
+    records = f"{lead}: {finding}" if finding else bare
+    said = f'You said "{check.claim}"{when}. {records}.'
+    return f"{said}\nSources: {cited(check.sources)}" if check.sources else said
+
+
+def cited(sources: list[Source]) -> str:
+    return ", ".join(f"{s.label} ({s.url})" if s.url else s.label for s in sources)
+
+
+def clock(t: float) -> str:
+    """Seconds from the meeting start as mm:ss, or h:mm:ss after the first hour."""
+    hours, rest = divmod(int(t), 3600)
+    minutes, seconds = divmod(rest, 60)
+    return f"{hours}:{minutes:02}:{seconds:02}" if hours else f"{minutes:02}:{seconds:02}"
 
 
 def clip(text: str) -> str:

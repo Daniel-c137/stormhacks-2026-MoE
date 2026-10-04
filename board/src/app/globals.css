@@ -320,30 +320,12 @@
   .card-acts { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
   .card-acts .btn-outline { background: var(--soft); }
 
-  /* Fact-checks. The raised hand is the agent wanting attention (coral), and only a visual cue. A
-     private check is a quiet card for the one person it is about. */
-  .hand-up { padding: 0 12px 0 14px; gap: 6px; }
-  .hand-up .lead { margin-right: 0; }
-  .verdict { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; background: var(--soft-2); color: var(--ink-2); }
-  .verdict[data-verdict="contradicted"] { background: var(--coral-tint); color: var(--coral-text); }
-  .verdict[data-verdict="supported"] { background: var(--ok-soft); color: var(--ok); }
-  .fc-body { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-  .fc-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-  .fc-sev { font-size: 12px; font-weight: 700; color: var(--coral-text); }
-  .fc-t { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
-  .fc-claim { font-size: 15px; line-height: 1.5; font-weight: 600; overflow-wrap: anywhere; }
-  .fc-body .source { background: var(--soft); }
-  .fc-none { font-size: 13px; color: var(--muted); }
-  .fc-conf { font-size: 12.5px; color: var(--muted); }
   .room-notes { position: absolute; top: 76px; right: 18px; z-index: 4; width: min(360px, calc(100% - 36px)); display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
   .room-notes > * { pointer-events: auto; animation: pop .14s ease-out; }
   .nudge { display: flex; align-items: flex-start; gap: 10px; padding: 10px 6px 10px 14px; border-radius: 14px; background: var(--card); box-shadow: 0 0 0 1px var(--line-2), 0 10px 24px rgba(0,0,0,.4); font-size: 13.5px; font-weight: 600; line-height: 1.45; }
   .nudge > i { margin-top: 2px; color: var(--note-fg); }
   .nudge > span { flex: 1; min-width: 0; }
   .nudge .icon-btn { margin: -4px 0; }
-  .fc-quiet { padding: 10px 12px 14px 14px; border-radius: 16px; background: var(--card); box-shadow: 0 0 0 1px var(--line), 0 10px 24px rgba(0,0,0,.35); max-height: 46vh; overflow: auto; }
-  .fc-quiet-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: -2px -4px 4px 0; }
-  .fc-quiet-from { font-size: 12px; font-weight: 700; color: var(--muted); }
 
   /* Speaker view: whoever is talking (or sharing) fills the stage, everyone else stacks in a filmstrip. */
   .stage { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
@@ -410,13 +392,8 @@
   .chat-tab[aria-selected="true"] { border-color: var(--primary); }
   .chat-tab[aria-selected="false"] { color: var(--muted); }
   .chat-tab[aria-selected="false"]:hover { color: var(--ink); }
-  .tab-n { display: inline-grid; place-items: center; min-width: 20px; height: 20px; margin-left: 6px; padding: 0 6px; border-radius: 999px; background: var(--soft-2); font-family: var(--font-ui); font-size: 11.5px; font-weight: 700; vertical-align: 2px; }
   .chat-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .chat-pane[hidden] { display: none; }
-  .fc-list { display: flex; flex-direction: column; gap: 10px; }
-  .fc-item { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 16px; background: var(--soft); }
-  .fc-item[data-hand="true"] { box-shadow: inset 0 0 0 1.5px var(--coral); }
-  .fc-head .msg-ts { margin-left: auto; }
   .la { display: flex; flex-direction: column; gap: 12px; }
   .la-now { font-size: 13.5px; color: var(--muted); }
   .la-now b { color: var(--ink); }

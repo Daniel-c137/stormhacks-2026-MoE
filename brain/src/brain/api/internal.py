@@ -287,8 +287,8 @@ async def fact_check_tick(
 ) -> FactCheckResponse:
     """The worker's timer tick (every 30-60 s, never per utterance) for a live meeting. Reads the
     final segments since the last tick from the store, so the worker sends none. The worker
-    publishes each check on Topic.FACT_CHECK, a private one only to its recipient, and
-    agent_state on Topic.AGENT_STATE; nothing is spoken."""
+    sends each check only to its recipient, whoever made the claim, as a private chat message;
+    nothing goes to the room and nothing is spoken."""
     try:
         meeting = await store.meeting(meeting_id)
     except NotFound:

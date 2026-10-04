@@ -142,7 +142,7 @@ class ReportPipeline:
             meeting, transcript, agenda = await self._read(meeting_id)
             zone = await zone_of(self.store, meeting.team_id)
             superseded: list[Decision] = []
-            # The public fact-checks from the live meeting; private ones were never stored.
+            # The fact-checks the live meeting kept; those only sent to a speaker never were.
             fact_checks = await self.store.fact_checks(meeting_id)
             if transcript.final_segments():
                 progress = await self._at(progress, WRITE)

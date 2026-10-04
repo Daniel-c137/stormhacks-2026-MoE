@@ -5,7 +5,6 @@ import {
   type Agenda,
   type ChatMessage,
   type CodeSnippet,
-  type FactCheck,
   type Participant,
   type Person,
   type Source,
@@ -19,7 +18,6 @@ import { Mark } from "@/components/ui/Mark";
 import { Sources, Unavailable } from "@/components/ui/Sources";
 import { useDismiss } from "@/hooks/useDismiss";
 import { fmtClock, initialsOf } from "@/lib/format";
-import { FactCheckBody } from "./FactCheckView";
 import { LiveAgenda } from "./LiveAgenda";
 
 /** A chat message plus what an agent answer carries with it. */
@@ -39,8 +37,6 @@ export interface SidePanelProps {
   error: string;
   agenda: Agenda | null;
   agendaError: Error | null;
-  /** This meeting's fact-checks this participant may see, oldest first. */
-  checks: FactCheck[];
   /** to=null sends to everyone; otherwise a private message to that participant (or the agent). */
   onSend: (text: string, to: string | null) => void;
   onClose: () => void;
@@ -48,11 +44,10 @@ export interface SidePanelProps {
 
 const PREVIEW_LINES = 4;
 
-type Tab = "chat" | "agenda" | "checks";
+type Tab = "chat" | "agenda";
 const TABS: [Tab, string][] = [
   ["chat", "Chat"],
   ["agenda", "Agenda"],
-  ["checks", "Fact-checks"],
 ];
 
 function ChatSnippet({ snippet }: { snippet: CodeSnippet }) {
@@ -84,23 +79,8 @@ function ChatSnippet({ snippet }: { snippet: CodeSnippet }) {
   );
 }
 
-/** The meeting's fact-checks, newest first. */
-function CheckList({ checks, me }: { checks: FactCheck[]; me: Person }) {
-  const agent = identity.agent_name;
-  if (!checks.length) return <p className="msgs-empty">No fact-checks yet. {agent} checks technical claims as the meeting goes.</p>;
-  return (
-    <ul className="fc-list">
-      {[...checks].reverse().map((c) => (
-        <li key={c.id} className="fc-item" data-hand={c.raised_hand}>
-          <FactCheckBody check={c} meId={me.id} showTime />
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-/** Meeting chat (public messages, private messages, private questions to the agent), the live
- * agenda, and the meeting's fact-checks. */
+/** Meeting chat (public messages, private messages including the agent's fact-checks, private
+ * questions to the agent) and the live agenda. */
 export function SidePanel({
   messages,
   me,
@@ -110,7 +90,6 @@ export function SidePanel({
   error,
   agenda,
   agendaError,
-  checks,
   onSend,
   onClose,
 }: SidePanelProps) {
@@ -168,7 +147,6 @@ export function SidePanel({
             onClick={() => setTab(id)}
           >
             {label}
-            {id === "checks" && checks.length > 0 && <span className="tab-n">{checks.length}</span>}
           </button>
         ))}
         <button type="button" className="icon-btn" onClick={onClose} aria-label="Hide panel">
@@ -178,11 +156,6 @@ export function SidePanel({
       {tab === "agenda" && (
         <div className="msgs" role="tabpanel" id="panel-agenda" aria-labelledby="tab-agenda">
           <LiveAgenda agenda={agenda} error={agendaError} />
-        </div>
-      )}
-      {tab === "checks" && (
-        <div className="msgs" role="tabpanel" id="panel-checks" aria-labelledby="tab-checks">
-          <CheckList checks={checks} me={me} />
         </div>
       )}
       <div className="chat-pane" role="tabpanel" id="panel-chat" aria-labelledby="tab-chat" hidden={tab !== "chat"}>

@@ -5,8 +5,7 @@ from contracts.agent import AgentStateName
 
 from .room import RoomBus
 
-# capturing is listening for a question (the Ask button); hand_raised is an answer card waiting,
-# or a fact-check's raised hand.
+# capturing is listening for a question (the Ask button); hand_raised is an answer card waiting.
 TRANSITIONS: dict[AgentStateName, frozenset[AgentStateName]] = {
     "idle": frozenset({"capturing", "working", "hand_raised", "speaking"}),
     "capturing": frozenset({"working", "idle", "hand_raised"}),
