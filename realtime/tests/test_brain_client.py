@@ -254,6 +254,16 @@ async def test_translate_is_tried_once_because_a_late_caption_is_useless(failure
     assert len(recorder.requests) == 1
 
 
+async def test_a_failed_translate_says_which_status_so_the_worker_can_back_off():
+    with pytest.raises(BrainUnavailable) as off:
+        await client(Recorder(503)).translate("m-1", "Hola", None)
+    with pytest.raises(BrainUnavailable) as slow:
+        await client(Recorder(httpx.ReadTimeout("slow"))).translate("m-1", "Hola", None)
+
+    assert off.value.status == 503
+    assert slow.value.status is None
+
+
 async def test_translate_against_the_real_brain_endpoint():
     from brain.api.deps import get_settings, get_store, get_translation_llm_factory
     from brain.config import Settings as BrainSettings

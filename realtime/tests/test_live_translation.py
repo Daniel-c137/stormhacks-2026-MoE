@@ -155,6 +155,7 @@ async def manager(stt, translator, bus, brain, invocations):
         on_invocation=on_invocation,
         translate=translator,
         provisional_seconds=PERIOD,
+        translation_pause_seconds=60,
         clock=lambda: 0.0,
         drain_seconds=0.2,
     )
@@ -343,3 +344,107 @@ async def test_the_assistant_is_called_by_the_english_translation(
     await finish(manager, stt)
 
     assert [i.question for i in invocations] == ["what did we decide about Postgres?"]
+
+
+# failing translation keeps the room informed and the bill down (#106 review)
+
+
+async def test_while_provisional_translation_fails_the_speakers_own_words_are_shown(
+    manager, stt, translator, bus
+):
+    translator.answers[SPANISH] = ("es", ENGLISH)
+    stt.final(SPANISH, "es")  # Lucía is known to speak Spanish, so her partials are hidden
+    await until(lambda: bus.shown() == [ENGLISH])
+
+    stt.partial("Por ahora")  # nothing scripted: the model is down
+    await until(lambda: "Por ahora" in bus.shown())
+    stt.partial("Por ahora nos quedamos")
+    await until(lambda: "Por ahora nos quedamos" in bus.shown())
+    stt.final(SPANISH, "es")
+    await finish(manager, stt)
+
+    assert bus.shown()[-1] == ENGLISH  # the finished sentence still gets its translation
+
+
+async def test_a_failed_provisional_translation_pauses_the_next_ones(manager, stt, translator, bus):
+    translator.answers[SPANISH] = ("es", ENGLISH)
+    stt.final(SPANISH, "es")
+    await until(lambda: bus.shown() == [ENGLISH])
+
+    stt.partial("Por ahora")
+    await until(lambda: "Por ahora" in translator.texts())
+    for more in ("Por ahora nos", "Por ahora nos quedamos", "Por ahora nos quedamos con"):
+        stt.partial(more)
+        await asyncio.sleep(PERIOD * 2)
+    stt.final(SPANISH, "es")
+    await finish(manager, stt)
+
+    assert translator.texts() == [SPANISH, "Por ahora", SPANISH]
+
+
+async def test_no_model_configured_turns_translation_off_for_the_meeting(
+    manager, stt, translator, bus, brain
+):
+    translator.answers[SPANISH] = BrainUnavailable("not configured", status=503)
+
+    stt.final(SPANISH, "es")
+    await until(lambda: len(brain.saved) == 1)
+    stt.partial("¿Y las")
+    await asyncio.sleep(PERIOD * 3)
+    stt.final("¿Y las migraciones?", "es")
+    await finish(manager, stt)
+
+    assert translator.texts() == [SPANISH]  # asked once, never again this meeting
+    assert bus.shown() == [SPANISH, "¿Y las", "¿Y las migraciones?"]
+    assert [(s.text, s.language, s.original_text) for s in brain.saved] == [
+        (SPANISH, "es", None),
+        ("¿Y las migraciones?", "es", None),
+    ]
+
+
+# what the speaker's language is, and who decides it (#106 review)
+
+
+async def test_provisional_translation_lets_the_model_detect_the_language(
+    manager, stt, translator, bus
+):
+    translator.answers[SPANISH] = ("es", ENGLISH)
+    translator.answers["Por ahora"] = ("es", "For now")
+    stt.final(SPANISH, "es")
+    await until(lambda: bus.shown() == [ENGLISH])
+
+    stt.partial("Por ahora")
+    await until(lambda: "For now" in bus.shown())
+    await finish(manager, stt)
+
+    assert translator.calls[:2] == [(SPANISH, "es"), ("Por ahora", None)]
+
+
+async def test_a_short_final_in_another_language_does_not_change_the_speakers_language(
+    manager, stt, translator, bus
+):
+    translator.answers[SPANISH] = ("es", ENGLISH)
+    stt.final(SPANISH, "es")
+    await until(lambda: bus.shown() == [ENGLISH])
+
+    stt.final("Okay.", "en")  # one word: Lucía still speaks Spanish
+    stt.partial("Entonces")
+    await asyncio.sleep(PERIOD / 2)
+    stt.final("Let's ship it on Friday.", "en")  # a real English sentence: she switched
+    stt.partial("And then")
+    await finish(manager, stt)
+
+    assert "Entonces" not in bus.shown()
+    assert "And then" in bus.shown()
+
+
+async def test_the_assistant_is_called_in_persian_through_the_latin_spelling(
+    manager, stt, translator, invocations
+):
+    said = "پولاریس، وضعیت DS-104 چیه؟"
+    translator.answers[said] = ("fa", "Polaris, what's the status of DS-104?")
+
+    stt.final(said, "fa")
+    await finish(manager, stt)
+
+    assert [i.question for i in invocations] == ["what's the status of DS-104?"]
