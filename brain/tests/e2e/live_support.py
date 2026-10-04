@@ -1,6 +1,7 @@
 """Fixtures for the live end-to-end meeting suite (test_live_meeting.py): a seeded embedded
 Postgres, the GitHub and Jira MCP servers the brain reads, the brain itself as a real uvicorn
-subprocess, and Supabase sessions signed with a local HS256 secret."""
+subprocess with its own sign-in (AUTH_SECRET), and a login with a password for each of the
+cast."""
 
 import json
 import os
@@ -15,12 +16,12 @@ from pathlib import Path
 
 import anyio
 import httpx
-import jwt
 import pytest
 from conftest import JIRA_ACCOUNTS, FakeGitHub, FakeJira, serve_mcp
 from fact_check_support import merged_after_release
 from pg_support import fresh_database
 
+from brain.auth import hash_password
 from brain.config import Settings
 from brain.db import migrate
 from brain.jira import JiraConfig, JiraIssue, JiraReader
@@ -126,10 +127,15 @@ class GitHubSource:
     kind: str
 
 
+@dataclass(frozen=True)
+class Login:
+    email: str
+    password: str
+
+
 @dataclass
 class Brain:
     url: str
-    jwt_secret: str
     internal_token: str
     log: Path
 
@@ -175,10 +181,21 @@ def team(github_source) -> Team:
     return Team(id="team-dropsubs", name="DropSubs", member_ids=[], github_repo=github_source.repo)
 
 
+def login_email(person: Person) -> str:
+    """The cast sign in with their email; people renamed for the world's Jira have none."""
+    return person.email or f"{person.id}@dropsubs.dev"
+
+
 @pytest.fixture(scope="module")
-def live_dsn(pg_server, team, cast, github_source) -> Iterator[str]:
-    """A fresh database with every migration applied and the team, its people and its settings
-    (America/Vancouver) seeded."""
+def logins(cast) -> dict[str, Login]:
+    """Each of the cast's email and a password made for this run, by person id."""
+    return {p.id: Login(login_email(p), secrets.token_urlsafe(16)) for p in cast.everyone}
+
+
+@pytest.fixture(scope="module")
+def live_dsn(pg_server, team, cast, logins, github_source) -> Iterator[str]:
+    """A fresh database with every migration applied and the team, its people (each with a
+    login) and its settings (America/Vancouver) seeded."""
 
     async def seed(dsn: str) -> None:
         await migrate(dsn)
@@ -186,6 +203,8 @@ def live_dsn(pg_server, team, cast, github_source) -> Iterator[str]:
         await store.create_team(team)
         for person in cast.everyone:
             await store.upsert_person(person, team.id)
+            login = logins[person.id]
+            await store.set_login(person.id, login.email, hash_password(login.password))
         await store.save_settings(
             TeamSettings(
                 team_id=team.id,
@@ -222,12 +241,11 @@ def brain(live_dsn, jira_source, github_source, tmp_path_factory) -> Iterator[Br
     (and any OpenRouter) settings come from the environment and .env as usual; everything else
     points at this run's local servers. LiveKit is deliberately unreachable. Without E2E_LISTEN
     the speech model is blanked, so nothing can spend ElevenLabs credits."""
-    jwt_secret, internal_token = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
+    auth_secret, internal_token = secrets.token_urlsafe(48), secrets.token_urlsafe(32)
     env = {
         **os.environ,
         "DATABASE_URL": live_dsn,
-        "SUPABASE_URL": "",
-        "SUPABASE_JWT_SECRET": jwt_secret,
+        "AUTH_SECRET": auth_secret,
         "BRAIN_INTERNAL_TOKEN": internal_token,
         "GITHUB_MCP_URL": github_source.url,
         "GITHUB_REPO": github_source.repo,
@@ -269,7 +287,7 @@ def brain(live_dsn, jira_source, github_source, tmp_path_factory) -> Iterator[Br
         print(
             f"\nbrain on {url} (log: {log}); Jira: {jira_source.kind}; GitHub: {github_source.kind}"
         )
-        yield Brain(url=url, jwt_secret=jwt_secret, internal_token=internal_token, log=log)
+        yield Brain(url=url, internal_token=internal_token, log=log)
     finally:
         proc.terminate()
         try:
@@ -278,17 +296,14 @@ def brain(live_dsn, jira_source, github_source, tmp_path_factory) -> Iterator[Br
             proc.kill()
 
 
-def session(brain: Brain, person: Person) -> dict[str, str]:
-    """Authorization headers for a Supabase session of `person`, valid for an hour."""
-    now = int(time.time())
-    claims = {
-        "sub": person.id,
-        "aud": "authenticated",
-        "role": "authenticated",
-        "iat": now,
-        "exp": now + 3600,
-    }
-    return {"Authorization": f"Bearer {jwt.encode(claims, brain.jwt_secret, algorithm='HS256')}"}
+def log_in(client: httpx.Client, login: Login) -> httpx.Response:
+    """POST /auth/login, as the board signs in."""
+    return client.post("/auth/login", json={"email": login.email, "password": login.password})
+
+
+def session(response: httpx.Response) -> dict[str, str]:
+    """Authorization headers for the session a successful login returned."""
+    return {"Authorization": f"Bearer {response.json()['token']}"}
 
 
 def elevenlabs_characters(settings: Settings) -> int | None:

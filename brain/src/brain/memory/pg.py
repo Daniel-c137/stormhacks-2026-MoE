@@ -1,5 +1,5 @@
 """Meeting memory in Postgres with pgvector. The pool comes from the Postgres store; the table
-from supabase/migrations/20261003000100_meeting_memory.sql."""
+from db/migrations/20261003000100_meeting_memory.sql."""
 
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
