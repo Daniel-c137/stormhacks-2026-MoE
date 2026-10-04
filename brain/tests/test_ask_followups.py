@@ -1,24 +1,54 @@
 """Follow-ups to the agent's answers: the newest transcript survives the evidence limit, prompt
-text from people and upstream errors stays on one line, and "from the earlier conversation" is
-only claimed when the conversation can back it."""
+text from people and upstream errors stays on one line, "from the earlier conversation" is only
+claimed when the conversation can back it, and the agent's own words are never a source."""
 
 import pytest
 from api_support import ALEX, OTHER_TEAM, OUTSIDER, SARAH, TEAM
 from ask_support import citing, evidence, scripted
 
-from brain.agent.ask import DraftAnswer, PlannedCall, Question, ToolOrchestrator
+from brain.agent.ask import (
+    BEGIN_DATA,
+    END_DATA,
+    FROM_CONVERSATION,
+    NO_EVIDENCE,
+    UNVERIFIED,
+    DraftAnswer,
+    PlannedCall,
+    Question,
+    ToolOrchestrator,
+)
 from brain.config import Settings
 from brain.llm import MockEmbedder
 from brain.memory import InMemoryMemoryStore, MeetingMemory
 from brain.store import InMemoryStore
-from contracts import AskTurn, Person, Report, TaskDraft, TranscriptSegment
+from contracts import (
+    AGENT_PARTICIPANT_ID,
+    AskTurn,
+    Person,
+    Report,
+    TaskDraft,
+    TranscriptSegment,
+    get_identity,
+)
 
 pytestmark = pytest.mark.anyio
 
+AGENT = get_identity().agent_name
 HISTORY = [
     AskTurn(role="user", text="What did we decide about the waitlist email?"),
     AskTurn(role="agent", text="Alice said to hold it until v0.9.4 is out."),
 ]
+# The Home conversation from #58, as answered by real Gemini.
+WAITLIST_HISTORY = [
+    AskTurn(role="user", text="What did we decide about the waitlist email, and when?"),
+    AskTurn(
+        role="agent",
+        text="During the Friday standup on 2026-10-04, the team decided to hold the waitlist "
+        "email until v0.9.4 is out. Alice Moreau proposed this decision during the meeting.",
+    ),
+]
+# The agent's own line in the meeting from #63.
+STALE = "DS-104 is still In Progress in Jira, though the fix is merged."
 
 
 @pytest.fixture
@@ -221,6 +251,129 @@ async def test_the_conversation_label_cannot_be_gamed(store, settings, history, 
 
     assert "earlier conversation" not in answer.text
     assert "couldn't verify" in answer.text.lower()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Alice Moreau proposed the decision during the meeting, as mentioned in our earlier "
+        f"conversation. {AGENT} stated this during the conversation.",
+        "Alice Moreau proposed that decision during the Friday standup. This was stated in the "
+        "earlier conversation.",
+    ],
+    ids=["names-the-agent", "names-the-conversation"],
+)
+async def test_a_follow_up_that_mentions_the_conversation_is_labelled_from_it(
+    store, settings, text
+):
+    llm = scripted(answer=DraftAnswer(text=text, evidence_ids=[], from_conversation=True))
+
+    answer = await ToolOrchestrator(llm, store, settings=settings).ask(
+        question("Who said that?", history=WAITLIST_HISTORY)
+    )
+
+    assert answer.text == f"{text}\n\n{FROM_CONVERSATION}"
+    assert answer.sources == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"As mentioned earlier, {AGENT} said we ship on Monday with the new pricing page.",
+        "As I said earlier in our conversation.",
+        "Alice Moreau proposed it at the Friday standup on 2026-10-05, as stated earlier.",
+        "As mentioned in our earlier conversation, Alice Moreau did not propose holding it.",
+    ],
+    ids=["new-claim", "only-meta-words", "changed-date", "negation"],
+)
+async def test_meta_words_do_not_back_a_changed_answer(store, settings, text):
+    llm = scripted(answer=DraftAnswer(text=text, evidence_ids=[], from_conversation=True))
+
+    answer = await ToolOrchestrator(llm, store, settings=settings).ask(
+        question("Who said that?", history=WAITLIST_HISTORY)
+    )
+
+    assert answer.text == UNVERIFIED
+
+
+def agent_said(meeting_id: str, i: int, text: str) -> TranscriptSegment:
+    return TranscriptSegment(
+        seg_id=f"a-{i}",
+        meeting_id=meeting_id,
+        speaker_id=AGENT_PARTICIPANT_ID,
+        speaker_name=AGENT,
+        text=text,
+        is_final=True,
+        t_start=float(i),
+        t_end=float(i) + 1,
+    )
+
+
+def citing_the_agents_line(prompt: str) -> DraftAnswer:
+    """The model citing whatever evidence carries the agent's own earlier line."""
+    ids = [i for i, line in evidence(prompt).items() if "In Progress" in line]
+    return DraftAnswer(
+        text=f"DS-104 is still In Progress in Jira. {AGENT} stated this during the standup.",
+        evidence_ids=ids,
+    )
+
+
+async def test_an_answer_citing_only_the_agents_own_words_is_unverified(store, settings):
+    meeting = await store.create_meeting(TEAM.id, "Friday standup", ALEX.id)
+    llm = scripted(answer=citing_the_agents_line)
+
+    answer = await ToolOrchestrator(llm, store, settings=settings).ask(
+        question(
+            "Is DS-104 done in Jira yet?",
+            visibility="private",
+            meeting_id=meeting.id,
+            recent=[said(meeting.id, 20, "Is DS-104 done yet?"), agent_said(meeting.id, 32, STALE)],
+        )
+    )
+
+    shown = evidence(llm.calls[1].prompt).values()
+    assert not any("In Progress" in line for line in shown)
+    assert any("Is DS-104 done yet?" in line for line in shown)
+    assert answer.text == UNVERIFIED
+    assert answer.sources == []
+
+
+async def test_the_agents_own_words_alone_are_no_evidence(store, settings):
+    meeting = await store.create_meeting(TEAM.id, "Friday standup", ALEX.id)
+    llm = scripted(answer=citing_the_agents_line)
+
+    answer = await ToolOrchestrator(llm, store, settings=settings).ask(
+        question(
+            "Is DS-104 done in Jira yet?",
+            meeting_id=meeting.id,
+            recent=[agent_said(meeting.id, 32, STALE)],
+        )
+    )
+
+    assert len(llm.calls) == 1  # only the plan: nothing citable to answer from
+    assert answer.text == NO_EVIDENCE
+    assert answer.sources == []
+
+
+async def test_the_agents_own_words_are_fenced_context_without_an_id(store, settings):
+    meeting = await store.create_meeting(TEAM.id, "Friday standup", ALEX.id)
+    llm = scripted(answer=citing("Is DS-104 done yet?"))
+
+    await ToolOrchestrator(llm, store, settings=settings).ask(
+        question(
+            "Is DS-104 done in Jira yet?",
+            meeting_id=meeting.id,
+            recent=[said(meeting.id, 20, "Is DS-104 done yet?"), agent_said(meeting.id, 32, STALE)],
+        )
+    )
+
+    lines = llm.calls[1].prompt.splitlines()
+    at = next(i for i, line in enumerate(lines) if STALE in line)
+    assert not lines[at].startswith("[e")
+    begin = max(i for i, line in enumerate(lines[:at]) if line == BEGIN_DATA)
+    assert END_DATA not in lines[begin:at]
+    assert "never cite" in lines[begin - 1].lower()
+    assert STALE in llm.calls[0].prompt  # the plan still sees the whole recent transcript
 
 
 async def test_a_multi_line_question_stays_on_one_line(store, settings):
