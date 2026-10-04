@@ -158,7 +158,8 @@ export function useChat(meetingId: string): { messages: ChatMessage[]; send: (te
   return { messages, send: sendText };
 }
 
-/** Private messages between two people. Sent to one participant only; never stored anywhere. */
+/** Private messages between two people, or from the agent to one person (a late joiner's
+ * catch-up). Sent to one participant only; never stored anywhere. */
 export function usePrivateChat(): { messages: ChatMessage[]; send: (message: ChatMessage) => Promise<void> } {
   const room = useRoomContext();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -167,9 +168,16 @@ export function usePrivateChat(): { messages: ChatMessage[]; send: (message: Cha
     (message, from) => {
       // The sender is whoever LiveKit says sent it, not what the payload claims.
       if (!from || message.recipient_id !== room.localParticipant.identity) return;
+      const isAgent = from.identity === AGENT_PARTICIPANT_ID;
       setMessages((list) => [
         ...list,
-        { ...message, sender_id: from.identity, sender_name: from.name || from.identity, is_agent: false, visibility: "private" },
+        {
+          ...message,
+          sender_id: from.identity,
+          sender_name: from.name || from.identity,
+          is_agent: isAgent,
+          visibility: "private",
+        },
       ]);
     },
     false,

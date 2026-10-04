@@ -106,6 +106,24 @@ export interface FactCheckResponse {
   snippets?: CodeSnippet[];
 }
 
+/** realtime -> brain when someone joins a live meeting 5 minutes or more after it started, or
+ * comes back after 5 minutes or more away. `since` and `until` are seconds from the meeting start:
+ * the span they missed. */
+export interface CatchUpRequest {
+  participant_id: string;
+  since: number;
+  until: number;
+}
+
+/** What the worker sends only to the participant, as a private chat message from the agent
+ * (Topic.PRIVATE_CHAT, recipient_id set). `text` is null when there is nothing to send.
+ * `source_times` are the meeting seconds of the transcript lines it rests on. Never stored,
+ * broadcast or spoken. */
+export interface CatchUpResponse {
+  text?: string | null;
+  source_times?: number[];
+}
+
 /** Only the fields that are set change. */
 export interface ProfileUpdate {
   name?: string | null;

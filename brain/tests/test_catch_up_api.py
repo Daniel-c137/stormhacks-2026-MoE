@@ -47,9 +47,9 @@ def at(minutes: float) -> datetime:
 async def started_meeting(store, minutes_ago: float = 15):
     """A live meeting of TEAM that Alex started `minutes_ago`, with Alex and Sarah in it."""
     meeting = await store.create_meeting(TEAM.id, "Refund sync", ALEX.id)
+    await store.update_meeting(meeting.model_copy(update={"started_at": at(minutes_ago)}))
     await store.add_participant(meeting.id, ALEX.id)
-    await store.add_participant(meeting.id, SARAH.id)
-    return await store.update_meeting(meeting.model_copy(update={"started_at": at(minutes_ago)}))
+    return await store.add_participant(meeting.id, SARAH.id)
 
 
 async def say(store, meeting, lines) -> None:
@@ -382,3 +382,4 @@ def test_a_draft_with_nothing_grounded_has_nothing_to_send(worker, store, use_ll
 
     assert response.status_code == 200
     assert response.json() == {"text": None, "source_times": []}
+

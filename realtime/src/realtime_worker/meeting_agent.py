@@ -4,12 +4,14 @@ Polaris reasons only when someone asks deliberately: by name, with the Ask butto
 @mention. A spoken question's answer is a shared card that stays silent until a participant
 chooses Speak, Post in chat or Dismiss; a chat mention is answered in chat. On timers it asks the
 brain to keep time against the agenda and to fact-check, and publishes what comes back, a private
-fact-check only to its participant. Private chat never passes through here.
+fact-check only to its participant. Someone joining 5 minutes or more late, or back after 5 minutes
+or more away, gets a private catch-up from the brain as a chat message only to them. People's
+private chat never passes through here.
 """
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Iterable
 from datetime import UTC, datetime
 from typing import Any, Protocol
 from uuid import uuid4
@@ -33,6 +35,7 @@ from contracts.agent import AgentStateName, ResponseCardStatus
 from .brain_client import BrainClient
 from .elevenlabs_tts import spoken_text
 from .invocation import ASK_SECONDS, WakeDetector, default_aliases
+from .presence import CATCH_UP_AFTER_SECONDS, Presence, Span
 from .room import RoomBus
 from .state import AgentStateMachine
 from .tts import TextToSpeech
@@ -40,6 +43,8 @@ from .tts import TextToSpeech
 log = logging.getLogger(__name__)
 
 MAX_DETAIL = 120
+# A moment for a joiner's board to start listening before their catch-up is sent.
+CATCH_UP_DELAY_S = 3.0
 
 
 class Transcription(Protocol):
@@ -83,8 +88,12 @@ class MeetingAgent:
         agenda_tick_seconds: float = 30,
         fact_check_tick_seconds: float = 60,
         ask_seconds: float = ASK_SECONDS,
+        clock: Callable[[], float] | None = None,
+        catch_up_after: float = CATCH_UP_AFTER_SECONDS,
+        catch_up_delay: float = CATCH_UP_DELAY_S,
     ):
-        """transcription may be set after construction: it calls on_invocation."""
+        """transcription may be set after construction: it calls on_invocation. clock gives
+        seconds since the meeting started; without one nobody is caught up."""
         self.meeting_id = meeting_id
         self.bus = bus
         self.brain = brain
@@ -100,6 +109,9 @@ class MeetingAgent:
         self._agenda_tick_seconds = agenda_tick_seconds
         self._fact_check_tick_seconds = fact_check_tick_seconds
         self._ask_seconds = ask_seconds
+        self._clock = clock
+        self._catch_up_delay = catch_up_delay
+        self.presence = Presence(catch_up_after)
 
         self._cards: dict[str, ResponseCard] = {}
         self._asking: dict[str, asyncio.Task[None]] = {}  # participant -> their Ask's expiry
@@ -302,6 +314,63 @@ class MeetingAgent:
             await self.brain.ingest_public_chat(self.meeting_id, message)
         except Exception as e:
             log.warning("Could not save chat message %s: %s", message.id, e)
+
+    # catching up late joiners
+
+    def already_here(self, identities: Iterable[str]) -> None:
+        """Who was in the room when the agent joined it: never caught up for how they got here,
+        so a restarted worker does not catch up everyone again."""
+        if self._clock:
+            self.presence.already_here(identities, self._clock())
+
+    def on_participant_joined(self, identity: str) -> None:
+        """LiveKit's participant_connected."""
+        if not self._clock:
+            return
+        if span := self.presence.joined(identity, self._clock()):
+            self._spawn(self._catch_up(identity, span))
+
+    def on_participant_left(self, identity: str) -> None:
+        """LiveKit's participant_disconnected."""
+        if self._clock:
+            self.presence.left(identity, self._clock())
+
+    async def _catch_up(self, participant_id: str, span: Span) -> None:
+        """Asks the brain what they missed and sends it only to them; a failure sends nothing."""
+        await asyncio.sleep(self._catch_up_delay)
+        try:
+            caught = await self.brain.catch_up(
+                self.meeting_id, participant_id, span.since, span.until
+            )
+        except Exception as e:
+            log.warning("Could not catch up %s in %s: %s", participant_id, self.meeting_id, e)
+            return
+        if not caught.text:
+            log.info("Nothing to catch %s up on in %s", participant_id, self.meeting_id)
+            return
+        if not self.presence.present(participant_id):
+            log.info("%s left %s before their catch-up was ready", participant_id, self.meeting_id)
+            return
+        try:
+            await self.send_private(participant_id, caught.text)
+        except Exception as e:
+            log.warning("Could not send %s their catch-up: %s", participant_id, e)
+
+    async def send_private(self, recipient_id: str, text: str) -> None:
+        """A private chat message from the agent to one participant (Topic.PRIVATE_CHAT, only to
+        them). Never broadcast, spoken or sent to the brain, so never stored."""
+        message = ChatMessage(
+            id=str(uuid4()),
+            meeting_id=self.meeting_id,
+            sender_id=AGENT_PARTICIPANT_ID,
+            sender_name=self._agent_name,
+            is_agent=True,
+            text=text,
+            ts=datetime.now(UTC),
+            visibility="private",
+            recipient_id=recipient_id,
+        )
+        await self.bus.publish(Topic.PRIVATE_CHAT, message, to=[recipient_id])
 
     # ticks
 
