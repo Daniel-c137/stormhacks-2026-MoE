@@ -1,4 +1,5 @@
 import secrets
+from collections.abc import Callable
 from functools import cache
 from typing import NoReturn
 
@@ -7,6 +8,7 @@ from fastapi import Depends, Header, HTTPException
 from contracts import Meeting, Person, Team
 
 from ..config import Settings
+from ..jira import JiraPusher, jira_config
 from ..store import NotFound, Store
 
 
@@ -27,6 +29,13 @@ async def get_store() -> Store:
 async def current_user(authorization: str = Header()) -> Person:
     """Resolve the Supabase session; every query is scoped to this user's team."""
     not_implemented()
+
+
+def get_jira_pusher(settings: Settings = Depends(get_settings)) -> Callable[[], JiraPusher]:
+    """Makes the pusher for an approved push; JiraUnavailable when Jira is not configured.
+    A factory, so the route checks the team and the meeting before Jira's configuration.
+    Tests override it with an in-process Jira."""
+    return lambda: JiraPusher(jira_config(settings))
 
 
 async def require_internal(
