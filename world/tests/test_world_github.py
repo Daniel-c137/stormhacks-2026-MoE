@@ -375,7 +375,9 @@ async def test_list_pull_requests_filters_sorts_and_pages():
     other_base = await read("list_pull_requests", state="all", base="release")
     trimmed = await read("list_pull_requests", state="closed", fields=["number", "merged_at"])
 
-    assert len(closed) == 22 and all(pr["merged"] for pr in closed)
+    assert len(closed) == 22 and all(pr["merged_at"] for pr in closed)
+    # like the REST list, which carries no merged flag; pull_request_read has it
+    assert not any(pr["merged"] for pr in closed)
     assert closed[0]["number"] == 50 and closed[0]["merged_at"] == "2026-10-02T23:40:00Z"
     updated = [pr["updated_at"] for pr in by_update]
     assert updated == sorted(updated)
