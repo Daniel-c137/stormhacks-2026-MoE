@@ -42,11 +42,11 @@ export function TaskList() {
         <Icon name="arrow-left" />
         Meetings
       </Link>
-      <div className="mem-head">
-        <h1>Tasks</h1>
+      <div className="tasks-head">
+        <h1 id="tasks-h">Tasks</h1>
       </div>
 
-      <section className="rcard" aria-label="Tasks">
+      <section className="rcard" aria-labelledby="tasks-h">
         <div className="t-tools">
           <div className="chips" role="group" aria-label="Filter by owner">
             {[["all", "Everyone"], [me.id, "You"], ...members.filter((p) => p.id !== me.id).map((p) => [p.id, p.short])].map(

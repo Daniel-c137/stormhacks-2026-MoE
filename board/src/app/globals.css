@@ -567,6 +567,7 @@
   .contra-h { font-size: 13px; font-weight: 700; color: var(--coral-text); }
   .contra p { margin-top: 4px; font-size: 16px; line-height: 1.4; font-weight: 600; }
   .contra .link { display: inline-block; margin-top: 6px; font-size: 14px; color: var(--ink); }
+  .contra-miss { display: block; margin-top: 4px; font-size: 14px; color: var(--ink-2); }
   .tasks { display: flex; flex-direction: column; gap: 10px; }
   .task { display: grid; grid-template-columns: 28px minmax(0,1fr); gap: 12px; padding: 16px; border-radius: 20px; border: 1px solid var(--line); transition: opacity .15s; }
   .task[data-inc="false"] { opacity: .55; }
@@ -606,9 +607,9 @@
   .line .tx { font-size: 15.5px; line-height: 1.55; }
   .line mark { border-radius: 4px; background: var(--hl); color: inherit; font-weight: 700; }
 
-  /* ---------- decisions & tasks ---------- */
-  .mem-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin: 18px 0; }
-  .mem-head h1 { font-family: var(--font-display); font-size: 40px; font-weight: 800; letter-spacing: -.035em; line-height: 1.02; }
+  /* ---------- tasks ---------- */
+  .tasks-head { margin: 18px 0; }
+  .tasks-head h1 { font-family: var(--font-display); font-size: 40px; font-weight: 800; letter-spacing: -.035em; line-height: 1.02; }
   .trow { display: grid; grid-template-columns: 24px minmax(0,1fr) auto; gap: 12px; align-items: center; padding: 14px 0; border-top: 1px solid var(--line); }
   .trow:first-of-type { border-top: 0; }
   .trow > i { font-size: 18px; color: var(--ink-2); }

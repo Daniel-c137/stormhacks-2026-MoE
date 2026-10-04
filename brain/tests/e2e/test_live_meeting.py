@@ -560,12 +560,12 @@ class TestLiveMeeting:
         expected = owner if owner in flow.jira.accounts else None
         assert issue.assignee == expected, f"assigned to {issue.assignee}, expected {expected}"
 
-    def test_19_decisions_and_open_tasks_pages(self, flow: Flow):
+    def test_19_decisions_and_open_tasks_lists(self, flow: Flow):
         need(flow.write_up_done, "the finished write-up")
         r = flow.client.get("/decisions", headers=flow.bob)
-        assert r.status_code == 200 and r.json(), f"Decisions page: {short(r)}"
+        assert r.status_code == 200 and r.json(), f"Decisions list: {short(r)}"
         r = flow.client.get("/tasks", headers=flow.bob, params={"open": True})
-        assert r.status_code == 200, f"Tasks page: {short(r)}"
+        assert r.status_code == 200, f"Tasks list: {short(r)}"
         show("pages", f"{len(r.json())} open tasks")
 
     def test_20_home_asks_about_the_past_meeting(self, flow: Flow):

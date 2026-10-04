@@ -1,5 +1,4 @@
 import {
-  Archive,
   ArrowDown,
   ArrowLeft,
   ArrowRight,
@@ -97,7 +96,6 @@ function Jira(props: SVGProps<SVGSVGElement>) {
 }
 
 const ICONS = {
-  archive: Archive,
   "arrow-down": ArrowDown,
   "arrow-left": ArrowLeft,
   "arrow-right": ArrowRight,

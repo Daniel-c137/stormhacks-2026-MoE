@@ -461,6 +461,12 @@ function ReportView({ meeting, onPushed }: { meeting: Meeting; onPushed: () => v
                                     .join(" · ")}
                                 </Link>
                               )}
+                              {/* Never just the heading: say why the other decision is not shown. */}
+                              {!related && (allDecisions.data || allDecisions.error) && (
+                                <span className="contra-miss">
+                                  {allDecisions.data ? "That decision is no longer on record." : "That decision can't be loaded right now."}
+                                </span>
+                              )}
                             </div>
                           </div>
                         )}
