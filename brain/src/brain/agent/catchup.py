@@ -3,7 +3,8 @@
 One model call over the final segments of the span they missed and the meeting's agenda with its
 status. Only what people said counts: never the agent's own lines, never chat. Each item the model
 writes names the numbered lines it rests on; an item that cites none is dropped, and the time shown
-is that of the first line it cites. Where the meeting is now comes from the agenda's current item
+is that of the first line it cites; a main point citing only what a decision or a for-you item
+cites repeats it and is dropped. Where the meeting is now comes from the agenda's current item
 when there is one. With too little said (under MIN_SENTENCES whole sentences) there is nothing to
 send and no model call. Nothing here is stored or logged.
 """
@@ -129,9 +130,11 @@ def finish(
     request: CatchUpRequest,
 ) -> CatchUpResponse:
     """Only grounded items, at most MAX_WORDS in all; nothing to send when none is grounded."""
-    points = grounded(draft.points, lines)[:MAX_POINTS]
     decisions = grounded(draft.decisions, lines)[:MAX_DECISIONS]
     for_you = grounded(draft.for_you, lines)[:MAX_FOR_YOU]
+    # A main point resting only on lines a decision or a for-you item cites repeats it.
+    told = {t for item in [*decisions, *for_you] for t in item.times}
+    points = [p for p in grounded(draft.points, lines) if not set(p.times) <= told][:MAX_POINTS]
     current = agenda_now(agenda)
     said_now = [] if current or draft.now is None else grounded([draft.now], lines)
     if not (points or decisions or for_you or said_now):
