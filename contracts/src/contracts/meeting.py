@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-MeetingStatus = Literal["live", "processing", "needs_review", "pushed"]
+MeetingStatus = Literal["scheduled", "live", "processing", "needs_review", "pushed"]
 ParticipantRole = Literal["host", "member"]
 
 
@@ -15,6 +15,8 @@ class Person(BaseModel):
     short: str
     initials: str
     title: str | None = None
+    email: str | None = None
+    photo_url: str | None = None
 
 
 class Team(BaseModel):
@@ -26,6 +28,8 @@ class Team(BaseModel):
 
 
 class Meeting(BaseModel):
+    """A scheduled meeting has scheduled_start and no started_at until someone starts it."""
+
     id: str
     team_id: str
     title: str
@@ -33,9 +37,13 @@ class Meeting(BaseModel):
     code: str
     host_id: str
     participant_ids: list[str]
+    invitee_ids: list[str] = []
+    scheduled_start: datetime | None = None
     started_at: datetime | None = None
+    ended_at: datetime | None = None
     duration_min: int | None = None
     jira_keys: list[str] = []
+    transcript_deleted_at: datetime | None = None  # set once retention removed the segments
 
 
 class Participant(BaseModel):

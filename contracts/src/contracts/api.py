@@ -1,14 +1,24 @@
 """HTTP request and response bodies. Board -> brain, and realtime -> brain (internal)."""
 
+from datetime import datetime
+from typing import Literal
+
 from pydantic import BaseModel
 
 from .agent import Answer, Invocation, Visibility
 from .meeting import Meeting
 from .transcript import TranscriptSegment
 
+AskTurnRole = Literal["user", "agent"]
+
 
 class CreateMeetingRequest(BaseModel):
+    """Without scheduled_start the meeting starts now; with it, the meeting waits as scheduled."""
+
     title: str
+    scheduled_start: datetime | None = None
+    duration_min: int | None = None
+    invitee_ids: list[str] = []
 
 
 class JoinMeetingResponse(BaseModel):
@@ -17,11 +27,51 @@ class JoinMeetingResponse(BaseModel):
     token: str
 
 
+class InviteRequest(BaseModel):
+    person_ids: list[str]
+
+
+class AskTurn(BaseModel):
+    """An earlier turn of the same conversation, sent back so a follow-up has its context."""
+
+    role: AskTurnRole
+    text: str
+
+
 class AskRequest(BaseModel):
     """A typed question from the board. Private answers go back only to the asker."""
 
     question: str
     visibility: Visibility
+    history: list[AskTurn] = []  # oldest first
+
+
+class AgendaItemInput(BaseModel):
+    """An agenda item as a person edits it. No id means a new item."""
+
+    id: str | None = None
+    title: str
+    minutes: int | None = None
+
+
+class AgendaUpdate(BaseModel):
+    """The whole edited list, in order. Items left out are removed."""
+
+    items: list[AgendaItemInput]
+
+
+class AgendaRewriteRequest(BaseModel):
+    text: str
+
+
+class AgendaRewriteResponse(BaseModel):
+    text: str
+
+
+class ProfileUpdate(BaseModel):
+    """Only the fields that are set change."""
+
+    name: str | None = None
 
 
 class SegmentsIngest(BaseModel):
