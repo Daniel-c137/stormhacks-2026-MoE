@@ -236,9 +236,8 @@ async def google_callback(
     board's /login with a one-time code (`google`) or why it failed (`google_error`)."""
 
     def back(**query: str) -> RedirectResponse:
-        response = RedirectResponse(
-            f"{settings.board_url.rstrip('/')}/login?{urlencode(query)}", status_code=302
-        )
+        board = (settings.board_url or "").rstrip("/")  # "": this site's /login
+        response = RedirectResponse(f"{board}/login?{urlencode(query)}", status_code=302)
         response.delete_cookie(FLOW_COOKIE, path=FLOW_COOKIE_PATH)
         return response
 
