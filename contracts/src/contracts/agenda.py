@@ -33,7 +33,11 @@ class AgendaItem(BaseModel):
 
 
 class Agenda(BaseModel):
+    """One person's agenda for a meeting: everyone has their own, and nobody else sees or edits
+    it. Polaris keeps time against each one separately."""
+
     meeting_id: str
+    person_id: str | None = None  # whose agenda; always set once saved
     items: list[AgendaItem]
     generated_at: datetime
     updated_at: datetime | None = None  # last human edit
@@ -50,8 +54,9 @@ class AgendaSuggestions(BaseModel):
 
 
 class AgendaNudge(BaseModel):
-    """A reminder that an agenda item has not come up yet."""
+    """A reminder that an agenda item has not come up yet, for the agenda's owner only."""
 
     meeting_id: str
+    person_id: str | None = None  # whose agenda the item is on; the nudge goes only to them
     item_id: str
     text: str

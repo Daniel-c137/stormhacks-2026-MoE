@@ -260,17 +260,25 @@ class Store(Protocol):
 
     # agenda
 
-    async def agenda(self, meeting_id: str) -> Agenda | None: ...
+    async def agenda(self, meeting_id: str, person_id: str) -> Agenda | None:
+        """This person's own agenda for the meeting: everyone has their own."""
+        ...
+
+    async def agendas(self, meeting_id: str) -> list[Agenda]:
+        """Everyone's agendas for the meeting, the earliest made first."""
+        ...
+
     async def save_agenda(self, agenda: Agenda) -> Agenda:
-        """Replaces the meeting's agenda, whatever its revision, and bumps the revision.
-        Returns what was saved, with the new revision."""
+        """Replaces agenda.person_id's agenda for the meeting, whatever its revision, and bumps
+        the revision. Returns what was saved, with the new revision. ValueError without a
+        person_id."""
         ...
 
     async def save_agenda_if(self, agenda: Agenda) -> Agenda:
-        """Replaces the agenda only if the saved one is still at `agenda.revision` (0: none saved
-        yet), and bumps the revision: an atomic compare-and-set, so of overlapping writers that
-        read the same revision (timekeeping ticks, lobby edits) only one gets through and the
-        others get Conflict. NotFound when the meeting is missing."""
+        """Replaces the person's agenda only if the saved one is still at `agenda.revision` (0:
+        none saved yet), and bumps the revision: an atomic compare-and-set, so of overlapping
+        writers that read the same revision (timekeeping ticks, edits) only one gets through and
+        the others get Conflict. NotFound when the meeting is missing."""
         ...
 
     # fact-checks
@@ -390,7 +398,7 @@ class InMemoryStore:
         self._meetings: dict[str, Meeting] = {}
         self._segments: dict[str, dict[str, TranscriptSegment]] = {}
         self._chat: dict[str, dict[str, ChatMessage]] = {}
-        self._agendas: dict[str, Agenda] = {}
+        self._agendas: dict[tuple[str, str | None], Agenda] = {}  # (meeting, person)
         self._fact_checks: dict[str, dict[str, FactCheck]] = {}
         self._fact_check_states: dict[str, FactCheckState] = {}
         self._reports: dict[str, Report] = {}
@@ -415,7 +423,6 @@ class InMemoryStore:
             self._meetings,
             self._segments,
             self._chat,
-            self._agendas,
             self._fact_checks,
             self._fact_check_states,
             self._reports,
@@ -424,6 +431,8 @@ class InMemoryStore:
         ):
             for meeting_id in gone & rows.keys():
                 del rows[meeting_id]
+        for key in [k for k in self._agendas if k[0] in gone]:
+            del self._agendas[key]
         for rows in (self._tasks, self._decisions):
             for row_id in [i for i, row in rows.items() if row.meeting_id in gone]:
                 del rows[row_id]
@@ -697,29 +706,34 @@ class InMemoryStore:
 
     # agenda
 
-    async def agenda(self, meeting_id: str) -> Agenda | None:
-        saved = self._agendas.get(meeting_id)
+    async def agenda(self, meeting_id: str, person_id: str) -> Agenda | None:
+        saved = self._agendas.get((meeting_id, person_id))
         return _copy(saved) if saved else None
 
+    async def agendas(self, meeting_id: str) -> list[Agenda]:
+        mine = [a for (m, _), a in self._agendas.items() if m == meeting_id]
+        return [_copy(a) for a in sorted(mine, key=lambda a: (a.generated_at, a.person_id))]
+
     async def save_agenda(self, agenda: Agenda) -> Agenda:
+        _owned(agenda)
         self._meeting(agenda.meeting_id)
         return self._put_agenda(agenda)
 
     async def save_agenda_if(self, agenda: Agenda) -> Agenda:
         # No await between the check and the write, so this is atomic on the event loop.
+        _owned(agenda)
         self._meeting(agenda.meeting_id)
-        saved = self._agendas.get(agenda.meeting_id)
+        saved = self._agendas.get((agenda.meeting_id, agenda.person_id))
         if (saved.revision if saved else 0) != agenda.revision:
             raise Conflict(f"agenda for meeting {agenda.meeting_id} changed meanwhile")
         return self._put_agenda(agenda)
 
     def _put_agenda(self, agenda: Agenda) -> Agenda:
-        saved = self._agendas.get(agenda.meeting_id)
+        key = (agenda.meeting_id, agenda.person_id)
+        saved = self._agendas.get(key)
         revision = (saved.revision if saved else 0) + 1
-        self._agendas[agenda.meeting_id] = agenda.model_copy(
-            deep=True, update={"revision": revision}
-        )
-        return _copy(self._agendas[agenda.meeting_id])
+        self._agendas[key] = agenda.model_copy(deep=True, update={"revision": revision})
+        return _copy(self._agendas[key])
 
     # fact-checks
 
@@ -908,3 +922,8 @@ def unique_segments(
         if known is not None and known != segment:
             raise Conflict(f"seg_id {segment.seg_id} was already saved with different content")
         batch[segment.seg_id] = segment
+
+
+def _owned(agenda: Agenda) -> None:
+    if not agenda.person_id:
+        raise ValueError("An agenda belongs to someone: person_id is required")

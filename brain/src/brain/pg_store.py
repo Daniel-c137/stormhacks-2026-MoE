@@ -86,6 +86,11 @@ def _utc(row: Row) -> Row:
     return {k: v.astimezone(UTC) if isinstance(v, datetime) else v for k, v in row.items()}
 
 
+def _owned(agenda: Agenda) -> None:
+    if not agenda.person_id:
+        raise ValueError("An agenda belongs to someone: person_id is required")
+
+
 def _meeting(row: Row) -> Meeting:
     return Meeting.model_validate(_utc(row))
 
@@ -611,33 +616,56 @@ class PostgresStore:
 
     # agenda
 
-    async def agenda(self, meeting_id: str) -> Agenda | None:
+    async def agenda(self, meeting_id: str, person_id: str) -> Agenda | None:
         async with self._tx() as cur:
             row = await self._one(
                 cur,
-                f"select meeting_id, {AGENDA} from agendas where meeting_id = %s",
-                [meeting_id],
+                f"select meeting_id, person_id, {AGENDA} from agendas"
+                " where meeting_id = %s and person_id = %s",
+                [meeting_id, person_id],
             )
             if row is None:
                 return None
-            items = await self._all(
-                cur,
-                "select id, title, why, owner_id, sources, status, minutes, added_by,"
-                " discussed_s, nudged_t, last_discussed_t, covered_by, covered_t from agenda_items"
-                " where meeting_id = %s order by ord",
-                [meeting_id],
-            )
+            items = await self._agenda_items(cur, meeting_id, person_id)
         return Agenda.model_validate(_utc(row) | {"items": items})
 
+    async def agendas(self, meeting_id: str) -> list[Agenda]:
+        async with self._tx() as cur:
+            rows = await self._all(
+                cur,
+                f"select meeting_id, person_id, {AGENDA} from agendas where meeting_id = %s"
+                " order by generated_at, person_id",
+                [meeting_id],
+            )
+            return [
+                Agenda.model_validate(
+                    _utc(row)
+                    | {"items": await self._agenda_items(cur, meeting_id, row["person_id"])}
+                )
+                for row in rows
+            ]
+
+    async def _agenda_items(self, cur: Cursor, meeting_id: str, person_id: str) -> list[Row]:
+        return await self._all(
+            cur,
+            "select id, title, why, owner_id, sources, status, minutes, added_by,"
+            " discussed_s, nudged_t, last_discussed_t, covered_by, covered_t from agenda_items"
+            " where meeting_id = %s and person_id = %s order by ord",
+            [meeting_id, person_id],
+        )
+
     async def save_agenda(self, agenda: Agenda) -> Agenda:
+        _owned(agenda)
         async with self._tx() as cur:
             # One upsert: overlapping saves queue on the row lock and each bumps the revision.
             row = await self._one(
                 cur,
-                "insert into agendas (meeting_id, generated_at, updated_at, current_item_id,"
-                " tracked_until, revision) values (%(meeting_id)s, %(generated_at)s,"
-                " %(updated_at)s, %(current_item_id)s, %(tracked_until)s, 1)"
-                " on conflict (meeting_id) do update set generated_at = excluded.generated_at,"
+                "insert into agendas (meeting_id, person_id, generated_at, updated_at,"
+                " current_item_id, tracked_until, revision) values (%(meeting_id)s,"
+                " %(person_id)s, %(generated_at)s, %(updated_at)s, %(current_item_id)s,"
+                " %(tracked_until)s, 1)"
+                " on conflict (meeting_id, person_id) do update"
+                " set generated_at = excluded.generated_at,"
                 " updated_at = excluded.updated_at, current_item_id = excluded.current_item_id,"
                 " tracked_until = excluded.tracked_until, revision = agendas.revision + 1"
                 " returning revision",
@@ -647,20 +675,22 @@ class PostgresStore:
         return agenda.model_copy(deep=True, update={"revision": row["revision"]})
 
     async def save_agenda_if(self, agenda: Agenda) -> Agenda:
+        _owned(agenda)
         if agenda.revision == 0:  # none saved yet: create it, unless someone just did
             sql = (
-                "insert into agendas (meeting_id, generated_at, updated_at, current_item_id,"
-                " tracked_until, revision) values (%(meeting_id)s, %(generated_at)s,"
-                " %(updated_at)s, %(current_item_id)s, %(tracked_until)s, 1)"
-                " on conflict (meeting_id) do nothing returning revision"
+                "insert into agendas (meeting_id, person_id, generated_at, updated_at,"
+                " current_item_id, tracked_until, revision) values (%(meeting_id)s,"
+                " %(person_id)s, %(generated_at)s, %(updated_at)s, %(current_item_id)s,"
+                " %(tracked_until)s, 1)"
+                " on conflict (meeting_id, person_id) do nothing returning revision"
             )
         else:  # the row lock makes an overlapping save wait, then miss the old revision
             sql = (
                 "update agendas set generated_at = %(generated_at)s,"
                 " updated_at = %(updated_at)s, current_item_id = %(current_item_id)s,"
                 " tracked_until = %(tracked_until)s, revision = revision + 1"
-                " where meeting_id = %(meeting_id)s and revision = %(revision)s"
-                " returning revision"
+                " where meeting_id = %(meeting_id)s and person_id = %(person_id)s"
+                " and revision = %(revision)s returning revision"
             )
         async with self._tx() as cur:
             row = await self._one(cur, sql, agenda.model_dump(exclude={"items"}))
@@ -671,17 +701,21 @@ class PostgresStore:
         return agenda.model_copy(deep=True, update={"revision": row["revision"]})
 
     async def _replace_agenda_items(self, cur: Cursor, agenda: Agenda) -> None:
-        await cur.execute("delete from agenda_items where meeting_id = %s", [agenda.meeting_id])
+        await cur.execute(
+            "delete from agenda_items where meeting_id = %s and person_id = %s",
+            [agenda.meeting_id, agenda.person_id],
+        )
         if agenda.items:
             await cur.executemany(
-                "insert into agenda_items (meeting_id, ord, id, title, why, owner_id,"
+                "insert into agenda_items (meeting_id, person_id, ord, id, title, why, owner_id,"
                 " sources, status, minutes, added_by, discussed_s, nudged_t, last_discussed_t,"
                 " covered_by, covered_t)"
-                " values (%(meeting_id)s, %(ord)s, %(id)s, %(title)s, %(why)s, %(owner_id)s,"
-                " %(sources)s, %(status)s, %(minutes)s, %(added_by)s, %(discussed_s)s,"
-                " %(nudged_t)s, %(last_discussed_t)s, %(covered_by)s, %(covered_t)s)",
+                " values (%(meeting_id)s, %(person_id)s, %(ord)s, %(id)s, %(title)s, %(why)s,"
+                " %(owner_id)s, %(sources)s, %(status)s, %(minutes)s, %(added_by)s,"
+                " %(discussed_s)s, %(nudged_t)s, %(last_discussed_t)s, %(covered_by)s,"
+                " %(covered_t)s)",
                 [
-                    self._agenda_item(agenda.meeting_id, i, item)
+                    self._agenda_item(agenda.meeting_id, i, item) | {"person_id": agenda.person_id}
                     for i, item in enumerate(agenda.items)
                 ],
             )
