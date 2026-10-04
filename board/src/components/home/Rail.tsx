@@ -33,6 +33,8 @@ interface ChatEntry {
   text: string;
   sources?: Source[];
   unavailable?: string[];
+  /** A reply saying the question failed; not sent back as conversation. */
+  failed?: boolean;
 }
 
 const startMs = (m: Meeting) => meetingStart(m)?.getTime() ?? 0;
@@ -125,13 +127,15 @@ export function Rail({ meetings, now }: { meetings: Query<Meeting[]>; now: Date 
     setSuggest(false);
     setInput("");
     setTyping(true);
+    // Earlier turns go with the question, so a follow-up has its context.
+    const history = chat.filter((c) => !c.failed).map((c) => ({ role: c.from, text: c.text }));
     setChat((c) => [...c, { id: `q${id}`, from: "user", text: question }]);
     let reply: ChatEntry;
     try {
-      const answer = await askHistory({ question, visibility: "private" });
+      const answer = await askHistory({ question, visibility: "private", history });
       reply = { id: `a${id}`, from: "agent", text: answer.text, sources: answer.sources, unavailable: answer.unavailable };
     } catch (err) {
-      reply = { id: `a${id}`, from: "agent", text: `I couldn't answer that. ${describeError(err)}` };
+      reply = { id: `a${id}`, from: "agent", text: `I couldn't answer that. ${describeError(err)}`, failed: true };
     }
     if (epoch.current !== asked) return;
     pending.current -= 1;

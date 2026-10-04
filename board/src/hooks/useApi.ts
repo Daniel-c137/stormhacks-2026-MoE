@@ -3,6 +3,7 @@
 // Data from the brain API, outside or around a live meeting.
 import type {
   Agenda,
+  ConnectorStatus,
   Decision,
   Meeting,
   Person,
@@ -84,3 +85,4 @@ export const useTasks = (ownerId?: string): Query<TaskDraft[]> =>
   useQuery(`tasks:${ownerId ?? ""}`, () => api.listTasks(ownerId));
 export const useSettings = (): Query<TeamSettings> => useQuery("settings", api.getSettings);
 export const useVoices = (): Query<Voice[]> => useQuery("voices", api.listVoices);
+export const useConnectors = (): Query<ConnectorStatus[]> => useQuery("connectors", api.listConnectors);

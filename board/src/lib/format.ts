@@ -35,7 +35,7 @@ export const shortOf = (name: string) => name.trim().split(/\s+/)[0] || name;
 
 /** When a meeting starts: its scheduled time until it has actually started. */
 export function meetingStart(m: Meeting): Date | null {
-  const iso = m.started_at ?? m.scheduled_for;
+  const iso = m.started_at ?? m.scheduled_start;
   return iso ? new Date(iso) : null;
 }
 

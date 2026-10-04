@@ -1,10 +1,12 @@
 // Sign-in against the brain (POST /auth/login). The session token and its expiry are kept in
 // localStorage; every brain call sends authHeaders().
 import type { LoginRequest, LoginResponse } from "@moe/contracts";
+import { apiUrl } from "./apiUrl";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const TOKEN_KEY = "session.token";
 const EXPIRES_KEY = "session.expires_at";
+/** Fired on window when this tab signs in or out; other tabs see the storage event instead. */
+export const SESSION_EVENT = "session-change";
 
 /** A failed login. `status` is 401 for a wrong email or password, 429 after too many failures
  * (`retryAfter` seconds), 503 when the brain's sign-in is not configured. */
@@ -31,7 +33,7 @@ function storage(): Storage | null {
 
 export async function login(email: string, password: string): Promise<LoginResponse> {
   const body: LoginRequest = { email, password };
-  const response = await fetch(`${API_URL}/auth/login`, {
+  const response = await fetch(apiUrl("/auth/login"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -48,6 +50,7 @@ export async function login(email: string, password: string): Promise<LoginRespo
   const store = storage();
   store?.setItem(TOKEN_KEY, session.token);
   store?.setItem(EXPIRES_KEY, session.expires_at);
+  notify();
   return session;
 }
 
@@ -65,8 +68,27 @@ export function sessionToken(): string | null {
 
 export function signOut(): void {
   const store = storage();
-  store?.removeItem(TOKEN_KEY);
-  store?.removeItem(EXPIRES_KEY);
+  if (!store?.getItem(TOKEN_KEY) && !store?.getItem(EXPIRES_KEY)) return;
+  store.removeItem(TOKEN_KEY);
+  store.removeItem(EXPIRES_KEY);
+  notify();
+}
+
+function notify(): void {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(SESSION_EVENT));
+}
+
+/** Calls `listener` whenever the session may have changed, in this tab or another. */
+export function onSessionChange(listener: () => void): () => void {
+  const onStorage = (e: StorageEvent) => {
+    if (e.key === null || e.key === TOKEN_KEY || e.key === EXPIRES_KEY) listener();
+  };
+  window.addEventListener(SESSION_EVENT, listener);
+  window.addEventListener("storage", onStorage);
+  return () => {
+    window.removeEventListener(SESSION_EVENT, listener);
+    window.removeEventListener("storage", onStorage);
+  };
 }
 
 /** `Authorization: Bearer <token>` for brain calls; empty when signed out. */

@@ -1,32 +1,33 @@
 "use client";
 
 import type { Person } from "@moe/contracts";
-import type { Session } from "@supabase/supabase-js";
 import { usePathname, useRouter } from "next/navigation";
-import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { Icon } from "@/components/ui/Icon";
+import { Notice } from "@/components/ui/Notice";
 import { useMe, useMembers } from "@/hooks/useApi";
-import { initialsOf, shortOf, unknownPerson } from "@/lib/format";
-import { supabaseBrowser, supabaseConfigured } from "@/lib/supabase";
+import { unknownPerson } from "@/lib/format";
+import { onSessionChange, sessionToken, signOut } from "@/lib/auth";
 
-type AuthState =
-  | { status: "loading" | "unconfigured" | "signed_out" }
-  | { status: "signed_in"; session: Session };
+type AuthStatus = "loading" | "signed_out" | "signed_in";
 
-const AuthContext = createContext<AuthState>({ status: "loading" });
+const AuthContext = createContext<AuthStatus>("loading");
 
-/** Tracks the Supabase session for the whole app. */
+/** Whether there is a session from the brain (lib/auth.ts), kept current across tabs. */
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<AuthState>({ status: supabaseConfigured() ? "loading" : "unconfigured" });
+  const [status, setStatus] = useState<AuthStatus>("loading");
   useEffect(() => {
-    if (!supabaseConfigured()) return;
-    const auth = supabaseBrowser().auth;
-    const apply = (session: Session | null) =>
-      setState(session ? { status: "signed_in", session } : { status: "signed_out" });
-    void auth.getSession().then(({ data }) => apply(data.session));
-    const { data } = auth.onAuthStateChange((_event, session) => apply(session));
-    return () => data.subscription.unsubscribe();
+    const check = () => setStatus(sessionToken() ? "signed_in" : "signed_out");
+    check();
+    // A session expires on its own: look again now and then, not only when something changes.
+    const timer = setInterval(check, 60_000);
+    const stop = onSessionChange(check);
+    return () => {
+      clearInterval(timer);
+      stop();
+    };
   }, []);
-  return <AuthContext.Provider value={state}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={status}>{children}</AuthContext.Provider>;
 }
 
 export const useAuth = () => useContext(AuthContext);
@@ -40,6 +41,8 @@ interface TeamValue {
   /** Any account by id; a labelled stand-in when the id is not a known member. */
   person: (id: string) => Person;
   reloadMe: () => void;
+  /** Replace the signed-in user's own record after they changed it. */
+  setMe: (person: Person) => void;
 }
 
 const TeamContext = createContext<TeamValue | null>(null);
@@ -50,41 +53,63 @@ export function useTeam(): TeamValue {
   return value;
 }
 
-/** The account as Supabase knows it, used until the brain returns the team's own record. */
-function personFromSession(session: Session): Person {
-  const meta = session.user.user_metadata as { name?: unknown; full_name?: unknown };
-  const fromMeta = typeof meta.name === "string" ? meta.name : typeof meta.full_name === "string" ? meta.full_name : "";
-  const name = fromMeta.trim() || session.user.email?.split("@")[0] || "You";
-  return { id: session.user.id, name, short: shortOf(name), initials: initialsOf(name) };
-}
-
-function TeamProvider({ session, children }: { session: Session; children: ReactNode }) {
+function TeamProvider({ children }: { children: ReactNode }) {
   const meQuery = useMe();
   const membersQuery = useMembers();
-  const value = useMemo<TeamValue>(() => {
-    const members = membersQuery.data ?? [];
-    const me = meQuery.data ?? members.find((p) => p.id === session.user.id) ?? personFromSession(session);
+  const [changed, setChanged] = useState<Person | null>(null);
+  const { reload: reloadMeQuery } = meQuery;
+  const reloadMe = useCallback(() => {
+    setChanged(null);
+    reloadMeQuery();
+  }, [reloadMeQuery]);
+  const loaded = changed ?? meQuery.data;
+  const value = useMemo<TeamValue | null>(() => {
+    if (!loaded) return null;
+    // The members list may predate a change to your own name or photo.
+    const members = (membersQuery.data ?? []).map((p) => (p.id === loaded.id ? loaded : p));
     return {
-      me,
-      email: session.user.email ?? null,
+      me: loaded,
+      email: loaded.email ?? null,
       members,
       membersError: membersQuery.error,
-      person: (id) => (id === me.id ? me : (members.find((p) => p.id === id) ?? unknownPerson(id))),
-      reloadMe: meQuery.reload,
+      person: (id) => (id === loaded.id ? loaded : (members.find((p) => p.id === id) ?? unknownPerson(id))),
+      reloadMe,
+      setMe: setChanged,
     };
-  }, [meQuery.data, meQuery.reload, membersQuery.data, membersQuery.error, session]);
+  }, [loaded, membersQuery.data, membersQuery.error, reloadMe]);
+
+  if (!value) {
+    return (
+      <main className="auth">
+        <div className="auth-card">
+          {meQuery.error ? (
+            <>
+              <Notice error={meQuery.error} onRetry={meQuery.reload}>
+                Your account can&apos;t be loaded.
+              </Notice>
+              <button type="button" className="btn btn-outline" onClick={signOut}>
+                <Icon name="log-out" />
+                Sign out
+              </button>
+            </>
+          ) : (
+            <p className="muted-p">Loading…</p>
+          )}
+        </div>
+      </main>
+    );
+  }
   return <TeamContext.Provider value={value}>{children}</TeamContext.Provider>;
 }
 
 /** Signed-in pages only. Everyone else goes to sign-in and comes back afterwards. */
 export function AuthGate({ children }: { children: ReactNode }) {
-  const auth = useAuth();
+  const status = useAuth();
   const router = useRouter();
   const pathname = usePathname();
-  const needsSignIn = auth.status === "signed_out" || auth.status === "unconfigured";
   useEffect(() => {
-    if (needsSignIn) router.replace(`/login?next=${encodeURIComponent(pathname)}`);
-  }, [needsSignIn, pathname, router]);
-  if (auth.status !== "signed_in") return null;
-  return <TeamProvider session={auth.session}>{children}</TeamProvider>;
+    if (status === "signed_out") router.replace(`/login?next=${encodeURIComponent(pathname)}`);
+  }, [status, pathname, router]);
+  if (status !== "signed_in") return null;
+  return <TeamProvider>{children}</TeamProvider>;
 }

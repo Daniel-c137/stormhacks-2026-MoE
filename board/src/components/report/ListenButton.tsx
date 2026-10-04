@@ -1,5 +1,9 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
+import { Icon, Spinner } from "@/components/ui/Icon";
+import { ApiError, describeError, getReportAudio } from "@/lib/api";
+
 export interface ListenButtonProps {
   meetingId: string;
 }
@@ -10,6 +14,60 @@ export interface ListenButtonProps {
  * done. Shows an unavailable state when the brain answers 503 (ElevenLabs not configured).
  * Report page only; never plays into a meeting.
  */
-export function ListenButton(_props: ListenButtonProps) {
-  return null;
+export function ListenButton({ meetingId }: ListenButtonProps) {
+  const [state, setState] = useState<"idle" | "loading" | "playing">("idle");
+  const [problem, setProblem] = useState("");
+  const audio = useRef<HTMLAudioElement | null>(null);
+  const url = useRef<string | null>(null);
+
+  const release = () => {
+    audio.current?.pause();
+    audio.current = null;
+    if (url.current) URL.revokeObjectURL(url.current);
+    url.current = null;
+  };
+  useEffect(() => release, []);
+
+  const listen = async () => {
+    if (state === "playing") {
+      release();
+      setState("idle");
+      return;
+    }
+    setState("loading");
+    setProblem("");
+    try {
+      const blob = await getReportAudio(meetingId);
+      release();
+      url.current = URL.createObjectURL(blob);
+      const player = new Audio(url.current);
+      audio.current = player;
+      player.onended = () => {
+        release();
+        setState("idle");
+      };
+      await player.play();
+      setState("playing");
+    } catch (err) {
+      release();
+      setState("idle");
+      setProblem(
+        err instanceof ApiError && err.status === 503 ? "Listening isn't available: no voice is set up." : describeError(err),
+      );
+    }
+  };
+
+  return (
+    <span className="listen">
+      <button type="button" className="btn btn-outline btn-sm" onClick={() => void listen()} disabled={state === "loading"}>
+        {state === "loading" ? <Spinner /> : <Icon name={state === "playing" ? "x" : "volume-2"} />}
+        {state === "playing" ? "Stop" : "Listen"}
+      </button>
+      {problem && (
+        <span role="status" className="note">
+          {problem}
+        </span>
+      )}
+    </span>
+  );
 }

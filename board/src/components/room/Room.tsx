@@ -281,6 +281,8 @@ function RoomView({
 
   const askPrivately = async (text: string) => {
     const base = { meeting_id: meeting.id, visibility: "private" as const };
+    // Earlier turns of this private thread go with the question, so a follow-up has its context.
+    const history = agentThread.map((m) => ({ role: m.is_agent ? ("agent" as const) : ("user" as const), text: m.text }));
     setAgentThread((list) => [
       ...list,
       {
@@ -296,7 +298,7 @@ function RoomView({
     ]);
     setPrivateAsks((n) => n + 1);
     try {
-      const answer = await askInMeeting(meeting.id, { question: text, visibility: "private" });
+      const answer = await askInMeeting(meeting.id, { question: text, visibility: "private", history });
       setAgentThread((list) => [
         ...list,
         {

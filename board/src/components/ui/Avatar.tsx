@@ -1,5 +1,8 @@
+"use client";
+
 import type { Person } from "@moe/contracts";
 import type { CSSProperties } from "react";
+import { usePhoto } from "@/hooks/usePhoto";
 import { cx } from "@/lib/format";
 
 // Colour by initials, so each person keeps one colour everywhere.
@@ -19,21 +22,23 @@ export interface AvatarProps {
 }
 
 export function Avatar({ person, size, me, title }: AvatarProps) {
-  const style: CSSProperties = person.photo_url
-    ? { backgroundImage: `url("${person.photo_url}")`, backgroundSize: "cover", backgroundPosition: "center" }
+  // The initials show until the photo has loaded, and if it can't be.
+  const photo = usePhoto(person.photo_url);
+  const style: CSSProperties = photo
+    ? { backgroundImage: `url("${photo}")`, backgroundSize: "cover", backgroundPosition: "center" }
     : me
       ? {}
       : { background: avatarColor(person.initials) };
   return (
     <span
-      className={cx("av", size, me && !person.photo_url && "av-me")}
+      className={cx("av", size, me && !photo && "av-me")}
       style={style}
       title={title}
-      role={person.photo_url ? "img" : undefined}
-      aria-label={person.photo_url ? person.name : undefined}
-      aria-hidden={person.photo_url ? undefined : true}
+      role={photo ? "img" : undefined}
+      aria-label={photo ? person.name : undefined}
+      aria-hidden={photo ? undefined : true}
     >
-      {person.photo_url ? null : person.initials}
+      {photo ? null : person.initials}
     </span>
   );
 }

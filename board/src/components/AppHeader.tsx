@@ -9,7 +9,7 @@ import { Avatar } from "@/components/ui/Avatar";
 import { Icon } from "@/components/ui/Icon";
 import { Mark } from "@/components/ui/Mark";
 import { useDismiss } from "@/hooks/useDismiss";
-import { supabaseBrowser } from "@/lib/supabase";
+import { signOut } from "@/lib/auth";
 
 /** Brand (identity.product_name), account menu and settings. */
 export function AppHeader() {
@@ -51,7 +51,11 @@ export function AppHeader() {
                   <b>{me.name}</b>
                   {email && <span>{email}</span>}
                 </div>
-                <button type="button" className="menu-item" role="menuitem" onClick={() => void supabaseBrowser().auth.signOut()}>
+                <Link className="menu-item" role="menuitem" href="/memory" onClick={() => setMenuOpen(false)}>
+                  <Icon name="list-checks" />
+                  Decisions &amp; tasks
+                </Link>
+                <button type="button" className="menu-item" role="menuitem" onClick={signOut}>
                   <Icon name="log-out" />
                   Sign out
                 </button>

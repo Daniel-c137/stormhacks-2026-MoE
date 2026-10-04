@@ -1,14 +1,15 @@
 "use client";
 
-import { type Sensitivity, type TeamSettings, identity } from "@moe/contracts";
-import { type ChangeEvent, useEffect, useRef, useState } from "react";
+import { type ConnectorName, type ConnectorStatus, type Sensitivity, type TeamSettings, identity } from "@moe/contracts";
+import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from "react";
 import { useTeam } from "@/components/AuthProvider";
 import { Avatar } from "@/components/ui/Avatar";
 import { Icon, Spinner } from "@/components/ui/Icon";
 import { Mark } from "@/components/ui/Mark";
 import { Notice } from "@/components/ui/Notice";
-import { useSettings, useVoices } from "@/hooks/useApi";
-import { describeError, updateMe, updateSettings } from "@/lib/api";
+import { useConnectors, useSettings, useVoices } from "@/hooks/useApi";
+import { ApiError, changePassword, deletePhoto, describeError, updateMe, updateSettings, uploadPhoto, waitText } from "@/lib/api";
+import { signOut } from "@/lib/auth";
 import { initialsOf } from "@/lib/format";
 
 const SENSITIVITY: [Sensitivity, string, string][] = [
@@ -24,8 +25,16 @@ const SENSITIVITY: [Sensitivity, string, string][] = [
 const PHOTO_SIZE = 256;
 const PREVIEW_MS = 4000;
 
+/** A new photo picked here, not saved yet: the upload and its local preview. */
+interface PickedPhoto {
+  blob: Blob;
+  preview: string;
+}
+
+const MIN_PASSWORD = 10;
+
 /** Centre-crop to a small square JPEG, so a profile photo stays a few kilobytes. */
-async function squarePhoto(file: File): Promise<string> {
+async function squarePhoto(file: File): Promise<Blob> {
   const bitmap = await createImageBitmap(file);
   const side = Math.min(bitmap.width, bitmap.height);
   const canvas = document.createElement("canvas");
@@ -33,19 +42,142 @@ async function squarePhoto(file: File): Promise<string> {
   const context = canvas.getContext("2d");
   if (!context) throw new Error("This browser can't resize images.");
   context.drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, PHOTO_SIZE, PHOTO_SIZE);
-  return canvas.toDataURL("image/jpeg", 0.85);
+  return new Promise((resolve, reject) =>
+    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("The image couldn't be encoded."))), "image/jpeg", 0.85),
+  );
+}
+
+const CONNECTOR_TEXT: Record<ConnectorStatus["state"], string> = {
+  connected: "Connected",
+  not_configured: "Not configured",
+  failing: "Not reachable",
+};
+
+/** Whether the server can use an integration right now, checked live (GET /settings/connectors). */
+function ConnectorState({ name, statuses }: { name: ConnectorName; statuses: ReturnType<typeof useConnectors> }) {
+  const status = statuses.data?.find((c) => c.name === name);
+  if (!status) {
+    return (
+      <div className="connected" data-on={false}>
+        <Icon name="circle-dashed" />
+        {statuses.error ? `Status unavailable. ${describeError(statuses.error)}` : "Checking…"}
+      </div>
+    );
+  }
+  return (
+    <div className="connected" data-on={status.state === "connected"}>
+      <Icon name={status.state === "connected" ? "circle-check" : status.state === "failing" ? "triangle-alert" : "circle-dashed"} />
+      {CONNECTOR_TEXT[status.state]}
+      {status.detail && <span>· {status.detail}</span>}
+    </div>
+  );
+}
+
+/** POST /auth/password. Sessions already issued stay valid until they expire. */
+function PasswordForm() {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [again, setAgain] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (next.length < MIN_PASSWORD) {
+      setMessage({ ok: false, text: `The new password must be at least ${MIN_PASSWORD} characters.` });
+      return;
+    }
+    if (next !== again) {
+      setMessage({ ok: false, text: "The new passwords don't match." });
+      return;
+    }
+    setBusy(true);
+    setMessage(null);
+    try {
+      await changePassword({ current_password: current, new_password: next });
+      setCurrent("");
+      setNext("");
+      setAgain("");
+      setMessage({ ok: true, text: "Password changed." });
+    } catch (err) {
+      const text =
+        err instanceof ApiError && err.status === 401
+          ? "The current password is wrong."
+          : err instanceof ApiError && err.status === 429
+            ? `Too many failed attempts.${err.retryAfter ? ` Try again in ${waitText(err.retryAfter)}.` : ""}`
+            : `The password wasn't changed. ${describeError(err)}`;
+      setMessage({ ok: false, text });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form className="srow-stack" onSubmit={submit} aria-labelledby="s-password">
+      <label className="label" style={{ maxWidth: 360 }}>
+        Current password
+        <input
+          className="field"
+          type="password"
+          autoComplete="current-password"
+          value={current}
+          onChange={(e) => setCurrent(e.target.value)}
+          required
+        />
+      </label>
+      <div className="two">
+        <label className="label">
+          New password
+          <input
+            className="field"
+            type="password"
+            autoComplete="new-password"
+            value={next}
+            onChange={(e) => setNext(e.target.value)}
+            minLength={MIN_PASSWORD}
+            required
+          />
+        </label>
+        <label className="label">
+          Repeat new password
+          <input
+            className="field"
+            type="password"
+            autoComplete="new-password"
+            value={again}
+            onChange={(e) => setAgain(e.target.value)}
+            minLength={MIN_PASSWORD}
+            required
+          />
+        </label>
+      </div>
+      <div className="photo-acts">
+        <div>
+          <button type="submit" className="btn btn-outline btn-sm" disabled={busy || !current || !next || !again}>
+            {busy ? <Spinner /> : <Icon name="lock" />}
+            Change password
+          </button>
+        </div>
+        <span role="status" className={message && !message.ok ? "err" : "note"}>
+          {message?.text ?? `At least ${MIN_PASSWORD} characters.`}
+        </span>
+      </div>
+    </form>
+  );
 }
 
 /** Profile, GitHub repo and ref, Jira site and project, the agent's voice and fact-check sensitivity. */
 export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
   const agent = identity.agent_name;
-  const { me, reloadMe } = useTeam();
+  const { me, email, setMe } = useTeam();
   const settings = useSettings();
   const voices = useVoices();
+  const connectors = useConnectors();
 
   // Each is null/undefined until the person changes it; the saved value shows until then.
   const [name, setName] = useState<string | null>(null);
-  const [photo, setPhoto] = useState<string | null | undefined>(undefined);
+  // undefined: unchanged; null: remove the saved photo.
+  const [photo, setPhoto] = useState<PickedPhoto | null | undefined>(undefined);
   const [draft, setDraft] = useState<TeamSettings | null>(null);
   const [previewing, setPreviewing] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -67,10 +199,12 @@ export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
     return () => clearTimeout(timer);
   }, [previewing]);
   useEffect(() => () => audio.current?.pause(), []);
+  const preview = photo?.preview;
+  useEffect(() => (preview ? () => URL.revokeObjectURL(preview) : undefined), [preview]);
 
   const s = draft ?? settings.data ?? null;
   const shownName = name ?? me.name;
-  const shownPhoto = photo === undefined ? (me.photo_url ?? null) : photo;
+  const shownPhoto = photo === undefined ? (me.photo_url ?? null) : (photo?.preview ?? null);
   const profileChanged = (name !== null && name.trim() !== me.name) || photo !== undefined;
   const touch = () => {
     setSaved(false);
@@ -87,14 +221,15 @@ export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
     e.target.value = "";
     if (!file) return;
     try {
-      setPhoto(await squarePhoto(file));
+      const blob = await squarePhoto(file);
+      setPhoto({ blob, preview: URL.createObjectURL(blob) });
       touch();
     } catch (err) {
       setProblem(`That image couldn't be used. ${describeError(err)}`);
     }
   };
 
-  const preview = (voiceId: string, sample: string) => {
+  const previewVoice = (voiceId: string, sample: string) => {
     setPreviewing(voiceId);
     audio.current?.pause();
     // A voice's sample is either a clip to play or the line it would say.
@@ -108,15 +243,18 @@ export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
     setSaving(true);
     setProblem("");
     try {
-      if (profileChanged) {
-        await updateMe({ name: shownName.trim() || me.name, ...(photo !== undefined ? { photo } : {}) });
-        reloadMe();
+      if (name !== null && name.trim() !== me.name) {
+        setMe(await updateMe({ name: name.trim() }));
         setName(null);
+      }
+      if (photo !== undefined) {
+        setMe(await (photo ? uploadPhoto(photo.blob) : deletePhoto()));
         setPhoto(undefined);
       }
       if (draft) {
         await updateSettings(draft);
         settings.reload();
+        connectors.reload();
         setDraft(null);
       }
       setSaved(true);
@@ -155,7 +293,7 @@ export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
                     <label className="btn btn-outline btn-sm file-btn">
                       <Icon name="image-up" />
                       {shownPhoto ? "Change photo" : "Upload photo"}
-                      <input type="file" accept="image/*" onChange={(e) => void onPhoto(e)} />
+                      <input type="file" accept="image/jpeg,image/png" onChange={(e) => void onPhoto(e)} />
                     </label>
                     {shownPhoto && (
                       <button
@@ -189,6 +327,26 @@ export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
                   style={{ maxWidth: 360 }}
                 />
                 <span className="note">How you appear in meetings, transcripts and reports.</span>
+              </div>
+            </section>
+          </div>
+
+          <div className="sgroup" role="group" aria-labelledby="g-account">
+            <h2 id="g-account">Account</h2>
+            <section className="srow" aria-labelledby="s-password">
+              <h3 id="s-password">Password</h3>
+              <PasswordForm />
+            </section>
+            <section className="srow" aria-labelledby="s-signout">
+              <h3 id="s-signout">Session</h3>
+              <div className="photo-acts">
+                <div>
+                  <button type="button" className="btn btn-outline btn-sm" onClick={signOut}>
+                    <Icon name="log-out" />
+                    Sign out
+                  </button>
+                </div>
+                {email && <span className="note">Signed in as {email}.</span>}
               </div>
             </section>
           </div>
@@ -232,11 +390,8 @@ export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
                         />
                       </label>
                     </div>
-                    <div className="connected" data-on={s.github.connected}>
-                      <Icon name={s.github.connected ? "circle-check" : "circle-dashed"} />
-                      {s.github.connected ? "Connected" : "Not connected"}
-                      {s.github.connected && githubStatus && <span>· {githubStatus}</span>}
-                    </div>
+                    <ConnectorState name="github" statuses={connectors} />
+                    {githubStatus && <span className="note">{githubStatus}</span>}
                   </div>
                 </section>
                 <section className="srow" aria-labelledby="s-jira">
@@ -262,10 +417,7 @@ export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
                         />
                       </label>
                     </div>
-                    <div className="connected" data-on={s.jira.connected}>
-                      <Icon name={s.jira.connected ? "circle-check" : "circle-dashed"} />
-                      {s.jira.connected ? "Connected" : "Not connected"}
-                    </div>
+                    <ConnectorState name="jira" statuses={connectors} />
                   </div>
                 </section>
               </div>
@@ -290,7 +442,7 @@ export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
                             <button
                               type="button"
                               className="btn btn-outline btn-sm"
-                              onClick={() => preview(v.id, v.sample)}
+                              onClick={() => previewVoice(v.id, v.sample)}
                               aria-label={`Preview ${v.name}`}
                             >
                               <Icon name="play" />

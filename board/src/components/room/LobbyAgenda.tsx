@@ -1,19 +1,28 @@
 "use client";
 
-import { type AgendaItem, identity } from "@moe/contracts";
+import { type Agenda, type AgendaItemInput, identity } from "@moe/contracts";
 import { type FormEvent, type KeyboardEvent, useCallback, useRef, useState } from "react";
 import { Icon, Spinner } from "@/components/ui/Icon";
 import { useAgenda } from "@/hooks/useApi";
 import { useDismiss } from "@/hooks/useDismiss";
-import { describeError, rewriteTopic, updateAgenda } from "@/lib/api";
+import { describeError, rewriteAgendaItem, updateAgenda } from "@/lib/api";
 
-/** Topics for the meeting: add, edit, delete, and have the agent tidy the wording. Saved with the meeting. */
+/** A topic as edited here. `key` is stable for React; `id` is the brain's, once it has saved it. */
+interface Topic extends AgendaItemInput {
+  key: string;
+}
+
+const fromAgenda = (agenda: Agenda): Topic[] =>
+  agenda.items.map((item) => ({ key: item.id, id: item.id, title: item.title, minutes: item.minutes ?? null }));
+
+/** Topics for the meeting: add, edit, delete, and have the agent tidy the wording. Saved with the
+ * meeting (PUT /meetings/{id}/agenda takes the whole list; items without an id are new). */
 export function LobbyAgenda({ meetingId }: { meetingId: string }) {
   const agent = identity.agent_name;
   const agenda = useAgenda(meetingId);
   // Edits made here; until the first one, the saved agenda is shown as it is.
-  const [edited, setEdited] = useState<AgendaItem[] | null>(null);
-  const items = edited ?? agenda.data?.items ?? [];
+  const [edited, setEdited] = useState<Topic[] | null>(null);
+  const items = edited ?? (agenda.data ? fromAgenda(agenda.data) : []);
   const [input, setInput] = useState("");
   const [rewriting, setRewriting] = useState(false);
   const [rewrote, setRewrote] = useState(false);
@@ -22,18 +31,34 @@ export function LobbyAgenda({ meetingId }: { meetingId: string }) {
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
   const list = useRef<HTMLUListElement>(null);
+  // The brain's id for each topic it has saved, by key. Saves run one at a time, so a topic added
+  // while an earlier save is in flight is sent with its id once that save has returned.
+  const ids = useRef(new Map<string, string>());
+  const queue = useRef<Promise<void>>(Promise.resolve());
   useDismiss(
     list,
     menuFor !== null,
     useCallback(() => setMenuFor(null), []),
   );
 
-  const save = (next: AgendaItem[]) => {
+  const save = (next: Topic[]) => {
     setEdited(next);
     setError("");
-    updateAgenda(meetingId, { items: next }).catch((err: unknown) =>
-      setError(`These topics aren't saved yet. ${describeError(err)}`),
-    );
+    queue.current = queue.current.then(async () => {
+      const body = {
+        items: next.map((t) => ({ id: t.id ?? ids.current.get(t.key) ?? null, title: t.title, minutes: t.minutes ?? null })),
+      };
+      try {
+        const saved = await updateAgenda(meetingId, body);
+        // The brain keeps the order it was sent, so the nth saved item is the nth topic.
+        next.forEach((t, i) => {
+          const savedId = saved.items[i]?.id;
+          if (savedId) ids.current.set(t.key, savedId);
+        });
+      } catch (err) {
+        setError(`These topics aren't saved yet. ${describeError(err)}`);
+      }
+    });
   };
 
   const hasText = Boolean(input.trim());
@@ -42,7 +67,7 @@ export function LobbyAgenda({ meetingId }: { meetingId: string }) {
     e.preventDefault();
     const title = input.trim();
     if (!title || rewriting) return;
-    save([...items, { id: crypto.randomUUID(), title, sources: [], status: "pending" }]);
+    save([...items, { key: crypto.randomUUID(), title }]);
     setInput("");
     setRewrote(false);
   };
@@ -53,7 +78,7 @@ export function LobbyAgenda({ meetingId }: { meetingId: string }) {
     setRewriting(true);
     setError("");
     try {
-      const result = await rewriteTopic(meetingId, { text });
+      const result = await rewriteAgendaItem({ text });
       setInput(result.text);
       setRewrote(true);
     } catch (err) {
@@ -66,7 +91,7 @@ export function LobbyAgenda({ meetingId }: { meetingId: string }) {
   const saveEdit = (id: string) => {
     if (editing !== id) return;
     const title = draft.trim();
-    if (title) save(items.map((x) => (x.id === id ? { ...x, title } : x)));
+    if (title) save(items.map((x) => (x.key === id ? { ...x, title } : x)));
     setEditing(null);
   };
 
@@ -89,8 +114,8 @@ export function LobbyAgenda({ meetingId }: { meetingId: string }) {
           {items.map((item) => {
             const menuLabel = `Options for “${item.title}”`;
             return (
-              <li key={item.id} className="agenda-item">
-                {editing === item.id ? (
+              <li key={item.key} className="agenda-item">
+                {editing === item.key ? (
                   <input
                     className="field"
                     aria-label="Edit topic"
@@ -98,7 +123,7 @@ export function LobbyAgenda({ meetingId }: { meetingId: string }) {
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
                     onKeyDown={onEditKey}
-                    onBlur={() => saveEdit(item.id)}
+                    onBlur={() => saveEdit(item.key)}
                   />
                 ) : (
                   <>
@@ -106,16 +131,16 @@ export function LobbyAgenda({ meetingId }: { meetingId: string }) {
                     <button
                       type="button"
                       className="icon-btn sm"
-                      onClick={() => setMenuFor(menuFor === item.id ? null : item.id)}
+                      onClick={() => setMenuFor(menuFor === item.key ? null : item.key)}
                       aria-haspopup="menu"
-                      aria-expanded={menuFor === item.id}
+                      aria-expanded={menuFor === item.key}
                       aria-label={menuLabel}
                     >
                       <Icon name="ellipsis" />
                     </button>
                   </>
                 )}
-                {menuFor === item.id && (
+                {menuFor === item.key && (
                   <div className="menu" role="menu" aria-label={menuLabel}>
                     <button
                       type="button"
@@ -123,7 +148,7 @@ export function LobbyAgenda({ meetingId }: { meetingId: string }) {
                       role="menuitem"
                       onClick={() => {
                         setMenuFor(null);
-                        setEditing(item.id);
+                        setEditing(item.key);
                         setDraft(item.title);
                       }}
                     >
@@ -136,7 +161,7 @@ export function LobbyAgenda({ meetingId }: { meetingId: string }) {
                       role="menuitem"
                       onClick={() => {
                         setMenuFor(null);
-                        save(items.filter((x) => x.id !== item.id));
+                        save(items.filter((x) => x.key !== item.key));
                       }}
                     >
                       <Icon name="trash-2" />

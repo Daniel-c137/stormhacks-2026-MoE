@@ -25,8 +25,9 @@ import {
   useSavedTranscript,
   useSettings,
 } from "@/hooks/useApi";
-import { describeError, pushTasks, updateTask } from "@/lib/api";
+import { describeError, pushTasks, retryReport, updateTask } from "@/lib/api";
 import { fmtClock, fmtDate, fmtLongDate, fmtT, joinNames, meetingStart, shortOf } from "@/lib/format";
+import { ListenButton } from "./ListenButton";
 import { TaskReview } from "./TaskReview";
 
 export interface MeetingReportProps {
@@ -95,7 +96,23 @@ export function MeetingReport({ meetingId }: MeetingReportProps) {
 
 function Processing({ meeting }: { meeting: Meeting }) {
   const agent = identity.agent_name;
+  const { me } = useTeam();
   const progress = useReportProgress(meeting.id, 2000);
+  const [retrying, setRetrying] = useState(false);
+  const [retryProblem, setRetryProblem] = useState("");
+  const stopped = progress.data?.error;
+  const retry = async () => {
+    setRetrying(true);
+    setRetryProblem("");
+    try {
+      await retryReport(meeting.id);
+      progress.reload();
+    } catch (err) {
+      setRetryProblem(`The write-up didn't restart. ${describeError(err)}`);
+    } finally {
+      setRetrying(false);
+    }
+  };
   const steps = progress.data?.steps ?? [];
   const current = progress.data?.current ?? 0;
   const meta = [meeting.duration_min ? `${meeting.duration_min} min` : null, `${meeting.participant_ids.length} people`]
@@ -133,6 +150,23 @@ function Processing({ meeting }: { meeting: Meeting }) {
         </ol>
       )}
       {progress.error && !progress.data && <Notice error={progress.error}>Progress isn&apos;t available.</Notice>}
+      {stopped && (
+        <Notice>
+          The write-up stopped: {stopped}
+          {meeting.host_id === me.id ? "" : " The host can start it again."}
+        </Notice>
+      )}
+      {stopped && meeting.host_id === me.id && (
+        <button type="button" className="btn btn-primary" onClick={() => void retry()} disabled={retrying}>
+          {retrying ? <Spinner /> : <Icon name="rotate-ccw" />}
+          Try the write-up again
+        </button>
+      )}
+      {retryProblem && (
+        <span role="alert" className="err">
+          {retryProblem}
+        </span>
+      )}
       <Link className="btn btn-outline" href="/">
         <Icon name="arrow-left" />
         Back to meetings
@@ -272,6 +306,7 @@ function ReportView({ meeting, onPushed }: { meeting: Meeting; onPushed: () => v
                 {people}
               </span>
             </div>
+            {r?.summary && <ListenButton meetingId={meeting.id} />}
           </header>
 
           {report.error && !r && (

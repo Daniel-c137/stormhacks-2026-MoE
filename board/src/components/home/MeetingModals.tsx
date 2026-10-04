@@ -94,7 +94,7 @@ export function NewMeetingModal({ onClose, onScheduled }: { onClose: () => void;
       const name = title.trim() || "Untitled meeting";
       if (when === "later") {
         onScheduled(
-          await createMeeting({ title: name, scheduled_for: start.toISOString(), duration_min: duration, invitee_ids: invitees }),
+          await createMeeting({ title: name, scheduled_start: start.toISOString(), duration_min: duration, invitee_ids: invitees }),
         );
       } else {
         const meeting = await createMeeting({ title: name });
