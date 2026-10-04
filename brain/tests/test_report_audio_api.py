@@ -127,6 +127,19 @@ def test_the_teams_voice_overrides_the_default(client_as, store, elevenlabs):
     assert request.url.path == f"/v1/text-to-speech/{TEAM_VOICE}"
 
 
+def test_a_voice_id_cannot_reach_another_elevenlabs_endpoint(client_as, store, elevenlabs):
+    meeting = create(client_as(ALEX))
+    reported(store, meeting)
+    team_voice(store, "x/../../v1/voices/abc/edit?y=1")
+
+    listen(client_as(ALEX), meeting)
+
+    [request] = elevenlabs.requests
+    assert request.url.raw_path.startswith(b"/v1/text-to-speech/")
+    assert request.url.raw_path.count(b"/") == 3  # the voice is one escaped path segment
+    assert "y" not in request.url.params
+
+
 def test_a_team_voice_is_enough_without_a_default_voice(client_as, store, elevenlabs, settings):
     settings.elevenlabs_voice_id = None
     meeting = create(client_as(ALEX))
