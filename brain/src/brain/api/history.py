@@ -6,6 +6,7 @@ from contracts import (
     Answer,
     AskRequest,
     Decision,
+    Meeting,
     Person,
     Report,
     ReportProgress,
@@ -15,16 +16,18 @@ from contracts import (
     TranscriptSegment,
 )
 
-from .deps import current_user, not_implemented
+from ..store import Store
+from .deps import current_user, get_store, member_meeting, not_implemented
 
 router = APIRouter(tags=["history"])
 
 
 @router.get("/meetings/{meeting_id}/transcript")
 async def get_transcript(
-    meeting_id: str, user: Person = Depends(current_user)
+    meeting: Meeting = Depends(member_meeting), store: Store = Depends(get_store)
 ) -> list[TranscriptSegment]:
-    not_implemented()
+    """Final segments in time order."""
+    return await store.transcript(meeting.id)
 
 
 @router.get("/meetings/{meeting_id}/report")

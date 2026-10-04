@@ -1,3 +1,4 @@
+import secrets
 from functools import cache
 from typing import NoReturn
 
@@ -33,9 +34,26 @@ async def current_user(authorization: str = Header()) -> Person:
     not_implemented()
 
 
-async def require_internal(x_internal_token: str = Header()) -> None:
-    """Guard for realtime -> brain calls (BRAIN_INTERNAL_TOKEN)."""
-    not_implemented()
+MIN_INTERNAL_TOKEN = 32
+
+
+async def require_internal(
+    x_internal_token: str | None = Header(default=None),
+    settings: Settings = Depends(app_settings),
+) -> None:
+    """Guard for realtime -> brain calls (BRAIN_INTERNAL_TOKEN). A short token is treated as
+    unset: /internal shares the board's port, so the token is the only thing protecting it."""
+    expected = settings.brain_internal_token
+    if not expected or len(expected) < MIN_INTERNAL_TOKEN:
+        raise HTTPException(
+            status_code=503,
+            detail=f"BRAIN_INTERNAL_TOKEN must be set to at least {MIN_INTERNAL_TOKEN} characters",
+        )
+    # Bytes: compare_digest raises on non-ASCII str, which would turn a bad header into a 500.
+    if not x_internal_token or not secrets.compare_digest(
+        x_internal_token.encode(), expected.encode()
+    ):
+        raise HTTPException(status_code=401, detail="Invalid internal token")
 
 
 # Team scoping is a dependency, not a helper, so a route can't forget it.

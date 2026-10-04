@@ -21,6 +21,10 @@ class NotFound(LookupError):
     """No such row, or not one the caller's team can see."""
 
 
+class SegmentConflict(ValueError):
+    """A seg_id already saved for this meeting arrived with different content."""
+
+
 class Store(Protocol):
     """Supabase Postgres. Every read is scoped to a team."""
 
@@ -44,8 +48,16 @@ class Store(Protocol):
         """Appends only if absent, atomically (array_append guarded by NOT ... = ANY)."""
         ...
 
-    async def add_segments(self, meeting_id: str, segments: list[TranscriptSegment]) -> None: ...
-    async def transcript(self, meeting_id: str) -> list[TranscriptSegment]: ...
+    async def add_segments(self, meeting_id: str, segments: list[TranscriptSegment]) -> None:
+        """Idempotent by (meeting_id, seg_id): an identical resend is a no-op, a seg_id reused
+        with different content raises SegmentConflict. All or nothing per call. In Postgres:
+        a unique constraint and INSERT ... ON CONFLICT DO NOTHING, then compare the conflicts."""
+        ...
+
+    async def transcript(self, meeting_id: str) -> list[TranscriptSegment]:
+        """Ordered by (t_start, t_end, seg_id), so ties are stable in every store."""
+        ...
+
     async def add_public_chat(self, message: ChatMessage) -> None: ...
 
     async def save_report(self, report: Report) -> None: ...
@@ -68,6 +80,7 @@ class InMemoryStore:
         self._teams = {t.id: t for t in teams}
         self._people = {p.id: p for p in people}
         self._meetings: dict[str, Meeting] = {}
+        self._segments: dict[str, dict[str, TranscriptSegment]] = {}
 
     async def team_for_user(self, user_id: str) -> Team:
         for team in self._teams.values():
@@ -137,3 +150,18 @@ class InMemoryStore:
             )
             self._meetings[meeting_id] = meeting
         return meeting
+
+    async def add_segments(self, meeting_id: str, segments: list[TranscriptSegment]) -> None:
+        saved = self._segments.setdefault(meeting_id, {})
+        incoming: dict[str, TranscriptSegment] = {}
+        for segment in segments:
+            known = saved.get(segment.seg_id) or incoming.get(segment.seg_id)
+            if known is not None and known != segment:
+                raise SegmentConflict(f"seg_id {segment.seg_id} was already saved differently")
+            incoming[segment.seg_id] = segment
+        for seg_id, segment in incoming.items():
+            saved.setdefault(seg_id, segment)
+
+    async def transcript(self, meeting_id: str) -> list[TranscriptSegment]:
+        saved = self._segments.get(meeting_id, {}).values()
+        return sorted(saved, key=lambda s: (s.t_start, s.t_end, s.seg_id))
