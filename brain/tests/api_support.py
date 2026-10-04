@@ -1,8 +1,12 @@
 """A two-team world and an app wired to it, for HTTP tests of the brain's API.
 
 Auth is overridden by client_as; test_auth.py covers real Supabase sessions. The store is the real
-in-memory store and LiveKit tokens are really signed.
+in-memory store, or with BRAIN_TEST_STORE=postgres a PostgresStore on a fresh pgserver database
+with the migrations applied. LiveKit tokens are really signed.
 """
+
+import asyncio
+import os
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,7 +14,7 @@ from fastapi.testclient import TestClient
 from brain.api.deps import current_user, get_settings, get_store
 from brain.config import Settings
 from brain.main import create_app
-from brain.store import InMemoryStore
+from brain.store import InMemoryStore, Store
 from contracts import Person, Team
 
 KEY = "test-key"
@@ -37,8 +41,24 @@ def settings() -> Settings:
 
 
 @pytest.fixture
-def store() -> InMemoryStore:
+def store(request) -> Store:
+    if os.environ.get("BRAIN_TEST_STORE") == "postgres":
+        return asyncio.run(postgres_world(request.getfixturevalue("pg_dsn")))
     return InMemoryStore(teams=[TEAM, OTHER_TEAM], people=[ALEX, SARAH, OUTSIDER])
+
+
+async def postgres_world(dsn: str) -> Store:
+    """The same two teams in Postgres. Connects per call, so any test's event loop can use it."""
+    from brain.db import migrate
+    from brain.pg_store import PostgresStore
+
+    await migrate(dsn)
+    store = PostgresStore(dsn)
+    for team in (TEAM, OTHER_TEAM):
+        await store.create_team(team.model_copy(update={"member_ids": []}))
+    for person, team in ((ALEX, TEAM), (SARAH, TEAM), (OUTSIDER, OTHER_TEAM)):
+        await store.upsert_person(person, team.id)
+    return store
 
 
 @pytest.fixture
