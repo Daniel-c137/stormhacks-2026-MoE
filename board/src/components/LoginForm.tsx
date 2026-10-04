@@ -80,6 +80,11 @@ export function LoginForm() {
     if (failed) setNotice({ kind: "error", text: GOOGLE_ERRORS[failed] ?? GOOGLE_ERRORS.failed });
     const code = query.get("google");
     if (code) {
+      // Swapped once: off the address bar, so neither a reload nor React's development re-run of
+      // this effect sends it again (a second try would fail and flash an error).
+      query.delete("google");
+      const rest = query.toString();
+      window.history.replaceState(window.history.state, "", `${window.location.pathname}${rest ? `?${rest}` : ""}`);
       setBusy(true);
       finishGoogleSignIn(code).catch((err: unknown) => {
         setNotice({ kind: "error", text: authProblem(err, "google") });

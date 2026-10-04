@@ -6,7 +6,7 @@ import { Avatar } from "@/components/ui/Avatar";
 import { Icon, Spinner } from "@/components/ui/Icon";
 import { Notice } from "@/components/ui/Notice";
 import { useMembers } from "@/hooks/useApi";
-import { ApiError, createAccount, describeError } from "@/lib/api";
+import { createAccount, describeError } from "@/lib/api";
 
 type Role = "member" | "admin";
 /** Invite: no login; the person creates their account on the sign-in page. Password: the server
@@ -65,7 +65,8 @@ export function TeamAccounts() {
       close();
       members.reload();
     } catch (err) {
-      setProblem(err instanceof ApiError && err.status === 409 ? "This email is already on the team or has an account." : describeError(err));
+      // 409: on this team already, has an account, or another team invited it; the brain says which.
+      setProblem(describeError(err));
     } finally {
       setBusy(false);
     }
