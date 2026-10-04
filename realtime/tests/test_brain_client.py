@@ -255,7 +255,7 @@ async def test_translate_is_tried_once_because_a_late_caption_is_useless(failure
 
 
 async def test_translate_against_the_real_brain_endpoint():
-    from brain.api.deps import get_llm_factory, get_settings, get_store
+    from brain.api.deps import get_settings, get_store, get_translation_llm_factory
     from brain.config import Settings as BrainSettings
     from brain.llm import MockLLM
     from brain.main import create_app
@@ -268,7 +268,7 @@ async def test_translate_against_the_real_brain_endpoint():
     llm = MockLLM(structured={Translation: Translation(language="es", english="Hello everyone")})
     app = create_app()
     app.dependency_overrides[get_store] = lambda: store
-    app.dependency_overrides[get_llm_factory] = lambda: lambda: llm
+    app.dependency_overrides[get_translation_llm_factory] = lambda: lambda: llm
     app.dependency_overrides[get_settings] = lambda: BrainSettings(
         _env_file=None, brain_internal_token=TOKEN
     )
