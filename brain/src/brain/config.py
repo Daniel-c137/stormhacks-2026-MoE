@@ -11,7 +11,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=REPO_ROOT / ".env", extra="ignore")
 
-    database_url: str | None = None
+    database_url: str | None = None  # Supabase Postgres (or any Postgres with the migrations)
     transcript_retention_days: int = Field(default=14, ge=1)
 
     supabase_url: str | None = None

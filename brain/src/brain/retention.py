@@ -10,6 +10,9 @@ from typing import Protocol
 from contracts import Meeting
 
 from .config import Settings
+from .db import open_pool
+from .memory import PgMemoryStore
+from .pg_store import PostgresStore
 from .store import Store
 
 PURGEABLE = frozenset({"needs_review", "pushed"})
@@ -69,9 +72,11 @@ async def purge_transcripts(
 async def open_retention_stores(
     settings: Settings,
 ) -> AsyncIterator[tuple[Store, TranscriptMemory | None]]:
-    """The database store and memory retention runs against."""
+    """The Postgres store and its meeting memory, on one pool that closes on exit."""
     if not settings.database_url:
         raise RetentionUnavailable("DATABASE_URL is not configured")
-    # The Postgres Store lands with #5; until then there is no database store to purge.
-    raise RetentionUnavailable("The Postgres store is not available yet (#5)")
-    yield  # pragma: no cover
+    pool = await open_pool(settings.database_url, max_size=2)
+    try:
+        yield PostgresStore(pool), PgMemoryStore(pool)
+    finally:
+        await pool.close()
