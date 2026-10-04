@@ -1,19 +1,26 @@
 import asyncio
+import logging
 from typing import Protocol
 
 import httpx
 
 from contracts import (
+    AgendaTrackResponse,
     Answer,
     ChatMessage,
+    FactCheckResponse,
     Invocation,
     InvokeRequest,
     InvokeResponse,
+    KeytermsResponse,
     SegmentsIngest,
     TranscriptSegment,
+    WorkerMeetingResponse,
 )
 
 from .config import Settings
+
+log = logging.getLogger(__name__)
 
 
 class BrainUnavailable(RuntimeError):
@@ -36,6 +43,8 @@ class BrainRejected(RuntimeError):
 # Transient by convention; everything else 4xx/501 is final. 501 is the brain's "not built yet".
 RETRYABLE = {408, 429, 500, 502, 503, 504}
 MAX_DETAIL = 200
+# An agenda tick whose model call failed still carries the agenda and the nudges it saved.
+AGENDA_FALLBACK = {502, 503}
 
 
 class BrainClient(Protocol):
@@ -47,11 +56,20 @@ class BrainClient(Protocol):
 
     async def invoke(self, invocation: Invocation, recent: list[TranscriptSegment]) -> Answer: ...
 
+    async def meeting(self, meeting_id: str) -> WorkerMeetingResponse: ...
+
+    async def keyterms(self, meeting_id: str) -> list[str]: ...
+
+    async def track_agenda(self, meeting_id: str) -> AgendaTrackResponse: ...
+
+    async def fact_check(self, meeting_id: str) -> FactCheckResponse: ...
+
 
 class HttpBrainClient:
     """Retries only idempotent calls: network failures and transient statuses, with backoff.
-    Saving segments is idempotent (the brain ignores an identical seg_id); invoke is not, since
-    a retry could run the model twice and make two response cards."""
+    Reads and saves are idempotent (the brain ignores an identical seg_id or chat id); invoke is
+    not, since a retry could run the model twice and make two response cards, and a tick is not
+    retried within itself because the next tick tries again."""
 
     def __init__(
         self,
@@ -90,30 +108,91 @@ class HttpBrainClient:
         )
         return InvokeResponse.model_validate_json(response.content).answer
 
+    async def ingest_public_chat(self, meeting_id: str, message: ChatMessage) -> None:
+        """Public chat only; a private message is refused here and never sent."""
+        if message.visibility != "public" or message.recipient_id is not None:
+            raise ValueError("Private chat is never sent to the brain")
+        body = message.model_dump(mode="json")
+        await self._post(f"/internal/meetings/{meeting_id}/chat", body, idempotent=True)
+
+    async def meeting(self, meeting_id: str) -> WorkerMeetingResponse:
+        response = await self._request("GET", f"/internal/meetings/{meeting_id}", idempotent=True)
+        return WorkerMeetingResponse.model_validate_json(response.content)
+
+    async def keyterms(self, meeting_id: str) -> list[str]:
+        response = await self._request(
+            "GET", f"/internal/meetings/{meeting_id}/keyterms", idempotent=True
+        )
+        return KeytermsResponse.model_validate_json(response.content).terms
+
+    async def track_agenda(self, meeting_id: str) -> AgendaTrackResponse:
+        """The brain takes `now` from the meeting's start. When the model failed (502/503) the
+        body still holds the agenda and the nudges it saved as sent, so they are returned."""
+        response = await self._request(
+            "POST",
+            f"/internal/meetings/{meeting_id}/agenda/track",
+            body={},
+            idempotent=False,
+            timeout=self._invoke_timeout,
+            keep=AGENDA_FALLBACK,
+        )
+        if response.status_code in AGENDA_FALLBACK:
+            try:
+                tracked = AgendaTrackResponse.model_validate_json(response.content)
+            except ValueError:
+                raise BrainUnavailable(
+                    f"agenda tick failed (HTTP {response.status_code})"
+                ) from None
+            log.warning("Agenda tick tracked nothing: %s", short_detail(response))
+            return tracked
+        return AgendaTrackResponse.model_validate_json(response.content)
+
+    async def fact_check(self, meeting_id: str) -> FactCheckResponse:
+        response = await self._post(
+            f"/internal/meetings/{meeting_id}/fact-check",
+            {},
+            idempotent=False,
+            timeout=self._invoke_timeout,
+        )
+        return FactCheckResponse.model_validate_json(response.content)
+
     async def aclose(self) -> None:
         await self._http.aclose()
 
     async def _post(
         self, path: str, body: dict, *, idempotent: bool, timeout: float | None = None
     ) -> httpx.Response:
+        return await self._request("POST", path, body=body, idempotent=idempotent, timeout=timeout)
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        body: dict | None = None,
+        idempotent: bool,
+        timeout: float | None = None,
+        keep: frozenset[int] | set[int] = frozenset(),
+    ) -> httpx.Response:
+        """The response on success, or on a status in `keep`."""
         attempts = self._attempts if idempotent else 1
         last = "no attempt made"
         for attempt in range(attempts):
             if attempt:
                 await asyncio.sleep(self._backoff * 2 ** (attempt - 1))
             try:
-                response = await self._http.post(
-                    path, json=body, timeout=timeout or httpx.USE_CLIENT_DEFAULT
+                response = await self._http.request(
+                    method, path, json=body, timeout=timeout or httpx.USE_CLIENT_DEFAULT
                 )
             except httpx.TransportError as e:
                 last = type(e).__name__
                 continue
-            if response.is_success:
+            if response.is_success or response.status_code in keep:
                 return response
             if response.status_code not in RETRYABLE:
                 raise BrainRejected(response.status_code, short_detail(response))
             last = f"HTTP {response.status_code}"
-        raise BrainUnavailable(f"POST {path} failed after {attempts} attempt(s) ({last})")
+        raise BrainUnavailable(f"{method} {path} failed after {attempts} attempt(s) ({last})")
 
 
 def short_detail(response: httpx.Response) -> str:

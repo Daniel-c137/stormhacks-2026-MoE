@@ -501,3 +501,29 @@ async def test_ask_button_uses_the_meeting_clock(manager, stt, clock, invocation
     await manager.join()
 
     assert [(i.via, i.question) for i in invocations] == [("ask", "Who owns the payment API?")]
+
+
+async def test_a_cancelled_ask_does_not_take_the_next_segment(manager, stt, invocations):
+    start(manager, "u-sarah")
+    manager.arm_ask("u-sarah")
+
+    assert manager.cancel_ask("u-sarah") is True
+    stt.say("u-sarah", "Who owns the payment API?")
+    stt.end("u-sarah")
+    await manager.join()
+
+    assert invocations == []
+
+
+async def test_recent_final_segments_are_kept_for_the_brains_context(manager, stt):
+    start(manager, "u-alex")
+    stt.say("u-alex", "Partial words", final=False)
+    for n in range(25):
+        stt.say("u-alex", f"Point {n}.")
+    stt.end("u-alex")
+    await manager.join()
+
+    recent = manager.recent_finals()
+    assert len(recent) == 20  # what the brain takes at most
+    assert [s.text for s in recent[-2:]] == ["Point 23.", "Point 24."]
+    assert all(s.is_final for s in recent)

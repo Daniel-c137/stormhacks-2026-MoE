@@ -14,6 +14,7 @@ sentence finish, and whatever could not be saved is counted.
 import asyncio
 import logging
 import time
+from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import Any
@@ -27,6 +28,9 @@ from .room import RoomBus
 from .stt import SpeechPiece, SpeechToText
 
 log = logging.getLogger(__name__)
+
+# Final segments kept as context for an invocation; the brain takes at most this many.
+RECENT_FINALS = 20
 
 
 @dataclass
@@ -78,6 +82,7 @@ class TranscriptionManager:
         self._backlog: list[TranscriptSegment] = []
         self._saved = 0
         self._dropped = 0
+        self._recent: deque[TranscriptSegment] = deque(maxlen=RECENT_FINALS)
 
     # state
 
@@ -86,6 +91,10 @@ class TranscriptionManager:
 
     def saved_count(self) -> int:
         return self._saved
+
+    def recent_finals(self) -> list[TranscriptSegment]:
+        """The latest final segments of everyone, oldest first: an invocation's context."""
+        return list(self._recent)
 
     def unsaved_count(self) -> int:
         """Final segments not in the brain's record: still held, or given up on. Nonzero means
@@ -110,6 +119,10 @@ class TranscriptionManager:
     def arm_ask(self, participant_id: str) -> None:
         """The Ask button: this participant's next final segment is the question."""
         self._detector.arm_ask(participant_id, at=self._clock())
+
+    def cancel_ask(self, participant_id: str) -> bool:
+        """Withdraw an Ask press. True if one was waiting."""
+        return self._detector.cancel_ask(participant_id)
 
     async def stop(self, track_sid: str) -> None:
         """The track was muted, unpublished or unsubscribed. Ends its audio so the transcriber
@@ -200,6 +213,7 @@ class TranscriptionManager:
         except Exception:
             log.exception("Could not publish caption %s", segment.seg_id)
         if segment.is_final:
+            self._recent.append(segment)
             self._spawn(self._save(segment))
             if invocation := self._detector.on_segment(segment):
                 self._spawn(self._invoke(invocation))

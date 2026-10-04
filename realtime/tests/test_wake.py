@@ -202,6 +202,31 @@ def test_ask_button_with_the_name_in_the_question_is_one_invocation(detector):
     assert detector.on_segment(said("And when is it due?", by="u-sarah", t=24.0)) is None
 
 
+def test_cancelling_the_ask_button_withdraws_it(detector):
+    detector.arm_ask("u-sarah", at=20.0)
+
+    assert detector.cancel_ask("u-sarah") is True
+    assert detector.on_segment(said("Who owns the payment API?", by="u-sarah", t=22.0)) is None
+    assert detector.cancel_ask("u-sarah") is False
+
+
+def test_cancelling_an_ask_leaves_a_spoken_name_waiting(detector):
+    """Only the button's press is withdrawn; saying the name alone is not an Ask press."""
+    assert detector.on_segment(said("OmniMan.", by="u-sarah", t=20.0)) is None
+
+    assert detector.cancel_ask("u-sarah") is False
+    inv = detector.on_segment(said("Who owns the payment API?", by="u-sarah", t=23.0))
+    assert inv is not None and inv.via == "voice"
+
+
+def test_polaris_by_name_alone_is_the_wake_phrase():
+    detector = WakeDetector(default_aliases("Polaris"))
+
+    inv = detector.on_segment(said("Polaris, what is the refund window?"))
+
+    assert inv is not None and inv.question == "what is the refund window?"
+
+
 # public chat
 
 
