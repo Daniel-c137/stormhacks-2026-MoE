@@ -32,6 +32,7 @@ from contracts import (
     TranscriptSegment,
     TranslateRequest,
     TranslateResponse,
+    TranslationUpdate,
 )
 from contracts.language import is_english, normalise_language
 
@@ -271,6 +272,18 @@ def test_a_translated_segment_carries_the_english_and_the_words_as_said():
     )
 
 
+def test_translation_is_a_per_meeting_switch_off_by_default():
+    meeting = Meeting(
+        id="m1", team_id="t1", title="Standup", status="live", code="abc", host_id="u1",
+        participant_ids=[],
+    )  # fmt: skip
+
+    assert meeting.translate is False
+    assert CreateMeetingRequest(title="Standup").translate is False
+    assert CreateMeetingRequest(title="Standup", translate=True).translate is True
+    assert TranslationUpdate(translate=True).translate is True
+
+
 def test_a_translate_request_may_hint_the_language_and_the_answer_names_it():
     assert TranslateRequest(text="Hola a todos").language is None
     assert TranslateRequest(text="Hola a todos", language="es").language == "es"
@@ -284,6 +297,7 @@ def test_a_translate_request_may_hint_the_language_and_the_answer_names_it():
 @pytest.mark.parametrize(
     ("given", "code"),
     [("es", "es"), ("ES", "es"), (" fr ", "fr"), ("zh-CN", "zh"), ("spa", "es"), ("eng", "en"),
+     ("fa", "fa"), ("FA", "fa"), ("fas", "fa"), ("per", "fa"), ("fa-IR", "fa"), ("fa_IR", "fa"),
      ("Spanish", None), ("", None), (None, None)],
 )  # fmt: skip
 def test_language_codes_are_normalised_to_iso_639_1(given, code):

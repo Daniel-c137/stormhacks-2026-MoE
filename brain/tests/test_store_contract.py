@@ -654,6 +654,41 @@ async def test_status_changes_are_saved(store):
         await store.set_status(new_id(), "processing")
 
 
+async def test_translation_is_off_unless_the_meeting_is_created_with_it(store):
+    team, alex, *_ = await two_teams(store)
+
+    plain = await store.create_meeting(team.id, "Standup", alex.id)
+    translated = await store.create_meeting(team.id, "Sync", alex.id, translate=True)
+
+    assert (await store.meeting(plain.id)).translate is False
+    assert (await store.meeting(translated.id)).translate is True
+
+
+async def test_translation_can_be_switched_until_someone_joins(store):
+    team, alex, *_ = await two_teams(store)
+    meeting = await store.create_meeting(team.id, "Standup", alex.id)
+
+    on = await store.set_translate(meeting.id, True)
+    assert on.translate is True
+    assert (await store.meeting(meeting.id)).translate is True
+
+    await store.add_participant(meeting.id, alex.id)
+    with pytest.raises(Conflict):
+        await store.set_translate(meeting.id, False)  # the worker has read it by now
+    assert (await store.meeting(meeting.id)).translate is True
+
+
+async def test_translation_cannot_be_switched_once_the_meeting_ended(store):
+    team, alex, *_ = await two_teams(store)
+    meeting = await store.create_meeting(team.id, "Standup", alex.id)
+    await store.transition_status(meeting.id, {"live"}, "processing")
+
+    with pytest.raises(Conflict):
+        await store.set_translate(meeting.id, True)
+    with pytest.raises(NotFound):
+        await store.set_translate(new_id(), True)
+
+
 async def test_participants_are_added_once(store):
     team, alex, sarah, *_ = await two_teams(store)
     meeting = await store.create_meeting(team.id, "Standup", alex.id)
