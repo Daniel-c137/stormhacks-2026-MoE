@@ -14,9 +14,11 @@ from fastapi.testclient import TestClient
 
 from brain.agent.ask import BEGIN_DATA, END_DATA
 from brain.agent.timekeeping import (
+    CONTEXT_MAX_AGE_S,
     CONTEXT_SEGMENTS,
     MAX_WAIT_S,
     MIN_TALK_S,
+    MOVED_ON_HOLD_S,
     MOVED_ON_MIN_S,
     NOW_SLACK_S,
     SETTLE_S,
@@ -48,7 +50,7 @@ def stretch_of(prompt: str) -> str:
 
 def earlier_of(prompt: str) -> str:
     """The part of the prompt with the lines before the stretch, given for context only."""
-    return prompt.split("Earlier", 1)[1].split("Transcript stretch", 1)[0]
+    return prompt.split("Earlier, just before this stretch", 1)[1].split("Transcript stretch", 1)[0]
 
 
 def labelled(*runs: Run, covered: tuple[str, ...] = ()) -> AgendaTrackDraft:
@@ -626,10 +628,11 @@ def test_the_covered_time_is_the_end_of_the_last_thing_said_about_the_item(
     assert items[refunds]["status"] == "pending"
 
 
-def test_an_item_covered_after_the_talk_left_it_is_timed_at_the_move(
+def test_an_item_covered_after_the_talk_left_it_is_timed_at_its_last_word(
     worker, client_as, store, model
 ):
-    """Nothing in this stretch is about the item: it is covered as of when the talk moved on."""
+    """Nothing in this stretch is about the item: it is covered as of the last thing said about
+    it, in an earlier stretch."""
     meeting, (waitlist, *_) = standup(store, client_as)
     ingest(worker, meeting, said(meeting, 1, "Short waitlist note", 0, 10))
     model.says("a1").says("a2", covered=("a1",))
@@ -638,7 +641,7 @@ def test_an_item_covered_after_the_talk_left_it_is_timed_at_the_move(
     ingest(worker, meeting, said(meeting, 2, "On to the refund policy", 31, 45, SARAH))
     items = by_id(tracked(worker, meeting, now=60)["agenda"])
 
-    assert covered_by(items[waitlist]) == (AGENT_PARTICIPANT_ID, 31)
+    assert covered_by(items[waitlist]) == (AGENT_PARTICIPANT_ID, 10)
 
 
 # moving on to another item
@@ -671,7 +674,8 @@ def test_moving_on_across_two_ticks_covers_the_item_left_behind(worker, client_a
     second = tracked(worker, meeting, now=60)["agenda"]
 
     assert by_id(first)[waitlist]["status"] == "pending"
-    assert covered_by(by_id(second)[waitlist]) == (AGENT_PARTICIPANT_ID, 31)
+    assert 45 - 25 >= MOVED_ON_HOLD_S
+    assert covered_by(by_id(second)[waitlist]) == (AGENT_PARTICIPANT_ID, 25)  # its last word
     assert by_id(second)[refunds]["status"] == "pending"
 
 
@@ -734,6 +738,178 @@ def test_an_item_a_person_reopened_is_not_covered_again_while_others_are_discuss
     assert items[refunds]["status"] == "covered"  # left for the launch date
 
 
+def reopen(client: TestClient, meeting: str, item_ids: list[str], reopened: str) -> None:
+    """A person unticks one item; the others are sent as they are."""
+    titles = dict(zip(item_ids, (title for title, _ in STANDUP), strict=True))
+    response = client.put(
+        f"/meetings/{meeting}/agenda",
+        json={
+            "items": [
+                {"id": i, "title": titles[i], **({"status": "pending"} if i == reopened else {})}
+                for i in item_ids
+            ]
+        },
+    )
+    assert response.status_code == 200, response.text
+
+
+def test_the_model_cannot_cover_again_an_item_a_person_reopened_until_it_comes_up_again(
+    worker, client_as, store, model
+):
+    meeting, (waitlist, refunds, launch) = standup(store, client_as)
+    ingest(worker, meeting, said(meeting, 1, "The waitlist email, at length", 0, 25))
+    model.says("a1", covered=("a1",)).says("a2")
+    model.says("a3", covered=("a1",)).says("a1", covered=("a1",))
+    tracked(worker, meeting, now=30)
+    ingest(worker, meeting, said(meeting, 2, "Now the refund policy", 31, 55, SARAH))
+    tracked(worker, meeting, now=60)
+    reopen(client_as(SARAH), meeting, [waitlist, refunds, launch], waitlist)
+
+    ingest(worker, meeting, said(meeting, 3, "And the launch date", 61, 85))
+    still_open = by_id(tracked(worker, meeting, now=90)["agenda"])
+    ingest(worker, meeting, said(meeting, 4, "Back to the waitlist email: send it", 91, 110))
+    closed = by_id(tracked(worker, meeting, now=115)["agenda"])
+
+    # The model listed it straight after the reopen, from the earlier lines: Sarah's call stands.
+    assert still_open[waitlist]["status"] == "pending"
+    assert still_open[waitlist]["last_discussed_t"] is None
+    # Once the team talks about it again, the tracker may close it again.
+    assert covered_by(closed[waitlist]) == (AGENT_PARTICIPANT_ID, 110)
+
+
+def test_the_model_cannot_cover_an_item_nobody_has_talked_about(worker, client_as, store, model):
+    meeting, (waitlist, _, launch) = standup(store, client_as)
+    ingest(worker, meeting, said(meeting, 1, "The waitlist email, at length", 0, 25))
+    model.says("a1", covered=("a3",))
+
+    items = by_id(tracked(worker, meeting, now=30)["agenda"])
+
+    assert items[launch]["status"] == "pending"
+    assert items[waitlist]["last_discussed_t"] == 25
+
+
+def test_one_line_about_another_item_does_not_cover_the_item_under_way(
+    worker, client_as, store, model
+):
+    """An aside, or one mislabelled line, is not the team moving on."""
+    meeting, (waitlist, _, launch) = standup(store, client_as)
+    ingest(worker, meeting, said(meeting, 1, "The waitlist email, at length", 0, 60))
+    model.says("a1").says(None, (1, 1, "a1"), (2, 2, "a3")).says("a1")
+    tracked(worker, meeting, now=65)
+
+    ingest(
+        worker,
+        meeting,
+        said(meeting, 2, "And the second paragraph of the waitlist email", 61, 66),
+        said(meeting, 3, "That also affects the launch date, by the way", 67, 71, SARAH),
+    )
+    aside = tracked(worker, meeting, now=76)["agenda"]
+    ingest(worker, meeting, said(meeting, 4, "Anyway, the waitlist email subject line", 72, 90))
+    back = tracked(worker, meeting, now=95)["agenda"]
+
+    assert 71 - 66 < MOVED_ON_HOLD_S
+    assert by_id(aside)[waitlist]["status"] == "pending"
+    assert by_id(back)[waitlist]["status"] == "pending"
+    assert back["current_item_id"] == waitlist
+    assert by_id(back)[launch]["status"] == "pending"
+
+
+def test_setup_talk_between_two_items_does_not_hide_the_move(worker, client_as, store, model):
+    """Three ticks: the item, a line about no item, the next item."""
+    meeting, (waitlist, refunds, _) = standup(store, client_as)
+    model.says("a1").says("none").says("a2")
+    ingest(worker, meeting, said(meeting, 1, "The waitlist email, at length", 0, 25))
+    tracked(worker, meeting, now=30)
+    ingest(worker, meeting, said(meeting, 2, "One sec, sharing my screen", 26, 36, SARAH))
+    between = tracked(worker, meeting, now=41)["agenda"]
+    ingest(worker, meeting, said(meeting, 3, "Now the refund policy", 37, 52))
+    after = tracked(worker, meeting, now=57)["agenda"]
+
+    assert by_id(between)[waitlist]["status"] == "pending"  # small talk is not moving on
+    assert covered_by(by_id(after)[waitlist]) == (AGENT_PARTICIPANT_ID, 25)
+    assert by_id(after)[refunds]["status"] == "pending"
+
+
+def test_an_aside_after_the_next_item_started_still_counts_as_moving_on(
+    worker, client_as, store, model
+):
+    meeting, (waitlist, *_) = standup(store, client_as)
+    model.says("a1").says(None, (1, 1, "a2"), (2, 2, "none"))
+    ingest(worker, meeting, said(meeting, 1, "The waitlist email, at length", 0, 25))
+    tracked(worker, meeting, now=30)
+
+    ingest(
+        worker,
+        meeting,
+        said(meeting, 2, "Now the refund policy for annual plans", 26, 45, SARAH),
+        said(meeting, 3, "Can everyone still hear me", 46, 50),
+    )
+    items = by_id(tracked(worker, meeting, now=55)["agenda"])
+
+    assert covered_by(items[waitlist]) == (AGENT_PARTICIPANT_ID, 25)
+
+
+# talk time, whatever the ticks
+
+
+def test_a_tick_while_someone_is_still_speaking_changes_nothing(worker, client_as, store, model):
+    """Their caption is not final yet, so there is nothing to track: nothing is saved, and the
+    whole utterance is counted once it arrives."""
+    meeting, (waitlist, *_) = standup(store, client_as)
+    model.says("a1")
+
+    quiet = tracked(worker, meeting, now=20)["agenda"]
+    ingest(worker, meeting, said(meeting, 1, "A long point about the waitlist email", 0, 30))
+    agenda = tracked(worker, meeting, now=40)["agenda"]
+
+    assert (quiet["tracked_until"], quiet["revision"]) == (None, 1)  # only the lobby's save
+    assert by_id(agenda)[waitlist]["discussed_s"] == 30
+    assert agenda["tracked_until"] == 30  # the end of the last caption tracked
+
+
+def test_long_turns_are_counted_in_full_with_a_tick_every_ten_seconds(
+    worker, client_as, store, model
+):
+    """Captions become final a second after each turn ends, with ticks landing mid-turn."""
+    meeting, (waitlist, *_) = standup(store, client_as)
+    turns = [(0, 20), (21, 41), (42, 62)]
+    for _ in turns:
+        model.says("a1")
+
+    sent = 0
+    for now in range(10, 81, 10):
+        while sent < len(turns) and turns[sent][1] + 1 <= now:
+            ingest(worker, meeting, said(meeting, sent, f"Waitlist turn {sent}", *turns[sent]))
+            sent += 1
+        agenda = tracked(worker, meeting, now=now)["agenda"]
+
+    assert by_id(agenda)[waitlist]["discussed_s"] == 62
+    assert len(model.prompts) == 3  # once per turn, not once per tick
+
+
+@pytest.mark.parametrize("ticks", [(40,), (20, 40)], ids=["one tick", "two ticks"])
+def test_a_pause_goes_to_the_item_before_it_however_the_ticks_fall(
+    worker, client_as, store, model, ticks
+):
+    meeting, (waitlist, refunds, _) = standup(store, client_as)
+    ingest(
+        worker,
+        meeting,
+        said(meeting, 1, "The waitlist email", 0, 12),
+        said(meeting, 2, "Now the refund policy", 26, 34, SARAH),
+    )
+    if len(ticks) == 1:
+        model.says(None, (1, 1, "a1"), (2, 2, "a2"))
+    else:
+        model.says("a1").says("a2")
+
+    for now in ticks:
+        agenda = tracked(worker, meeting, now=now)["agenda"]
+
+    items = by_id(agenda)
+    assert (items[waitlist]["discussed_s"], items[refunds]["discussed_s"]) == (26, 8)
+
+
 # what the model is given to judge by
 
 
@@ -768,6 +944,21 @@ def test_only_the_last_few_earlier_lines_are_given(worker, client_as, store, mod
     earlier = earlier_of(model.prompts[1])
     assert earlier.count("Earlier point") == CONTEXT_SEGMENTS
     assert "Earlier point 19" in earlier and f"Earlier point {19 - CONTEXT_SEGMENTS}" not in earlier
+
+
+def test_lines_from_long_ago_are_not_given_as_what_came_just_before(
+    worker, client_as, store, model
+):
+    meeting, _ = standup(store, client_as)
+    ingest(worker, meeting, said(meeting, 1, "Waitlist email goes out Thursday", 0, 10))
+    model.says("a1").says("a2")
+    tracked(worker, meeting, now=20)
+
+    later = 10 + CONTEXT_MAX_AGE_S + 60
+    ingest(worker, meeting, said(meeting, 2, "After the break: refunds", later, later + 15, SARAH))
+    tracked(worker, meeting, now=later + 20)
+
+    assert "Earlier, just before this stretch" not in model.prompts[1]
 
 
 def test_the_agenda_says_how_long_each_item_has_been_discussed(worker, client_as, store, model):
