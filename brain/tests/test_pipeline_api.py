@@ -26,9 +26,11 @@ from contracts import (
     AGENT_PARTICIPANT_ID,
     Decision,
     DecisionRelation,
+    FactCheck,
     Person,
     Report,
     ReportProgress,
+    Source,
     get_identity,
 )
 
@@ -307,6 +309,43 @@ async def test_a_meeting_without_an_agenda_has_none_in_the_prompt(api, llm):
     assert "Agenda" not in call.prompt
 
 
+async def test_the_meetings_confident_contradictions_are_given_to_the_report(api, store, llm):
+    meeting = await api.create()
+    await api.ingest(meeting["id"])
+    claim = "The double charge fix from PR50 is already in the latest release."
+    records = Source(kind="github_pr", label="dropsubs/app#50 merged after v0.9.3")
+    checks = [
+        FactCheck(
+            id="fc-1",
+            claim=claim,
+            speaker_name=SARAH.name,
+            verdict="contradicted",
+            confidence=0.9,
+            severity="high",
+            sources=[records],
+        ),
+        FactCheck(
+            id="fc-2",
+            claim="The waitlist email went out on Monday.",
+            speaker_name=ALEX.name,
+            verdict="supported",
+            confidence=0.9,
+            severity="low",
+        ),
+    ]
+    for check in checks:
+        await store.add_fact_check(meeting["id"], check)
+
+    await api.end(meeting["id"])
+    await api.drain()
+
+    (call,) = calls_for(llm, ReportExtraction)
+    assert claim in call.prompt and records.label in call.prompt
+    assert checks[1].claim not in call.prompt
+    report = (await api.report(meeting["id"])).json()
+    assert [c["id"] for c in report["fact_checks"]] == ["fc-1", "fc-2"]
+
+
 # past decisions
 
 
@@ -360,6 +399,47 @@ async def test_past_decisions_found_in_memory_are_offered_even_without_shared_wo
 
     (call,) = calls_for(llm, DecisionVerdicts)
     assert "d-beta" in call.prompt
+
+
+async def test_an_older_meetings_write_up_never_retires_a_newer_meetings_decision(
+    api, store, memory
+):
+    newer = await ended(api, "Refund follow-up")  # started now, written up first
+    held_id = f"{newer['id']}-decision-1"
+    older = await api.create("Refund sync")
+    started = datetime.fromisoformat(newer["started_at"]) - timedelta(days=2)
+    stored = await store.meeting(older["id"])
+    await store.update_meeting(stored.model_copy(update={"started_at": started}))
+    llm = MockLLM(
+        structured={
+            ReportExtraction: EXTRACTION,
+            DecisionVerdicts: DecisionVerdicts(
+                verdicts=[
+                    DecisionVerdict(
+                        decision_id=f"{older['id']}-decision-1",
+                        verdict="contradicts",
+                        past_decision_id=held_id,
+                        reason="Backwards in time.",
+                        confidence=0.95,
+                    )
+                ]
+            ),
+        }
+    )
+    api.use_llm(llm)
+    assert any(  # memory would offer the newer decision if it were allowed
+        h.chunk.ref_id == held_id for h in await memory.search(TEAM.id, "waitlist email", k=50)
+    )
+
+    await api.ingest(older["id"])
+    await api.end(older["id"])
+    await api.drain()
+
+    assert await api.status(older["id"]) == "needs_review"
+    decisions = {d["id"]: d for d in (await api.get("/decisions")).json()}
+    assert (decisions[held_id]["status"], decisions[held_id]["relation"]) == ("active", None)
+    assert decisions[f"{older['id']}-decision-1"]["relation"] is None
+    assert calls_for(llm, DecisionVerdicts) == []
 
 
 async def test_without_memory_only_past_decisions_sharing_words_are_offered(api, store):

@@ -142,17 +142,20 @@ class ReportPipeline:
             meeting, transcript, agenda = await self._read(meeting_id)
             zone = await zone_of(self.store, meeting.team_id)
             superseded: list[Decision] = []
+            # The public fact-checks from the live meeting; private ones were never stored.
+            fact_checks = await self.store.fact_checks(meeting_id)
             if transcript.final_segments():
                 progress = await self._at(progress, WRITE)
                 llm = self.llm()
-                report = await build_report(llm, transcript, agenda=agenda, zone=zone)
+                report = await build_report(
+                    llm, transcript, agenda=agenda, zone=zone, fact_checks=fact_checks
+                )
                 progress = await self._at(progress, LINK)
                 report, superseded = await self._links(llm, meeting.team_id, report, zone)
             else:
                 report = Report(meeting_id=meeting_id, summary=NO_TRANSCRIPT)
             progress = await self._at(progress, SAVE)
-            # The public fact-checks from the live meeting; private ones were never stored.
-            report.fact_checks = await self.store.fact_checks(meeting_id)
+            report.fact_checks = fact_checks
             await self.store.complete_report(report, superseded)
         except asyncio.CancelledError:
             await self._failed(progress, INTERRUPTED)
@@ -189,17 +192,27 @@ class ReportPipeline:
     ) -> tuple[Report, list[Decision]]:
         """The report with its decisions' links, and the past decisions they retire. Past
         decisions are the team's from other meetings, as they were before any earlier save of
-        this meeting retired them, dated by their meetings' days in the team's `zone`."""
+        this meeting retired them, dated by their meetings' days in the team's `zone`. Only
+        decisions from meetings that started before this one count, so writing up an older
+        meeting later (a backfill, a retry) never retires a newer meeting's decision."""
+        if not report.decisions:
+            return report, []
+        meetings = await self.store.meetings(team_id)
+        starts = {m.id: start for m in meetings if (start := m.started_at or m.scheduled_start)}
+        this_start = starts.get(report.meeting_id)
         stored = await self.store.decisions(team_id)
         earlier = {d.id for d in stored if d.meeting_id == report.meeting_id}
-        past = [reopened(d, earlier) for d in stored if d.meeting_id != report.meeting_id]
-        if not report.decisions or not past:
+        past = [
+            reopened(d, earlier)
+            for d in stored
+            if d.meeting_id != report.meeting_id
+            and this_start is not None
+            and (start := starts.get(d.meeting_id)) is not None
+            and start < this_start
+        ]
+        if not past:
             return report, []
-        dates = {
-            m.id: day
-            for m in await self.store.meetings(team_id)
-            if (day := local_date(m.started_at or m.scheduled_start, zone))
-        }
+        dates = {m: day for m, start in starts.items() if (day := local_date(start, zone))}
         candidates = None
         if self.memory is not None:
             candidates = await memory_candidates(self.memory, team_id, report.decisions, past)

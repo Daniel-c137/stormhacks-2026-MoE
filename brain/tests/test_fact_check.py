@@ -106,17 +106,31 @@ BALANCED = [
     "The checkout timeout is set to 30 seconds.",
     "PR #212 got merged this morning.",
     "The deploy deadline is October 10.",
+    # release membership, as Scribe writes it ("PR50", no space)
+    "Quick sync on billing. The double charge fix from PR50 is already in the latest release, "
+    "so we are covered there.",
+    "PR 212 is in the current release.",
+    "The DS-104 fix went in v0.9.3.",
+    "The fix for DS-104 is in v1.2.3.",
+    "PR #41 is part of the release.",
+    "PR 88 made it into the release.",
+    "Issue 17 made the next release.",
+    "The retry change from PR 63 shipped in the newest release.",
 ]
 EAGER_ONLY = [
     "Honestly I fixed it.",
     "Let's look at DS-104 next.",
     "We'll talk again on Friday.",
     "Version 2 looks a lot nicer.",
+    "The refund fix is in the latest release.",
+    "I think that one made it into the release.",
 ]
 NEVER = [
     "Morning everyone, let's get started.",
     "Was PR 41 released already?",
     "Sounds good to me.",
+    "Let's talk about the release.",
+    "The release notes look good.",
 ]
 
 

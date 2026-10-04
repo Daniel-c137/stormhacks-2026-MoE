@@ -5,7 +5,8 @@ sensitivity is quiet. Each tick:
 
 1. Reads the final segments since the last checked point and keeps those a cheap, deterministic
    filter finds checkable: pull request and issue numbers, Jira keys, versions, "merged",
-   "released", "we decided", deadlines, configuration values. Nothing passes: no model call.
+   "released", "in the latest release", "we decided", deadlines, configuration values. Nothing
+   passes: no model call.
 2. Rate limit: one model check per MIN_INTERVAL_S at most, MAX_CLAIMS claims a batch at most.
 3. Plan: one model call picks the claims worth checking and read-only lookups for each.
 4. Evidence: the team's tools (the ones ask.py uses) and, when configured, code search; numbered
@@ -82,9 +83,13 @@ HAND_DETAIL = "Raised hand: a claim conflicts with the team's records"
 
 # the claim filter
 
+_WHICH = r"(?:latest|last|current|new|newest|next) "
 _STATUS = (
     r"merged|released|shipped|deployed|closed|fixed|resolved|reverted|landed|launched"
     r"|rolled (?:back|out)|went (?:out|live)|is live|is out|in prod(?:uction)?"
+    # release membership: "in the latest release", "in v1.2.3", "made it into the release"
+    rf"|in (?:the )?{_WHICH}release|in v\d+(?:\.\d+)*|part of (?:the )?(?:{_WHICH})?release"
+    rf"|made (?:it into )?(?:the )?(?:{_WHICH})?release|shipped in"
 )
 _DECISION = (
     r"we (?:decided|agreed|chose|settled on|went with)|(?:decision|agreement) (?:was|is)"
