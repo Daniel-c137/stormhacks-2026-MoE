@@ -258,7 +258,8 @@ class ToolOrchestrator:
         meeting = await toolbox.meeting(question.meeting_id) if question.meeting_id else None
         recent = recent_segments(question, meeting)
         own = [s for s in recent if by_agent(s)]
-        agenda = agenda_finding(meeting, await self.store.agenda(meeting.id)) if meeting else None
+        mine = await self.store.agenda(meeting.id, question.asker_id) if meeting else None
+        agenda = agenda_finding(meeting, mine) if meeting else None  # the asker's own
         context = render_context(question, meeting, members, today)
 
         plan = await self.llm.generate_structured(

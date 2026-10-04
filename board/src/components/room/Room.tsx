@@ -171,7 +171,7 @@ function RoomView({
   const privateChat = usePrivateChat();
   const { stage, setStage } = useStage();
   const agenda = useAgenda(meeting.id, me.id, meeting.started_at);
-  const { nudges, dismiss: dismissNudge } = useAgendaNudges(meeting.id);
+  const { nudges, dismiss: dismissNudge } = useAgendaNudges(meeting.id, me.id);
 
   const [chatOpen, setChatOpen] = useState(true);
   const [captionsOn, setCaptionsOn] = useState(false);

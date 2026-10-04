@@ -9,6 +9,7 @@ from collections.abc import Iterable
 
 from contracts import Meeting, TeamSettings, get_identity
 
+from .agent.agenda import everyones_items
 from .agent.team_tools import code_repos, jira_reader
 from .config import Settings
 from .store import Store
@@ -66,9 +67,9 @@ def select(candidates: Iterable[str]) -> list[str]:
 async def meeting_keyterms(store: Store, settings: Settings, meeting: Meeting) -> list[str]:
     """In order: the agent's name and the team's own wake phrase (without a leading greeting,
     whole, then word by word); each member's full and first name; the names of the repositories
-    and GitLab projects and the Jira project key; the agenda's titles; then the keys of the
-    project's unfinished Jira issues while there is room. A team without its own repository or
-    project uses the deployment's, as the agent does."""
+    and GitLab projects and the Jira project key; the titles on everyone's agenda, the host's
+    first; then the keys of the project's unfinished Jira issues while there is room. A team
+    without its own repository or project uses the deployment's, as the agent does."""
     team = await store.settings(meeting.team_id)
     candidates = [get_identity().agent_name]
     if phrase := without_greeting(team.wake_phrase or ""):
@@ -79,8 +80,7 @@ async def meeting_keyterms(store: Store, settings: Settings, meeting: Meeting) -
         candidates.append(repo.path.rstrip("/").rsplit("/", 1)[-1])
     if project := team.jira.project or settings.jira_project_key:
         candidates.append(project)
-    if agenda := await store.agenda(meeting.id):
-        candidates += [item.title for item in agenda.items]
+    candidates += [item.title for item in await everyones_items(store, meeting)]
     terms = select(candidates)
     if room := MAX_KEYTERMS - len(terms):
         terms = select([*terms, *await open_issue_keys(settings, team, room)])

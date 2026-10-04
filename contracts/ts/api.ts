@@ -128,8 +128,9 @@ export interface AgendaTrackRequest {
 }
 
 /** The worker publishes `agenda` on Topic.AGENDA and each nudge on Topic.AGENDA_NUDGE. */
+/** Everyone's agenda after the tick; the worker sends each agenda and nudge only to its owner. */
 export interface AgendaTrackResponse {
-  agenda: Agenda;
+  agendas?: Agenda[];
   nudges?: AgendaNudge[];
 }
 

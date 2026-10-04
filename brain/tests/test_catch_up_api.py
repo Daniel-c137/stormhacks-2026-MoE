@@ -309,6 +309,7 @@ def test_the_prompt_carries_the_agenda_and_the_message_says_where_the_meeting_is
     meeting = meeting_with(store)
     agenda = Agenda(
         meeting_id=meeting.id,
+        person_id=SARAH.id,  # the late joiner's own
         items=[
             AgendaItem(id="i-1", title="Refund double charge", status="covered", minutes=5),
             AgendaItem(id="i-2", title="Pricing page", minutes=10),
@@ -340,6 +341,26 @@ def test_without_an_agenda_the_model_says_where_the_meeting_is_from_what_was_sai
 
     lines = catch_up(worker, meeting.id).json()["text"].splitlines()
 
+    assert lines[1] == "Now: Talking about the pricing page. (06:40)"
+
+
+def test_the_late_joiner_is_placed_on_their_own_agenda_never_someone_elses(worker, store, use_llm):
+    meeting = meeting_with(store)
+    hosts = Agenda(
+        meeting_id=meeting.id,
+        person_id=ALEX.id,
+        items=[AgendaItem(id="i-1", title="Board deck")],
+        generated_at=datetime.now(UTC),
+        current_item_id="i-1",
+    )
+    anyio.run(store.save_agenda, hosts)
+    llm = catching_up(now=("Talking about the pricing page.", ("annual plan banner",)))
+    use_llm(llm)
+
+    lines = catch_up(worker, meeting.id, who=SARAH).json()["text"].splitlines()
+
+    [call] = llm.calls
+    assert "Board deck" not in call.prompt
     assert lines[1] == "Now: Talking about the pricing page. (06:40)"
 
 

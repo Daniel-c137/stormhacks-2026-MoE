@@ -298,7 +298,8 @@ export function useAgenda(meetingId: string, meId: string, startedAt: string | n
   );
 
   useTopic(Topic.AGENDA, (next) => {
-    if (next.meeting_id !== meetingId) return;
+    // Agendas are personal: the worker sends each only to its owner; anyone else's is ignored.
+    if (next.meeting_id !== meetingId || (next.person_id && next.person_id !== meId)) return;
     setError(null);
     const held = latest.current;
     // Only a change seen happening counts: an item this client knew as not covered, now covered
@@ -362,7 +363,7 @@ export interface ShownNudge extends AgendaNudge {
 }
 
 /** Timebox nudges from the agent, each shown for a while and then dropped. Never spoken. */
-export function useAgendaNudges(meetingId: string): { nudges: ShownNudge[]; dismiss: (key: string) => void } {
+export function useAgendaNudges(meetingId: string, meId: string): { nudges: ShownNudge[]; dismiss: (key: string) => void } {
   const [nudges, setNudges] = useState<ShownNudge[]>([]);
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const dismiss = useCallback((key: string) => {
@@ -371,7 +372,7 @@ export function useAgendaNudges(meetingId: string): { nudges: ShownNudge[]; dism
     setNudges((list) => list.filter((n) => n.key !== key));
   }, []);
   useTopic(Topic.AGENDA_NUDGE, (nudge) => {
-    if (nudge.meeting_id !== meetingId) return;
+    if (nudge.meeting_id !== meetingId || (nudge.person_id && nudge.person_id !== meId)) return;
     const key = `${nudge.item_id}:${crypto.randomUUID()}`;
     setNudges((list) => [...list.filter((n) => n.item_id !== nudge.item_id), { ...nudge, key }]);
     timers.current.set(key, setTimeout(() => dismiss(key), NUDGE_MS));

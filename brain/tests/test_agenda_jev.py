@@ -9,6 +9,7 @@ import pytest
 from api_support import SARAH
 from test_agenda_tracking import (
     Classifier,
+    alexs,
     by_id,
     covered_by,
     ingest,
@@ -300,7 +301,7 @@ def test_when_jev_fails_nothing_is_tracked_and_gemini_is_not_asked(
 
     assert response.status_code == 502
     assert "overloaded" in response.json()["detail"]
-    assert response.json()["agenda"]["tracked_until"] is None
+    assert alexs(response.json())["tracked_until"] is None
     assert gemini.prompts == []
 
 

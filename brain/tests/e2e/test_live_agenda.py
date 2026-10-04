@@ -48,6 +48,7 @@ async def test_live_gemini_tracks_a_standup_stretch_about_the_waitlist_email():
     await store.save_agenda(
         Agenda(
             meeting_id=meeting.id,
+            person_id=ALEX.id,
             items=[AgendaItem(id=f"i{n}", title=t, minutes=5) for n, t in enumerate(titles)],
             generated_at=datetime.now(UTC),
         )
@@ -77,11 +78,11 @@ async def test_live_gemini_tracks_a_standup_stretch_about_the_waitlist_email():
     )
 
     result = await track_agenda(store, lambda: llm, meeting, now=60)
-    print(f"{result.agenda.model_dump_json(indent=1)} (answered by {llm.last_model})")
+    print(f"{result.agendas[0].model_dump_json(indent=1)} (answered by {llm.last_model})")
 
-    waitlist = result.agenda.items[0]
-    assert result.agenda.current_item_id == waitlist.id or waitlist.status == "covered"
-    assert [i.status for i in result.agenda.items[1:]] == ["pending", "pending"]
+    waitlist = result.agendas[0].items[0]
+    assert result.agendas[0].current_item_id == waitlist.id or waitlist.status == "covered"
+    assert [i.status for i in result.agendas[0].items[1:]] == ["pending", "pending"]
     assert result.nudges == []
 
 
@@ -94,6 +95,7 @@ async def test_live_gemini_splits_a_two_topic_standup_and_gives_an_unmentioned_i
     await store.save_agenda(
         Agenda(
             meeting_id=meeting.id,
+            person_id=ALEX.id,
             items=[AgendaItem(id=f"i{n}", title=t, minutes=5) for n, t in enumerate(titles)],
             generated_at=datetime.now(UTC),
         )
@@ -125,11 +127,11 @@ async def test_live_gemini_splits_a_two_topic_standup_and_gives_an_unmentioned_i
     )
 
     result = await track_agenda(store, lambda: llm, meeting, now=70)
-    print(f"{result.agenda.model_dump_json(indent=1)} (answered by {llm.last_model})")
+    print(f"{result.agendas[0].model_dump_json(indent=1)} (answered by {llm.last_model})")
 
-    waitlist, refunds, launch = result.agenda.items
+    waitlist, refunds, launch = result.agendas[0].items
     assert launch.discussed_s == 0 and launch.status == "pending"
-    assert result.agenda.current_item_id != launch.id
+    assert result.agendas[0].current_item_id != launch.id
     assert waitlist.discussed_s > 0 or refunds.discussed_s > 0
     assert waitlist.discussed_s + refunds.discussed_s <= 55
 

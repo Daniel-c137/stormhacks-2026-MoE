@@ -111,6 +111,20 @@ def title_key(title: str) -> str:
     return " ".join(re.sub(r"[\W_]+", " ", title.casefold()).split())
 
 
+async def everyones_items(store: Store, meeting: Meeting) -> list[AgendaItem]:
+    """The items on everyone's agenda for the meeting, for what reads the meeting as a whole
+    (the write-up, keyterms): the host's first, then the others', each title once."""
+    agendas = await store.agendas(meeting.id)
+    agendas.sort(key=lambda agenda: agenda.person_id != meeting.host_id)  # stable: host first
+    seen: set[str] = set()
+    items: list[AgendaItem] = []
+    for item in (item for agenda in agendas for item in agenda.items):
+        if (key := title_key(item.title)) not in seen:
+            seen.add(key)
+            items.append(item)
+    return items
+
+
 TRAILING_NOTE = re.compile(r"\s*[(\[]([^()\[\]]*)[)\]]\s*$")
 
 

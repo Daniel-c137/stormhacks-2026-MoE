@@ -126,9 +126,19 @@ def track(worker: TestClient, meeting_id: str, now: float | None = None) -> http
 
 
 def tracked(worker: TestClient, meeting_id: str, now: float | None = None) -> dict:
+    """The tick's response, with `agenda` set to Alex's: most tests follow one person's agenda;
+    everyone's is in `agendas`."""
     response = track(worker, meeting_id, now)
     assert response.status_code == 200, response.text
-    return response.json()
+    body = response.json()
+    body["agenda"] = alexs(body)
+    return body
+
+
+def alexs(body: dict) -> dict:
+    """Alex's agenda in a tick's response body (an empty one when Alex has none)."""
+    mine = [a for a in body["agendas"] if a["person_id"] == ALEX.id]
+    return mine[0] if mine else {"items": [], "current_item_id": None, "tracked_until": None}
 
 
 def plan(client: TestClient, meeting_id: str, *items: tuple[str, int | None]) -> list[str]:
@@ -153,7 +163,10 @@ def T() -> datetime:
 
 
 def seed(store, agenda: Agenda) -> None:
-    anyio.run(store.save_agenda, agenda)
+    """Saves the agenda as Alex's unless it names its owner."""
+    anyio.run(
+        store.save_agenda, agenda.model_copy(update={"person_id": agenda.person_id or ALEX.id})
+    )
 
 
 def live_meeting(store, *, duration_min: int | None = None, started_ago_s: float = HOUR):
@@ -176,14 +189,14 @@ def standup(store, client_as) -> tuple[str, list[str]]:
 
 
 def saved_agenda(store, meeting_id: str) -> Agenda:
-    agenda = anyio.run(store.agenda, meeting_id)
+    agenda = anyio.run(store.agenda, meeting_id, ALEX.id)
     assert agenda is not None
     return agenda
 
 
 async def rename_first(store, meeting_id: str, title: str = "Waitlist email, renamed") -> None:
     """Another writer (a lobby edit) renames the first item and commits."""
-    agenda = await store.agenda(meeting_id)
+    agenda = await store.agenda(meeting_id, ALEX.id)
     items = [agenda.items[0].model_copy(update={"title": title}), *agenda.items[1:]]
     await store.save_agenda(agenda.model_copy(update={"items": items}))
 
@@ -728,7 +741,7 @@ def test_an_item_a_person_reopened_is_not_covered_again_while_others_are_discuss
     tracked(worker, meeting, now=30)
     ingest(worker, meeting, said(meeting, 2, "Now the refund policy", 31, 55, SARAH))
     tracked(worker, meeting, now=60)
-    reopened = client_as(SARAH).put(
+    reopened = client_as(ALEX).put(
         f"/meetings/{meeting}/agenda",
         json={
             "items": [
@@ -772,7 +785,7 @@ def test_the_model_cannot_cover_again_an_item_a_person_reopened_until_it_comes_u
     tracked(worker, meeting, now=30)
     ingest(worker, meeting, said(meeting, 2, "Now the refund policy", 31, 55, SARAH))
     tracked(worker, meeting, now=60)
-    reopen(client_as(SARAH), meeting, [waitlist, refunds, launch], waitlist)
+    reopen(client_as(ALEX), meeting, [waitlist, refunds, launch], waitlist)
 
     ingest(worker, meeting, said(meeting, 3, "And the launch date", 61, 85))
     still_open = by_id(tracked(worker, meeting, now=90)["agenda"])
@@ -1033,9 +1046,9 @@ def test_without_agenda_items_the_model_is_not_asked(worker, client_as, store, m
     emptied = tracked(worker, meeting, now=60)
 
     assert model.prompts == []
-    assert (unplanned["agenda"]["items"], unplanned["nudges"]) == ([], [])
-    assert unplanned["agenda"]["meeting_id"] == meeting
+    assert (unplanned["agendas"], unplanned["nudges"]) == ([], [])  # nobody has planned one
     assert (emptied["agenda"]["items"], emptied["nudges"]) == ([], [])
+    assert (emptied["agenda"]["meeting_id"], emptied["agenda"]["person_id"]) == (meeting, ALEX.id)
 
 
 def test_now_defaults_to_the_time_since_the_meeting_started(worker, store, model):
@@ -1052,7 +1065,7 @@ def test_now_defaults_to_the_time_since_the_meeting_started(worker, store, model
     response = worker.post(f"/internal/meetings/{meeting.id}/agenda/track")
 
     assert response.status_code == 200, response.text
-    agenda = response.json()["agenda"]
+    agenda = alexs(response.json())
     assert agenda["tracked_until"] == 20  # the caption that had been said by then
     assert agenda["items"][0]["discussed_s"] == 10
     assert "Not yet said" not in model.prompts[0]
@@ -1120,6 +1133,7 @@ def test_an_item_past_its_timebox_nudges_about_the_next_timeboxed_item_once(work
 
     [nudge] = body["nudges"]
     assert nudge["meeting_id"] == meeting and nudge["item_id"] == "r"
+    assert nudge["person_id"] == ALEX.id  # the worker sends it only to the agenda's owner
     assert "Refund policy hasn't come up yet" in nudge["text"]
     assert "Waitlist email" in nudge["text"]
     assert by_id(body["agenda"])["r"]["nudged_t"] == 25
@@ -1286,7 +1300,7 @@ def test_a_failing_model_is_retried_on_the_next_tick(worker, client_as, store, m
     failed = track(worker, meeting, now=30)
 
     assert failed.status_code == 502
-    assert (failed.json()["agenda"], failed.json()["nudges"]) == (before, [])
+    assert (alexs(failed.json()), failed.json()["nudges"]) == (before, [])
     assert client_as(ALEX).get(f"/meetings/{meeting}/agenda").json() == before
 
     model.says("a1")
@@ -1306,7 +1320,7 @@ def test_a_failing_model_still_gets_the_rule_nudges_out(worker, store, model):
     assert failed.status_code == 502
     body = failed.json()
     assert [n["item_id"] for n in body["nudges"]] == ["r", "l"]
-    assert body["agenda"]["tracked_until"] == 0
+    assert alexs(body)["tracked_until"] == 0
     saved = saved_agenda(store, meeting)
     assert (saved.tracked_until, saved.items[1].nudged_t) == (0, 26 * 60)
 
@@ -1349,7 +1363,7 @@ def test_editing_the_agenda_keeps_the_tracking_state_of_items_that_remain(
     model.says("a1", covered=("a1",))
     tracked(worker, meeting, now=30)
 
-    response = client_as(SARAH).put(
+    response = client_as(ALEX).put(
         f"/meetings/{meeting}/agenda",
         json={
             "items": [
@@ -1369,7 +1383,7 @@ def test_editing_the_agenda_keeps_the_tracking_state_of_items_that_remain(
     assert (items[refunds]["status"], items[refunds]["discussed_s"]) == ("pending", 0)
     assert launch not in items
 
-    response = client_as(SARAH).put(
+    response = client_as(ALEX).put(
         f"/meetings/{meeting}/agenda", json={"items": [{"id": refunds, "title": "Refunds"}]}
     )
 
@@ -1383,7 +1397,7 @@ def test_a_person_can_undo_a_wrong_covered_and_skip_an_item(worker, client_as, s
     model.says("a1", covered=("a1", "a2", "a3"))
     tracked(worker, meeting, now=30)
 
-    response = client_as(SARAH).put(
+    response = client_as(ALEX).put(
         f"/meetings/{meeting}/agenda",
         json={
             "items": [
@@ -1398,7 +1412,7 @@ def test_a_person_can_undo_a_wrong_covered_and_skip_an_item(worker, client_as, s
     assert response.status_code == 200, response.text
     statuses = [i["status"] for i in response.json()["items"]]
     assert statuses == ["covered", "pending", "skipped", "covered"]
-    bad = client_as(SARAH).put(
+    bad = client_as(ALEX).put(
         f"/meetings/{meeting}/agenda",
         json={"items": [{"id": waitlist, "title": "Waitlist email", "status": "done"}]},
     )
@@ -1413,7 +1427,7 @@ def test_checking_an_item_records_who_and_when_and_unchecking_clears_it(
     model.says("a1", covered=("a1",))
     tracked(worker, meeting, now=30)
 
-    response = client_as(SARAH).put(
+    response = client_as(ALEX).put(
         f"/meetings/{meeting}/agenda",
         json={
             "items": [
@@ -1427,7 +1441,7 @@ def test_checking_an_item_records_who_and_when_and_unchecking_clears_it(
     assert response.status_code == 200, response.text
     items = by_id(response.json())
     assert covered_by(items[waitlist]) == (None, None)  # the agent's wrong call, undone
-    assert items[refunds]["covered_by"] == SARAH.id
+    assert items[refunds]["covered_by"] == ALEX.id
     assert items[refunds]["covered_t"] == pytest.approx(HOUR, abs=30)
     assert covered_by(items[launch]) == (None, None)
 
@@ -1438,7 +1452,7 @@ def test_an_edit_that_leaves_an_item_covered_keeps_who_covered_it(worker, client
     model.says("a1", covered=("a1",))
     tracked(worker, meeting, now=30)
 
-    response = client_as(SARAH).put(
+    response = client_as(ALEX).put(
         f"/meetings/{meeting}/agenda",
         json={
             "items": [
@@ -1558,7 +1572,7 @@ def test_a_lobby_edit_is_retried_on_top_of_a_tick_that_saved_first(app, client_a
     meeting, (waitlist, refunds, _) = standup(store, client_as)
 
     async def tick(inner):
-        agenda = await inner.agenda(meeting)
+        agenda = await inner.agenda(meeting, ALEX.id)
         items = [agenda.items[0].model_copy(update={"discussed_s": 40.0}), *agenda.items[1:]]
         await inner.save_agenda(
             agenda.model_copy(
@@ -1569,7 +1583,7 @@ def test_a_lobby_edit_is_retried_on_top_of_a_tick_that_saved_first(app, client_a
     interfering = Interfering(store, tick)
     app.dependency_overrides[get_store] = lambda: interfering
 
-    response = client_as(SARAH).put(
+    response = client_as(ALEX).put(
         f"/meetings/{meeting}/agenda",
         json={"items": [{"id": refunds, "title": "Refunds"}, {"id": waitlist, "title": "Email"}]},
     )
@@ -1586,7 +1600,7 @@ def test_a_lobby_edit_that_keeps_losing_the_race_is_refused(app, client_as, stor
     interfering = Interfering(store, lambda inner: rename_first(inner, meeting), times=99)
     app.dependency_overrides[get_store] = lambda: interfering
 
-    response = client_as(SARAH).put(
+    response = client_as(ALEX).put(
         f"/meetings/{meeting}/agenda", json={"items": [{"id": waitlist, "title": "Email"}]}
     )
 
@@ -1693,7 +1707,7 @@ def test_two_replicas_ticking_at_once_count_the_stretch_once(store, settings):
     assert [r.status_code for r in responses] == [200, 200]
     assert saved_agenda(store, meeting).items[0].discussed_s == 30
     assert sorted(len(r.json()["nudges"]) for r in responses) == [0, 0]
-    assert {r.json()["agenda"]["items"][0]["discussed_s"] for r in responses} == {30}
+    assert {alexs(r.json())["items"][0]["discussed_s"] for r in responses} == {30}
 
 
 ROUNDS = 40
@@ -1707,7 +1721,12 @@ async def test_ticks_racing_lobby_edits_on_postgres_lose_no_edit(pg_dsn, setting
         meeting.model_copy(update={"started_at": datetime.now(UTC) - timedelta(hours=1)})
     )
     first = await store.save_agenda(
-        Agenda(meeting_id=meeting.id, items=[item("w", "Waitlist email", 10)], generated_at=T())
+        Agenda(
+            meeting_id=meeting.id,
+            person_id=ALEX.id,
+            items=[item("w", "Waitlist email", 10)],
+            generated_at=T(),
+        )
     )
     llm = MockLLM(structured={AgendaTrackDraft: all_about("a1")})
     app = app_for(store, settings, llm)
@@ -1731,10 +1750,34 @@ async def test_ticks_racing_lobby_edits_on_postgres_lose_no_edit(pg_dsn, setting
                 tg.start_soon(tick)
                 tg.start_soon(edit)
             statuses.append((replies["tick"].status_code, replies["edit"].status_code))
-            saved = await store.agenda(meeting.id)
+            saved = await store.agenda(meeting.id, ALEX.id)
             assert saved.items[0].title == f"Waitlist email {n}", f"round {n} lost the edit"
 
     assert statuses == [(200, 200)] * ROUNDS
-    saved = await store.agenda(meeting.id)
+    saved = await store.agenda(meeting.id, ALEX.id)
     assert saved.items[0].discussed_s == 30 * ROUNDS - 5
     assert saved.revision == first.revision + 2 * ROUNDS
+
+
+# everyone's own agenda
+
+
+def test_everyones_agenda_is_tracked_separately(worker, client_as, store, model):
+    meeting = live_meeting(store).id
+    [waitlist] = plan(client_as(ALEX), meeting, ("Waitlist email", 10))
+    [refunds] = plan(client_as(SARAH), meeting, ("Refund policy", 5))
+    ingest(worker, meeting, said(meeting, 1, "The waitlist email goes out Thursday", 0, 30))
+    model.says("a1").says(None)  # Alex's: about his item; Sarah's: nothing on hers
+
+    response = track(worker, meeting, now=60)
+
+    assert response.status_code == 200, response.text
+    agendas = {a["person_id"]: a for a in response.json()["agendas"]}
+    assert set(agendas) == {ALEX.id, SARAH.id}
+    assert agendas[ALEX.id]["current_item_id"] == waitlist
+    assert by_id(agendas[ALEX.id])[waitlist]["discussed_s"] == 30
+    assert agendas[SARAH.id]["current_item_id"] is None
+    assert by_id(agendas[SARAH.id])[refunds]["discussed_s"] == 0
+    alexs, sarahs = model.prompts  # one call per agenda, each with only its owner's items
+    assert "Waitlist email" in alexs and "Refund policy" not in alexs
+    assert "Refund policy" in sarahs and "Waitlist email" not in sarahs

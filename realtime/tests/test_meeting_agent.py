@@ -237,14 +237,22 @@ def invocation(via="voice", by="u-alex", visibility="public") -> Invocation:
     )
 
 
-def agenda_response(*, current: str | None = None, nudges=()) -> AgendaTrackResponse:
+def agenda_of(person_id: str, current: str | None = None) -> Agenda:
+    return Agenda(
+        meeting_id=MEETING,
+        person_id=person_id,
+        items=[AgendaItem(id="i-1", title="Refunds"), AgendaItem(id="i-2", title="Billing")],
+        generated_at=datetime(2026, 10, 3, tzinfo=UTC),
+        current_item_id=current,
+    )
+
+
+def agenda_response(
+    *, current: str | None = None, nudges=(), sarahs: str | None = None
+) -> AgendaTrackResponse:
+    """Alex's agenda with `current`, and Sarah's with `sarahs`: everyone has their own."""
     return AgendaTrackResponse(
-        agenda=Agenda(
-            meeting_id=MEETING,
-            items=[AgendaItem(id="i-1", title="Refunds"), AgendaItem(id="i-2", title="Billing")],
-            generated_at=datetime(2026, 10, 3, tzinfo=UTC),
-            current_item_id=current,
-        ),
+        agendas=[agenda_of("u-alex", current), agenda_of("u-sarah", sarahs)],
         nudges=list(nudges),
     )
 
@@ -1112,24 +1120,45 @@ async def test_a_failed_join_report_is_logged_and_polaris_keeps_working(
 # ticks
 
 
-async def test_an_agenda_tick_publishes_the_agenda_and_each_nudge_to_everyone(agent, bus, brain):
-    nudge = AgendaNudge(meeting_id=MEETING, item_id="i-2", text="Billing hasn't come up yet")
-    brain.agenda_ticks = [agenda_response(current="i-1", nudges=[nudge])]
+async def test_an_agenda_tick_sends_each_agenda_and_nudge_only_to_its_owner(agent, bus, brain):
+    nudge = AgendaNudge(
+        meeting_id=MEETING, person_id="u-sarah", item_id="i-2", text="Billing hasn't come up yet"
+    )
+    brain.agenda_ticks = [agenda_response(current="i-1", sarahs="i-2", nudges=[nudge])]
 
     await agent.tick_agenda()
 
-    [(agenda, to)] = bus.on(Topic.AGENDA)
-    assert (agenda.current_item_id, to) == ("i-1", None)
-    assert bus.on(Topic.AGENDA_NUDGE) == [(nudge, None)]
+    assert [(a.person_id, a.current_item_id, to) for a, to in bus.on(Topic.AGENDA)] == [
+        ("u-alex", "i-1", ["u-alex"]),
+        ("u-sarah", "i-2", ["u-sarah"]),
+    ]
+    assert bus.on(Topic.AGENDA_NUDGE) == [(nudge, ["u-sarah"])]
+
+
+async def test_an_agenda_or_nudge_without_an_owner_goes_to_nobody(agent, bus, brain):
+    nudge = AgendaNudge(meeting_id=MEETING, item_id="i-2", text="Billing hasn't come up yet")
+    stray = agenda_of("u-alex").model_copy(update={"person_id": None})
+    brain.agenda_ticks = [AgendaTrackResponse(agendas=[stray], nudges=[nudge])]
+
+    await agent.tick_agenda()
+
+    assert bus.on(Topic.AGENDA) == [] and bus.on(Topic.AGENDA_NUDGE) == []
 
 
 async def test_an_unchanged_agenda_is_not_published_again(agent, bus, brain):
-    brain.agenda_ticks = [agenda_response(current="i-1"), agenda_response(current="i-1")]
+    brain.agenda_ticks = [
+        agenda_response(current="i-1"),
+        agenda_response(current="i-1", sarahs="i-2"),  # only Sarah's changed
+    ]
 
     await agent.tick_agenda()
     await agent.tick_agenda()
 
-    assert len(bus.on(Topic.AGENDA)) == 1
+    assert [(a.person_id, a.current_item_id) for a, _ in bus.on(Topic.AGENDA)] == [
+        ("u-alex", "i-1"),
+        ("u-sarah", None),
+        ("u-sarah", "i-2"),
+    ]
 
 
 async def test_a_contradicted_check_is_one_private_chat_message_to_the_claimant(

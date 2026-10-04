@@ -320,12 +320,13 @@ async def track_agenda_tick(
 ) -> AgendaTrackResponse:
     """The worker's timer tick (every 10 s or so), and with Jev (JEV_MODEL) its check after each
     caption, for a live meeting. Reads the final segments since the last tick from the store, so
-    the worker sends none. The worker publishes the agenda on Topic.AGENDA and each nudge on
-    Topic.AGENDA_NUDGE; nothing is spoken.
+    the worker sends none. Everyone's agenda is tracked on its own; the worker publishes each
+    agenda on Topic.AGENDA and each nudge on Topic.AGENDA_NUDGE to its owner only; nothing is
+    spoken.
 
     Gemini is needed only when there is a stretch to classify: 503 when it is not configured,
-    502 when the call fails. Either way nothing is tracked, and the body still carries the agenda
-    and the rule nudges (saved as sent) for the worker to publish.
+    502 when the call fails. The other agendas are still tracked, and the body carries every
+    agenda and the nudges (saved as sent) for the worker to publish.
     """
     try:
         meeting = await store.meeting(meeting_id)

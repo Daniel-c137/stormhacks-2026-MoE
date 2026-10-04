@@ -1,4 +1,4 @@
-"""#93 over HTTP: the meeting ask and the worker's invoke both see the meeting's agenda; Home
+"""#93 over HTTP: the meeting ask and the worker's invoke both see the asker's own agenda; Home
 never does. The store is the in-memory one, or Postgres with BRAIN_TEST_STORE=postgres."""
 
 import asyncio
@@ -21,7 +21,7 @@ def llm(app):
 
 def meeting_with_agenda(client_as, store) -> dict:
     meeting = create(client_as(ALEX), "Sprint review")
-    asyncio.run(store.save_agenda(agenda_of(meeting["id"])))
+    asyncio.run(store.save_agenda(agenda_of(meeting["id"], person_id=SARAH.id)))
     return meeting
 
 

@@ -26,8 +26,10 @@ export interface AgendaItem {
   covered_t?: number | null;
 }
 
+/** One person's agenda for a meeting: everyone has their own, and nobody else sees or edits it. */
 export interface Agenda {
   meeting_id: string;
+  person_id?: string | null; // whose agenda; always set once saved
   items: AgendaItem[];
   generated_at: string; // ISO 8601
   updated_at?: string | null; // ISO 8601; last human edit
@@ -45,6 +47,7 @@ export interface AgendaSuggestions {
 /** A reminder that an agenda item has not come up yet. */
 export interface AgendaNudge {
   meeting_id: string;
+  person_id?: string | null; // whose agenda the item is on; the nudge goes only to them
   item_id: string;
   text: string;
 }

@@ -83,7 +83,7 @@ async def catch_up(
     if whole_sentences(said) < MIN_SENTENCES:
         return CatchUpResponse()
     lines = {f"e{n}": s for n, s in enumerate(said[-MAX_LINES:], start=1)}
-    agenda = await store.agenda(meeting.id)
+    agenda = await store.agenda(meeting.id, request.participant_id)  # their own
     name = await joiner_name(store, request.participant_id)
     draft = await make_llm().generate_structured(
         render_prompt(meeting, name, request, lines, agenda),

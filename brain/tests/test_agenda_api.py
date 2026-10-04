@@ -79,11 +79,27 @@ def test_new_items_get_ids_and_the_person_who_added_them_in_the_order_sent(clien
     assert saved(alex, meeting["id"]) == items
 
 
-def test_a_teammate_reorders_renames_removes_and_adds_items(client_as):
-    # client_as switches who the app's requests are made as, so each call names its person.
-    meeting = create(client_as(ALEX))
+def test_everyone_has_their_own_agenda_and_edits_only_theirs(client_as):
+    """Personal agendas: what the host (or anyone) puts on theirs never shows on anyone else's."""
+    alex, sarah = client_as(ALEX), client_as(SARAH)
+    meeting = create(alex)
+
+    put(alex, meeting["id"], {"title": "Refund status", "minutes": 10}, {"title": "Hiring"})
+    assert saved(sarah, meeting["id"]) == []  # nothing of Alex's on Sarah's
+    put(sarah, meeting["id"], {"title": "Mobile release"})
+    put(alex, meeting["id"], {"title": "Refund status", "minutes": 10})  # Alex drops Hiring
+
+    assert [i["title"] for i in saved(alex, meeting["id"])] == ["Refund status"]
+    assert [i["title"] for i in saved(sarah, meeting["id"])] == ["Mobile release"]
+    assert agenda(alex, meeting["id"]).json()["person_id"] == ALEX.id
+    assert agenda(sarah, meeting["id"]).json()["person_id"] == SARAH.id
+
+
+def test_someone_reorders_renames_removes_and_adds_items_on_their_agenda(client_as):
+    alex = client_as(ALEX)
+    meeting = create(alex)
     first, second, third = put(
-        client_as(ALEX),
+        alex,
         meeting["id"],
         {"title": "One", "minutes": 5},
         {"title": "Two"},
@@ -91,7 +107,7 @@ def test_a_teammate_reorders_renames_removes_and_adds_items(client_as):
     ).json()["items"]
 
     response = put(
-        client_as(SARAH),
+        alex,
         meeting["id"],
         {"id": third["id"], "title": "Three, renamed", "minutes": 20},
         {"title": "Four"},
@@ -99,11 +115,11 @@ def test_a_teammate_reorders_renames_removes_and_adds_items(client_as):
     )
 
     assert response.status_code == 200, response.text
-    items = saved(client_as(ALEX), meeting["id"])
+    items = saved(alex, meeting["id"])
     assert [i["title"] for i in items] == ["Three, renamed", "Four", "One"]
     assert items[0]["id"] == third["id"] and items[0]["minutes"] == 20
     assert items[2]["id"] == first["id"] and items[2]["minutes"] is None
-    assert [i["added_by"] for i in items] == [ALEX.id, SARAH.id, ALEX.id]
+    assert [i["added_by"] for i in items] == [ALEX.id, ALEX.id, ALEX.id]
     assert second["id"] not in {i["id"] for i in items}
 
 
@@ -122,7 +138,12 @@ def test_editing_keeps_an_items_status_sources_why_and_who_added_it(client_as, s
     )
     anyio.run(
         store.save_agenda,
-        Agenda(meeting_id=meeting["id"], items=[proposed], generated_at=datetime.now(UTC)),
+        Agenda(
+            meeting_id=meeting["id"],
+            person_id=ALEX.id,
+            items=[proposed],
+            generated_at=datetime.now(UTC),
+        ),
     )
 
     put(alex, meeting["id"], {"id": "a-1", "title": "Refunds for DS-117", "minutes": 5})
@@ -711,6 +732,23 @@ def test_suggestions_skip_what_is_already_on_the_agenda(app, client_as, store):
         "Who owns the refund script?",
         "Hiring",
     ]
+
+
+def test_suggestions_skip_only_what_is_on_your_own_agenda(app, client_as, store):
+    alex, sarah = client_as(ALEX), client_as(SARAH)
+    earlier_meeting(alex, store)
+    meeting = create(alex, "Next sync")
+    put(sarah, meeting["id"], {"title": "Fix the staging database"})  # on Sarah's, not Alex's
+    use_llm(
+        app,
+        MockLLM(
+            structured={AgendaSuggestionDraft: staging_items(("Fix the staging database", 10))}
+        ),
+    )
+
+    items = suggest(alex, meeting["id"]).json()["items"]
+
+    assert [i["title"] for i in items] == ["Fix the staging database"]
 
 
 def test_every_suggestion_gets_a_timebox_in_range(app, client_as, store):

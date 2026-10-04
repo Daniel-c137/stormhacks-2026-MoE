@@ -393,14 +393,23 @@ async def test_private_chat_is_never_sent():
 # ticks
 
 
-def an_agenda() -> Agenda:
-    return Agenda(meeting_id="m-1", items=[], generated_at=datetime(2026, 10, 3, tzinfo=UTC))
+def an_agenda(person_id: str = "u-alex") -> Agenda:
+    return Agenda(
+        meeting_id="m-1",
+        person_id=person_id,
+        items=[],
+        generated_at=datetime(2026, 10, 3, tzinfo=UTC),
+    )
 
 
-async def test_an_agenda_tick_posts_and_returns_the_agenda_and_nudges():
+async def test_an_agenda_tick_posts_and_returns_everyones_agenda_and_nudges():
     response = AgendaTrackResponse(
-        agenda=an_agenda(),
-        nudges=[AgendaNudge(meeting_id="m-1", item_id="i-1", text="Refunds hasn't come up")],
+        agendas=[an_agenda("u-alex"), an_agenda("u-sarah")],
+        nudges=[
+            AgendaNudge(
+                meeting_id="m-1", person_id="u-sarah", item_id="i-1", text="Refunds hasn't come up"
+            )
+        ],
     )
     recorder = Recorder(json_response(response))
 
@@ -419,7 +428,7 @@ async def test_an_agenda_tick_whose_model_failed_still_returns_what_to_publish(s
     """The brain saved the rule nudges as sent, so the worker must publish them."""
     body = {
         "detail": "Gemini is not configured",
-        "agenda": an_agenda().model_dump(mode="json"),
+        "agendas": [an_agenda().model_dump(mode="json")],
         "nudges": [AgendaNudge(meeting_id="m-1", item_id="i-1", text="Nudge").model_dump()],
     }
 

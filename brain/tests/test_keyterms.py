@@ -73,8 +73,16 @@ def keyterms(client: TestClient, meeting_id: str, **kwargs):
     return client.get(f"/internal/meetings/{meeting_id}/keyterms", **kwargs)
 
 
-def setup(store, *, agenda: list[str] = (), members: list[Person] = (), **team):
-    """TEAM's settings, any extra members, and a live meeting with this agenda."""
+def setup(
+    store,
+    *,
+    agenda: list[str] = (),
+    members: list[Person] = (),
+    agendas: dict[str, list[str]] | None = None,
+    **team,
+):
+    """TEAM's settings, any extra members, and a live meeting with this agenda (the host's), or
+    with these agendas by person id."""
 
     async def go():
         await store.save_settings(
@@ -88,11 +96,17 @@ def setup(store, *, agenda: list[str] = (), members: list[Person] = (), **team):
         for person in members:
             await store.upsert_person(person, TEAM.id)
         meeting = await store.create_meeting(TEAM.id, "Refund sync", ALEX.id)
-        if agenda:
-            items = [AgendaItem(id=f"a{n}", title=t) for n, t in enumerate(agenda)]
-            await store.save_agenda(
-                Agenda(meeting_id=meeting.id, items=items, generated_at=datetime.now(UTC))
-            )
+        for person_id, titles in (agendas or {ALEX.id: agenda}).items():
+            if titles:
+                items = [AgendaItem(id=f"a{n}", title=t) for n, t in enumerate(titles)]
+                await store.save_agenda(
+                    Agenda(
+                        meeting_id=meeting.id,
+                        person_id=person_id,
+                        items=items,
+                        generated_at=datetime.now(UTC),
+                    )
+                )
         return meeting
 
     return anyio.run(go)
@@ -144,6 +158,21 @@ def test_terms_come_in_order_agent_team_settings_agenda_then_jira(worker, store,
     (search,) = jira.searches
     assert "DS" in search["jql"] and "done" in search["jql"].lower()
     assert search["maxResults"] == MAX_KEYTERMS - 10
+
+
+def test_everyones_agenda_titles_are_terms_the_hosts_first(worker, store):
+    meeting = setup(
+        store, agendas={SARAH.id: ["Hiring", "rollout"], ALEX.id: ["Rollout", "Refunds"]}
+    )
+
+    response = keyterms(worker, meeting.id)
+
+    assert response.status_code == 200, response.text
+    assert KeytermsResponse.model_validate(response.json()).terms[-3:] == [
+        "Rollout",
+        "Refunds",
+        "Hiring",
+    ]
 
 
 def test_the_default_wake_phrase_is_the_agent_name_alone():

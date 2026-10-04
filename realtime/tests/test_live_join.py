@@ -124,6 +124,7 @@ def seed(dsn: str) -> str:
         await store.save_agenda(
             Agenda(
                 meeting_id=meeting.id,
+                person_id=ALEX.id,
                 items=[AgendaItem(id="i-refunds", title="Refund window")],
                 generated_at=meeting.started_at,
             )

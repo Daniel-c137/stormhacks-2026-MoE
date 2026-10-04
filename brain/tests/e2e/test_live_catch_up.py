@@ -92,6 +92,7 @@ async def test_a_late_joiner_is_caught_up_on_the_decision_and_the_current_item()
     await store.save_agenda(
         Agenda(
             meeting_id=meeting.id,
+            person_id=SARA.id,
             items=[
                 AgendaItem(id="i-1", title="Refund double charge", status="covered", minutes=5),
                 AgendaItem(id="i-2", title="Pricing page launch", minutes=10),

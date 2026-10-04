@@ -320,6 +320,33 @@ async def test_the_agenda_is_given_to_the_report_in_order(api, llm):
     assert first < call.prompt.index("2. Double charge refunds (10 min)")
 
 
+async def test_everyones_agenda_is_given_to_the_report_the_hosts_first(api, llm):
+    """Agendas are personal; the write-up orders topics by all of them: the host's items first,
+    then the others', each title once."""
+    meeting = await api.create()
+    for person, titles in [
+        (SARAH, ["Hiring plan", "double  charge REFUNDS"]),
+        (ALEX, ["Waitlist email", "Double charge refunds"]),
+    ]:
+        response = await api.call(
+            "PUT",
+            f"/meetings/{meeting['id']}/agenda",
+            person,
+            json={"items": [{"title": t} for t in titles]},
+        )
+        assert response.status_code == 200, response.text
+    await api.ingest(meeting["id"])
+
+    await api.end(meeting["id"])
+    await api.drain()
+
+    (call,) = calls_for(llm, ReportExtraction)
+    assert "1. Waitlist email" in call.prompt
+    assert "2. Double charge refunds" in call.prompt
+    assert "3. Hiring plan" in call.prompt
+    assert "REFUNDS" not in call.prompt
+
+
 async def test_a_meeting_without_an_agenda_has_none_in_the_prompt(api, llm):
     await ended(api)
 
