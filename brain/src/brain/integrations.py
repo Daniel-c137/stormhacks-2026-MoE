@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from mcp import Client
 from mcp.server.mcpserver import MCPServer
-from mcp.types import TextContent
+from mcp.types import CallToolResult, ContentBlock, TextContent
 from pydantic import BaseModel
 
 McpServerName = Literal["github", "jira"]
@@ -30,6 +30,8 @@ READ_TOOLS: dict[McpServerName, frozenset[str]] = {
             "list_commits",
             "list_releases",
             "get_latest_release",
+            "search_code",
+            "get_file_contents",
         }
     ),
     "jira": frozenset(
@@ -84,16 +86,25 @@ class McpReader:
 
     async def call(self, tool: str, arguments: dict[str, Any]) -> Any:
         """The tool's structured result, or its text parsed as JSON, or the text itself."""
-        if tool not in READ_TOOLS[self.server]:
-            raise ToolRefused(f"{tool} is not a {self.server} read tool")
-        async with Client(self.target) as client:
-            result = await client.call_tool(tool, arguments)
+        result = await self._call(tool, arguments)
         text = "\n".join(c.text for c in result.content if isinstance(c, TextContent))
-        if result.is_error:
-            raise McpToolError(text or f"{tool} failed")
         if result.structured_content is not None:
             return result.structured_content
         try:
             return json.loads(text)
         except ValueError:
             return text
+
+    async def content(self, tool: str, arguments: dict[str, Any]) -> list[ContentBlock]:
+        """The tool's content blocks as they are, e.g. a file as an embedded resource."""
+        return (await self._call(tool, arguments)).content
+
+    async def _call(self, tool: str, arguments: dict[str, Any]) -> CallToolResult:
+        if tool not in READ_TOOLS[self.server]:
+            raise ToolRefused(f"{tool} is not a {self.server} read tool")
+        async with Client(self.target) as client:
+            result = await client.call_tool(tool, arguments)
+        if result.is_error:
+            text = "\n".join(c.text for c in result.content if isinstance(c, TextContent))
+            raise McpToolError(text or f"{tool} failed")
+        return result
