@@ -74,9 +74,9 @@ def push(client: TestClient, meeting_id: str, *task_ids: str, approved_by: str =
     )
 
 
-def patch(client: TestClient, meeting_id: str, draft: TaskDraft, **changes):
+def patch(client: TestClient, path_meeting_id: str, draft: TaskDraft, /, **changes):
     body = draft.model_copy(update=changes).model_dump(mode="json")
-    return client.patch(f"/meetings/{meeting_id}/tasks/{draft.id}", json=body)
+    return client.patch(f"/meetings/{path_meeting_id}/tasks/{draft.id}", json=body)
 
 
 # the report page
