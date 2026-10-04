@@ -170,7 +170,11 @@ async def test_memory_with_vectors_the_database_cannot_hold_is_misconfigured():
 
 async def test_get_llm_is_a_503_when_gemini_is_not_configured():
     with pytest.raises(HTTPException) as raised:
-        await get_llm(Settings(_env_file=None, gemini_api_key=None, gemini_model=None))
+        await get_llm(
+            Settings(
+                _env_file=None, gemini_api_key=None, gemini_model=None, openrouter_api_key=None
+            )
+        )
 
     assert raised.value.status_code == 503
     assert "Gemini is not configured" in raised.value.detail

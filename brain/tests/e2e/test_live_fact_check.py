@@ -12,7 +12,7 @@ from brain.llm import GeminiLLM, make_llm
 from brain.store import InMemoryStore
 from contracts import GitHubSettings, JiraSettings, TeamSettings
 
-settings = Settings()
+settings = Settings(openrouter_models=None)  # Gemini alone, never the fallback
 
 pytestmark = [
     pytest.mark.live,
