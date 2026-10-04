@@ -122,3 +122,14 @@ def test_push_reports_failures_with_a_nonzero_exit(jira_env, tmp_path, capsys):
     out = capsys.readouterr().out
     assert "mtg-standup-task-1: failed" in out
     assert "mtg-standup-task-2: DS-117" in out
+
+
+def test_push_prints_why_an_issue_was_created_unassigned(jira_env, tmp_path, capsys):
+    jira_env.accounts = []
+    path = review_file(tmp_path)
+
+    assert main(["push", str(path), "--all", "--approved-by", "Alice Moreau"]) == 0
+
+    out = capsys.readouterr().out
+    assert "mtg-standup-task-1: DS-117" in out
+    assert "mtg-standup-task-1: created unassigned:" in out

@@ -1,6 +1,8 @@
 from datetime import date, datetime
 
 import pytest
+from conftest import FakeJira
+from mcp.types import CallToolResult, TextContent
 
 from brain.config import Settings
 from brain.jira import (
@@ -8,6 +10,7 @@ from brain.jira import (
     JiraConfig,
     JiraPusher,
     JiraUnavailable,
+    account_ids,
     apply_results,
     jira_config,
 )
@@ -35,12 +38,15 @@ def draft(n: int, **changes) -> TaskDraft:
     return task.model_copy(update=changes)
 
 
-def review(*tasks: TaskDraft) -> ProcessedMeeting:
+BOB = Person(id="p-bob", name="Bob Okafor", short="Bob", initials="BO")
+
+
+def review(*tasks: TaskDraft, members: list[Person] | None = None) -> ProcessedMeeting:
     return ProcessedMeeting(
         meeting_id="mtg-standup",
         title="Friday standup",
         started_at=datetime(2026, 10, 2, 9, 30),
-        members=[Person(id="p-bob", name="Bob Okafor", short="Bob", initials="BO")],
+        members=[BOB] if members is None else members,
         report=Report(meeting_id="mtg-standup", summary="s", tasks=list(tasks)),
     )
 
@@ -87,7 +93,78 @@ async def test_the_issue_says_where_it_came_from_who_owns_it_and_when_it_is_due(
     assert "Approved for Jira by Alice Moreau" in body
     assert created["additional_fields"] == {"duedate": "2026-10-07"}
     assert undated["additional_fields"] is None
-    assert created["assignee_account_id"] is None
+
+
+async def test_the_owner_is_looked_up_by_email_and_assigned(fake_jira):
+    bob = BOB.model_copy(update={"email": "bob@dropsubs.dev"})
+    task = draft(1, owner_id="p-bob")
+
+    results = await push(fake_jira, review(task, members=[bob]), approve(task.id))
+
+    assert fake_jira.lookups == ["bob@dropsubs.dev"]
+    assert fake_jira.created[0]["assignee_account_id"] == "acc-bob"
+    assert results[0].key == "DS-117" and results[0].warning is None
+    assert "Owner named in the meeting: Bob Okafor" in fake_jira.created[0]["description"]
+
+
+async def test_an_owner_without_an_email_is_looked_up_by_name(fake_jira):
+    task = draft(1, owner_id="p-bob")
+
+    await push(fake_jira, review(task), approve(task.id))
+
+    assert fake_jira.lookups == ["Bob Okafor"]
+    assert fake_jira.created[0]["assignee_account_id"] == "acc-bob"
+
+
+async def test_no_owner_or_an_owner_outside_the_meeting_means_no_lookup(fake_jira):
+    meeting = review(draft(1), draft(2, owner_id="p-stranger"))
+
+    results = await push(fake_jira, meeting, approve(draft(1).id, draft(2).id))
+
+    assert fake_jira.lookups == []
+    assert [c["assignee_account_id"] for c in fake_jira.created] == [None, None]
+    assert [r.warning for r in results] == [None, None]
+
+
+async def test_an_owner_with_no_jira_account_is_created_unassigned_with_a_warning():
+    jira = FakeJira(accounts=[])
+    task = draft(1, owner_id="p-bob")
+
+    results = await push(jira, review(task), approve(task.id))
+
+    assert results[0].key == "DS-117"
+    assert jira.created[0]["assignee_account_id"] is None
+    assert results[0].warning.startswith("created unassigned:")
+    assert "Bob Okafor" in results[0].warning
+
+
+async def test_an_ambiguous_owner_is_created_unassigned_with_a_warning():
+    jira = FakeJira(
+        accounts=[
+            {"accountId": "acc-bob-1", "displayName": "Bob Okafor"},
+            {"accountId": "acc-bob-2", "displayName": "Bob Okafor (contractor)"},
+        ]
+    )
+    task = draft(1, owner_id="p-bob")
+
+    results = await push(jira, review(task), approve(task.id))
+
+    assert results[0].key == "DS-117"
+    assert jira.created[0]["assignee_account_id"] is None
+    assert results[0].warning.startswith("created unassigned:")
+    assert "2 Jira accounts" in results[0].warning
+
+
+async def test_a_failed_lookup_does_not_block_the_issue(fake_jira):
+    fake_jira.lookup_error = "User search is not permitted"
+    task = draft(1, owner_id="p-bob")
+
+    results = await push(fake_jira, review(task), approve(task.id))
+
+    assert results[0].key == "DS-117" and results[0].error is None
+    assert fake_jira.created[0]["assignee_account_id"] is None
+    assert results[0].warning.startswith("created unassigned:")
+    assert "User search is not permitted" in results[0].warning
 
 
 async def test_nothing_is_pushed_without_an_approver(fake_jira):
@@ -181,3 +258,20 @@ def test_the_site_url_serves_as_cloud_id_when_none_is_given():
 
     assert config.cloud_id == "https://dropsubs.atlassian.net"
     assert config.base_url == "https://dropsubs.atlassian.net"
+
+
+def tool_result(structured=None, text: str = "") -> CallToolResult:
+    return CallToolResult(
+        content=[TextContent(type="text", text=text)], structured_content=structured
+    )
+
+
+def test_account_ids_accepts_the_shapes_jira_might_answer_with():
+    users = [{"accountId": "a1", "displayName": "Bob"}, {"account_id": "a2"}]
+
+    assert account_ids(tool_result({"users": users})) == ["a1", "a2"]
+    assert account_ids(tool_result({"result": users})) == ["a1", "a2"]
+    assert account_ids(tool_result({"result": {"users": users}})) == ["a1", "a2"]
+    assert account_ids(tool_result(text='[{"accountId": "a1"}, {"accountId": "a1"}]')) == ["a1"]
+    assert account_ids(tool_result(text="No users found")) == []
+    assert account_ids(tool_result({"users": [{"displayName": "no id"}]})) == []

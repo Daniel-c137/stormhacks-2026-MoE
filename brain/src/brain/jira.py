@@ -97,6 +97,7 @@ class JiraPusher:
         meeting: ProcessedMeeting,
         request: TaskPushRequest,
     ) -> TaskPushResult:
+        assignee, warning = await self.assignee(client, draft, meeting)
         result = await client.call_tool(
             "createJiraIssue",
             {
@@ -105,6 +106,7 @@ class JiraPusher:
                 "issueTypeName": self.config.issue_type,
                 "summary": draft.title,
                 "description": describe(draft, meeting, request.approved_by),
+                "assignee_account_id": assignee,
                 "additional_fields": {"duedate": draft.due.isoformat()} if draft.due else None,
             },
         )
@@ -112,11 +114,33 @@ class JiraPusher:
             return TaskPushResult(task_id=draft.id, error=text_of(result) or "Jira refused it")
         if not (key := issue_key(result)):
             return TaskPushResult(task_id=draft.id, error="Jira returned no issue key")
-        return self.pushed(draft.id, key)
+        return self.pushed(draft.id, key, warning)
 
-    def pushed(self, task_id: str, key: str) -> TaskPushResult:
+    async def assignee(
+        self, client: Client, draft: TaskDraft, meeting: ProcessedMeeting
+    ) -> tuple[str | None, str | None]:
+        """The owner's Jira account id, or None and a warning saying why the issue is unassigned.
+        Only an owner who is a meeting member is looked up, by email, else by name."""
+        owner = next((p for p in meeting.members if p.id == draft.owner_id), None)
+        if owner is None:
+            return None, None
+        search = owner.email or owner.name
+        result = await client.call_tool(
+            "lookupJiraAccountId", {"cloudId": self.config.cloud_id, "searchString": search}
+        )
+        if result.is_error:
+            reason = text_of(result) or "Jira refused it"
+            return None, f"created unassigned: looking up {search} failed: {reason}"
+        ids = account_ids(result)
+        if len(ids) == 1:
+            return ids[0], None
+        if not ids:
+            return None, f"created unassigned: no Jira account matches {search}"
+        return None, f"created unassigned: {len(ids)} Jira accounts match {search}"
+
+    def pushed(self, task_id: str, key: str, warning: str | None = None) -> TaskPushResult:
         url = f"{self.config.base_url.rstrip('/')}/browse/{key}" if self.config.base_url else None
-        return TaskPushResult(task_id=task_id, key=key, url=url)
+        return TaskPushResult(task_id=task_id, key=key, url=url, warning=warning)
 
 
 def apply_results(tasks: list[TaskDraft], results: list[TaskPushResult]) -> list[TaskDraft]:
@@ -157,6 +181,30 @@ def issue_key(result: CallToolResult) -> str | None:
         if isinstance(candidate, dict) and isinstance(candidate.get("key"), str):
             return candidate["key"]
     return None
+
+
+def account_ids(result: CallToolResult) -> list[str]:
+    """Distinct account ids from a lookupJiraAccountId result.
+
+    Assumed shape, unverified against Atlassian's server: a list of users, or an object with
+    that list under "users" or "result" (possibly nested once), each user carrying "accountId"
+    (or "account_id"). Anything else counts as no match."""
+    data = result.structured_content
+    if data is None:
+        try:
+            data = json.loads(text_of(result))
+        except ValueError:
+            return []
+    for _ in range(3):
+        if not isinstance(data, dict):
+            break
+        data = data.get("users", data.get("result"))
+    if not isinstance(data, list):
+        return []
+    ids = (
+        user.get("accountId") or user.get("account_id") for user in data if isinstance(user, dict)
+    )
+    return list(dict.fromkeys(i for i in ids if isinstance(i, str) and i))
 
 
 def text_of(result: CallToolResult) -> str:
