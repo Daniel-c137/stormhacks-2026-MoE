@@ -1024,6 +1024,11 @@ dependencies = [
     { name = "pydantic-settings" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "moe-brain" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "httpx" },
@@ -1032,6 +1037,9 @@ requires-dist = [
     { name = "moe-contracts", editable = "contracts" },
     { name = "pydantic-settings" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "moe-brain", editable = "brain" }]
 
 [[package]]
 name = "moe-world"

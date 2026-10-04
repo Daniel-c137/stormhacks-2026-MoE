@@ -22,7 +22,7 @@ from contracts import AGENT_PARTICIPANT_ID, Person, Team
 
 KEY = "test-key"
 SECRET = "test-secret-that-is-long-enough-for-hs256"
-LIVEKIT_URL = "wss://omniroom-test.livekit.cloud"
+LIVEKIT_URL = "wss://skyroom-test.livekit.cloud"
 WORKER_TOKEN = "worker-shared-secret-0123456789abcdef"
 AUTH_SECRET = "a-session-signing-secret-of-at-least-32-characters"
 
