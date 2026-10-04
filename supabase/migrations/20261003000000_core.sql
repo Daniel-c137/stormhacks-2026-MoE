@@ -23,6 +23,13 @@ create table people (
     photo_url text
 );
 
+-- The uploaded profile photo; people.photo_url points at the API route that serves it.
+create table person_photos (
+    person_id text primary key references people on delete cascade,
+    content_type text not null,
+    data bytea not null
+);
+
 -- person_id has no foreign key: a team may list a member before their profile is saved,
 -- and member lists skip ids without a profile.
 create table memberships (
@@ -165,6 +172,7 @@ create index decisions_meeting_idx on decisions (meeting_id, ord);
 
 alter table teams enable row level security;
 alter table people enable row level security;
+alter table person_photos enable row level security;
 alter table memberships enable row level security;
 alter table team_settings enable row level security;
 alter table meetings enable row level security;

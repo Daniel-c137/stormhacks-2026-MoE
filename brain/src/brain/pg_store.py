@@ -31,7 +31,7 @@ from contracts import (
 from contracts.meeting import MeetingStatus
 
 from .db import connection
-from .store import Conflict, NotFound, new_join_code
+from .store import Conflict, NotFound, new_join_code, photo_path
 
 Row = dict[str, Any]
 Cursor = AsyncCursor[Row]
@@ -179,6 +179,37 @@ class PostgresStore:
             )
         if row is None:
             raise NotFound(f"person {person.id}")
+        return Person.model_validate(row)
+
+    async def save_photo(self, person_id: str, content_type: str, data: bytes) -> Person:
+        async with self._tx() as cur:
+            row = await self._set_photo_url(cur, person_id, photo_path(person_id, data))
+            await cur.execute(
+                "insert into person_photos (person_id, content_type, data) values (%s, %s, %s)"
+                " on conflict (person_id) do update set content_type = excluded.content_type,"
+                " data = excluded.data",
+                [person_id, content_type, bytes(data)],
+            )
+        return Person.model_validate(row)
+
+    async def photo(self, person_id: str) -> tuple[str, bytes]:
+        async with self._tx() as cur:
+            row = await self._one(
+                cur,
+                "select p.id, ph.content_type, ph.data from people p"
+                " left join person_photos ph on ph.person_id = p.id where p.id = %s",
+                [person_id],
+            )
+        if row is None:
+            raise NotFound(f"person {person_id}")
+        if row["data"] is None:
+            raise NotFound(f"photo for person {person_id}")
+        return row["content_type"], bytes(row["data"])
+
+    async def delete_photo(self, person_id: str) -> Person:
+        async with self._tx() as cur:
+            row = await self._set_photo_url(cur, person_id, None)
+            await cur.execute("delete from person_photos where person_id = %s", [person_id])
         return Person.model_validate(row)
 
     async def members(self, team_id: str) -> list[Person]:
@@ -630,6 +661,16 @@ class PostgresStore:
             " on conflict do nothing",
             [team_id, list(person_ids)],
         )
+
+    async def _set_photo_url(self, cur: Cursor, person_id: str, url: str | None) -> Row:
+        row = await self._one(
+            cur,
+            f"update people p set photo_url = %s where id = %s returning {PERSON}",
+            [url, person_id],
+        )
+        if row is None:
+            raise NotFound(f"person {person_id}")
+        return row
 
     async def _members(
         self, team_id: str, needle: str, *, order: str, limit: int | None
