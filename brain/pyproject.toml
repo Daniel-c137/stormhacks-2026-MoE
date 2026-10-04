@@ -14,6 +14,8 @@ dependencies = [
     "mcp",
     "pyjwt[crypto]>=2.15.1",
     "httpx>=0.28.1",
+    "psycopg[binary]",
+    "psycopg-pool",
 ]
 
 [project.scripts]

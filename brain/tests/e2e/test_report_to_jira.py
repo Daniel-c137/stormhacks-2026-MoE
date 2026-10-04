@@ -34,6 +34,9 @@ def test_transcript_to_reviewed_drafts_to_jira_issues(jira_env, tmp_path, capsys
         "Find an owner for the model retirement",
     ]
     assert jira_env.created[0]["additional_fields"] == {"duedate": "2026-10-07"}
+    # Bob owns the first draft and has a Jira account; the second draft has no owner.
+    assert jira_env.lookups == ["Bob Okafor"]
+    assert [c["assignee_account_id"] for c in jira_env.created] == ["acc-bob", None]
     tasks = ProcessedMeeting.model_validate_json(review_file.read_text()).report.tasks
     assert [(t.key, t.jira_status) for t in tasks] == [("DS-117", "todo"), ("DS-118", "todo")]
     assert "https://dropsubs.atlassian.net/browse/DS-117" in capsys.readouterr().out

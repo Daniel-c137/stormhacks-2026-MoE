@@ -1,4 +1,5 @@
 import secrets
+from collections.abc import Callable
 from functools import cache
 from typing import NoReturn
 
@@ -8,6 +9,7 @@ from contracts import Meeting, Person, Team
 
 from ..auth import AuthNotConfigured, InvalidToken, KeysUnavailable, TokenVerifier
 from ..config import Settings
+from ..jira import JiraPusher, jira_config
 from ..store import NotFound, Store
 
 
@@ -71,6 +73,13 @@ async def current_user(
         return await store.person(claims["sub"])
     except NotFound:
         raise HTTPException(status_code=403, detail="not a workspace member") from None
+
+
+def get_jira_pusher(settings: Settings = Depends(get_settings)) -> Callable[[], JiraPusher]:
+    """Makes the pusher for an approved push; JiraUnavailable when Jira is not configured.
+    A factory, so the route checks the team and the meeting before Jira's configuration.
+    Tests override it with an in-process Jira."""
+    return lambda: JiraPusher(jira_config(settings))
 
 
 async def require_internal(

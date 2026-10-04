@@ -78,4 +78,5 @@ export interface TaskPushResult {
   key?: string | null;
   url?: string | null;
   error?: string | null;
+  warning?: string | null;
 }
