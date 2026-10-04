@@ -667,17 +667,14 @@
   .conn-account .field { height: 40px; border-radius: 10px; font-size: 14px; }
   .conn-account .note, .conn-account .err, .conn-account-actions { grid-column: 1 / -1; }
   .conn-account-actions { display: flex; gap: 8px; align-items: center; }
-  .voices { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
-  .voice { border: 1.5px solid var(--line); border-radius: 18px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; transition: border-color .15s; }
-  .voice:has(input:checked) { border-color: var(--ink); background: var(--card-hover); }
-  .voice-foot { display: flex; gap: 10px; align-items: center; min-height: 34px; }
+  .voice-pick { display: flex; flex-direction: column; gap: 8px; max-width: 460px; }
+  .voice-row { display: flex; gap: 10px; align-items: center; }
+  .voice-row .field { flex: 1; }
+  .voice-play { flex: none; }
   .opt-label { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
   .opt-label input { accent-color: var(--primary); width: 17px; height: 17px; margin: 2px 0 0; flex: none; }
   .opt-name { display: block; font-weight: 700; font-size: 15px; }
   .opt-desc { display: block; font-size: 13px; color: var(--muted); margin-top: 2px; line-height: 1.45; }
-  .playing { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--ink-2); min-width: 0; }
-  .playing .mark-slot { width: 20px; height: 20px; }
-  .playing em { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .sens { display: flex; flex-direction: column; gap: 10px; }
   .sens label { border: 1.5px solid var(--line); border-radius: 18px; padding: 14px 16px; }
   .sens label:has(input:checked) { border-color: var(--ink); background: var(--card-hover); }
