@@ -32,6 +32,7 @@ import { describeError, pushTasks, retryReport, updateTask } from "@/lib/api";
 import { attendeeNames, fmtClock, fmtDate, fmtLongDate, fmtT, joinNames, meetingStart, shortOf } from "@/lib/format";
 import { hostOrAdmin } from "@/lib/roles";
 import { jiraIssueUrl } from "@/lib/links";
+import { translationNote } from "@/lib/translation";
 import { ListenButton } from "./ListenButton";
 import { TaskReview } from "./TaskReview";
 
@@ -453,11 +454,13 @@ function ReportView({ meeting, onPushed }: { meeting: Meeting; onPushed: () => v
                                 {d.relation.type === "contradicts" ? "Contradicts a past decision" : "Superseded by a later decision"}
                               </div>
                               {related && <p>“{related.text}”</p>}
-                              <Link className="link" href="/memory">
-                                {[relatedMeeting?.title, relatedStart && fmtDate(relatedStart, true), "see in Decisions"]
-                                  .filter(Boolean)
-                                  .join(" · ")}
-                              </Link>
+                              {related && (
+                                <Link className="link" href={`/meetings/${related.meeting_id}`}>
+                                  {[relatedMeeting?.title ?? "That meeting", relatedStart && fmtDate(relatedStart, true)]
+                                    .filter(Boolean)
+                                    .join(" · ")}
+                                </Link>
+                              )}
                             </div>
                           </div>
                         )}
@@ -536,7 +539,7 @@ function ReportView({ meeting, onPushed }: { meeting: Meeting; onPushed: () => v
                     <li key={g.seg_id} id={`seg-${g.seg_id}`} className="line" data-hl={highlighted.includes(g.seg_id)}>
                       <span className="tm">{fmtT(g.t_start)}</span>
                       <span className="who">{speakerName(g.speaker_id, g.speaker_name)}</span>
-                      <span className="tx">{mark(g.text)}</span>
+                      <TranscriptText seg={g} marked={mark(g.text)} />
                     </li>
                   ))}
                 </ol>
@@ -637,5 +640,32 @@ function Tasks({
       onJump={onJump}
       canPush={hostOrAdmin(meeting, me)}
     />
+  );
+}
+
+/** A saved line's text, with how its English came about (#106): the words as said can be shown
+ * with a button, so keyboard and touch users reach them too. Text sits in <bdi dir="auto"> so
+ * Persian or Arabic reads right to left beside the English note. */
+function TranscriptText({ seg, marked }: { seg: TranscriptSegment; marked: ReactNode }) {
+  const [showOriginal, setShowOriginal] = useState(false);
+  const note = translationNote(seg);
+  return (
+    <span className="tx">
+      <bdi dir="auto">{marked}</bdi>
+      {note && <span className="tx-note"> · {note}</span>}
+      {seg.original_text && (
+        <>
+          {" "}
+          <button type="button" className="link tx-orig-btn" aria-expanded={showOriginal} onClick={() => setShowOriginal((v) => !v)}>
+            {showOriginal ? "Hide original" : "Show original"}
+          </button>
+          {showOriginal && (
+            <bdi dir="auto" className="tx-orig">
+              {seg.original_text}
+            </bdi>
+          )}
+        </>
+      )}
+    </span>
   );
 }

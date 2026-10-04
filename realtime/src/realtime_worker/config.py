@@ -20,7 +20,14 @@ class Settings(BaseSettings):
     elevenlabs_api_key: str | None = None
     elevenlabs_api_url: str = "https://api.elevenlabs.io"
     elevenlabs_stt_model: str | None = None
-    elevenlabs_stt_language: str = "en"  # ISO 639-1; meetings are in English for now
+    # ISO 639-1 language Scribe is pinned to. A meeting with live translation on (#106) lets
+    # Scribe detect each utterance's language instead.
+    elevenlabs_stt_language: str = "en"
+    # With translation on, a sentence still going after this long is translated so far, again
+    # each period while it grows.
+    translation_provisional_seconds: float = Field(default=1.5, gt=0)
+    # After a failed translation (the model down or slow), provisional ones pause this long.
+    translation_pause_seconds: float = Field(default=45, ge=0)
     elevenlabs_tts_model: str | None = None
     elevenlabs_voice_id: str | None = None  # the default; a team's chosen voice wins
 

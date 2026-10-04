@@ -395,6 +395,9 @@
   .ptile .name span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ptile .name .icon-mic-off { color: #FF7088; }
   .captions { flex: none; min-height: 60px; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 0 24px; }
+  .captions .cap-note, .lines .tx-note { font-size: .78em; opacity: .7; font-style: italic; }
+  .lines .tx-orig-btn { font-size: .78em; }
+  .lines .tx-orig { display: block; margin-top: 2px; opacity: .75; }
   .captions p { width: fit-content; max-width: min(780px, 100%); text-align: center; background: rgba(0,0,0,.78); box-shadow: 0 0 0 1px rgba(255,255,255,.06); color: #FFFFFF; padding: 8px 16px; border-radius: 14px; font-size: 17px; line-height: 1.45; text-wrap: balance; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
   .code { margin-top: 10px; border-radius: 12px; background: var(--r-code, #0A0A0B); color: #E7E9ED; overflow: hidden; box-shadow: 0 0 0 1px #2A2A2E; }
@@ -540,7 +543,6 @@
   .decision:first-of-type { border-top: 0; padding-top: 4px; }
   .dnum { width: 36px; height: 36px; border-radius: 12px; background: var(--primary); color: var(--on-primary); display: grid; place-items: center; font-family: var(--font-mono); font-size: 13px; font-weight: 600; }
   .dtext { font-size: 21px; line-height: 1.3; font-weight: 700; letter-spacing: -.015em; text-wrap: pretty; }
-  .decision[data-superseded="true"] .dtext { text-decoration: line-through; color: var(--muted); }
   .chain { position: relative; display: flex; flex-direction: column; margin-top: 12px; }
   .chain-step { position: relative; padding-left: 22px; }
   .chain-step::before { content: ""; position: absolute; left: 3px; top: 15px; width: 9px; height: 9px; border-radius: 999px; background: var(--card); border: 2px solid var(--primary); z-index: 1; }
@@ -557,9 +559,6 @@
   .chain-talk .line .tx { font-size: 14.5px; }
   .chain-talk .jump { margin: 6px 10px 6px; background: var(--card); font-family: inherit; font-weight: 600; }
   .chain-talk .jump:hover { background: var(--soft-2); }
-  .dquote { margin: 10px 0 0; padding: 10px 14px; border-radius: 14px; background: var(--soft); font-size: 15px; line-height: 1.5; color: var(--ink-2); font-style: italic; }
-  .dmeta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; font-size: 14px; color: var(--muted); }
-  .dmeta a { color: var(--ink-2); }
   .jump { display: inline-flex; gap: 4px; align-items: center; height: 26px; padding: 0 10px; border: 0; border-radius: 999px; background: var(--soft); font-family: var(--font-mono); font-size: 12px; color: var(--ink); }
   .jump:hover:not(:disabled) { background: var(--soft-2); }
   a.jump { text-decoration: none; }

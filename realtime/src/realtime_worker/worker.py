@@ -23,7 +23,13 @@ from datetime import UTC, datetime
 from livekit import rtc
 from livekit.agents import AgentServer, AutoSubscribe, JobContext, JobRequest, cli
 
-from contracts import AGENT_PARTICIPANT_ID, Meeting, WorkerMeetingResponse, get_identity
+from contracts import (
+    AGENT_PARTICIPANT_ID,
+    Meeting,
+    TranslateResponse,
+    WorkerMeetingResponse,
+    get_identity,
+)
 
 from .brain_client import BrainRejected, HttpBrainClient, brain_client_from_settings
 from .bus import LiveKitBus
@@ -34,7 +40,7 @@ from .meeting_agent import MeetingAgent
 from .scribe import ScribeSTT
 from .state import RoomAgentState
 from .tracks import TrackRouter
-from .transcription import TranscriptionManager
+from .transcription import TranscriptionManager, Translate
 
 log = logging.getLogger(__name__)
 
@@ -76,6 +82,24 @@ class RoomChat:
     async def send(self, text: str) -> str:
         info = await self._participant.send_text(text, topic=CHAT_TOPIC)
         return info.stream_id
+
+
+def speech_translator(brain, meeting: Meeting) -> Translate | None:
+    """translate(text, language) through the brain, only for a meeting whose host switched
+    live translation on (#106); None otherwise, so nothing is ever sent to the model."""
+    if not meeting.translate:
+        return None
+
+    async def translate(text: str, language: str | None) -> TranslateResponse:
+        return await brain.translate(meeting.id, text, language)
+
+    return translate
+
+
+def scribe_language(settings: Settings, meeting: Meeting) -> str | None:
+    """None lets Scribe detect each utterance's language, which translation needs; otherwise
+    it is pinned (ELEVENLABS_STT_LANGUAGE, English by default), as without translation."""
+    return None if meeting.translate else settings.elevenlabs_stt_language
 
 
 def meeting_clock(meeting: Meeting) -> Callable[[], float]:
@@ -144,7 +168,7 @@ class MeetingSession:
                 api_key=settings.elevenlabs_api_key or "",
                 model=settings.elevenlabs_stt_model or "",
                 keyterms=keyterms,
-                language=settings.elevenlabs_stt_language,
+                language=scribe_language(settings, meeting),
                 url=settings.elevenlabs_api_url,
             ),
             bus=bus,
@@ -152,6 +176,9 @@ class MeetingSession:
             detector=detector,
             on_invocation=agent.on_invocation,
             clock=clock,
+            translate=speech_translator(brain, meeting),
+            provisional_seconds=settings.translation_provisional_seconds,
+            translation_pause_seconds=settings.translation_pause_seconds,
         )
         agent.transcription = transcription
         router = TrackRouter(transcription)

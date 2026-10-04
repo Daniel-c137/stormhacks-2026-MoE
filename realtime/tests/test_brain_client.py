@@ -17,6 +17,7 @@ from contracts import (
     Invocation,
     Meeting,
     TranscriptSegment,
+    TranslateResponse,
     WorkerMeetingResponse,
 )
 from realtime_worker.brain_client import (
@@ -226,6 +227,68 @@ async def test_segments_land_in_the_real_brain_transcript():
     assert [s.seg_id for s in saved] == [seg(meeting.id, 1).seg_id, seg(meeting.id, 2).seg_id]
 
 
+# translation (#106)
+
+
+async def test_translate_posts_the_speech_and_the_detected_language():
+    answer = TranslateResponse(language="es", text="We keep Postgres for now.")
+    recorder = Recorder(json_response(answer))
+
+    got = await client(recorder).translate("m-1", "Por ahora nos quedamos con Postgres.", "es")
+
+    assert got == answer
+    [request] = recorder.requests
+    assert str(request.url) == "http://brain.test/internal/meetings/m-1/translate"
+    assert request.headers["X-Internal-Token"] == TOKEN
+    body = httpx.Response(200, content=request.content).json()
+    assert body == {"text": "Por ahora nos quedamos con Postgres.", "language": "es"}
+
+
+@pytest.mark.parametrize("failure", [503, 502, httpx.ReadTimeout("slow")])
+async def test_translate_is_tried_once_because_a_late_caption_is_useless(failure):
+    recorder = Recorder(failure, json_response(TranslateResponse(language="es", text="x")))
+
+    with pytest.raises(BrainUnavailable):
+        await client(recorder).translate("m-1", "Hola", None)
+
+    assert len(recorder.requests) == 1
+
+
+async def test_a_failed_translate_says_which_status_so_the_worker_can_back_off():
+    with pytest.raises(BrainUnavailable) as off:
+        await client(Recorder(503)).translate("m-1", "Hola", None)
+    with pytest.raises(BrainUnavailable) as slow:
+        await client(Recorder(httpx.ReadTimeout("slow"))).translate("m-1", "Hola", None)
+
+    assert off.value.status == 503
+    assert slow.value.status is None
+
+
+async def test_translate_against_the_real_brain_endpoint():
+    from brain.api.deps import get_settings, get_store, get_translation_llm_factory
+    from brain.config import Settings as BrainSettings
+    from brain.llm import MockLLM
+    from brain.main import create_app
+    from brain.store import InMemoryStore
+    from brain.translation import Translation
+    from contracts import Team
+
+    store = InMemoryStore(teams=[Team(id="t-1", name="Checkout", member_ids=["u-alex"])], people=[])
+    meeting = await store.create_meeting("t-1", "Standup", host_id="u-alex")
+    llm = MockLLM(structured={Translation: Translation(language="es", english="Hello everyone")})
+    app = create_app()
+    app.dependency_overrides[get_store] = lambda: store
+    app.dependency_overrides[get_translation_llm_factory] = lambda: lambda: llm
+    app.dependency_overrides[get_settings] = lambda: BrainSettings(
+        _env_file=None, brain_internal_token=TOKEN
+    )
+    brain = HttpBrainClient("http://brain.test", TOKEN, transport=httpx.ASGITransport(app=app))
+
+    got = await brain.translate(meeting.id, "Hola a todos", None)
+
+    assert got == TranslateResponse(language="es", text="Hello everyone")
+
+
 # what the worker reads when it joins
 
 
@@ -423,3 +486,72 @@ async def test_a_catch_up_is_not_retried_and_a_refusal_is_a_rejection():
     assert len(recorder.requests) == 1
     with pytest.raises(BrainRejected):
         await client(Recorder(409)).catch_up("m-1", "u-sarah", 0, 420)
+
+
+# who may act on the shared answer card
+
+
+async def test_asks_whether_a_participant_may_act_on_the_card():
+    recorder = Recorder(500, httpx.Response(200, json={"allowed": True}))
+
+    assert await client(recorder).card_permission("m-1", "u-sarah") is True
+
+    assert [r.method for r in recorder.requests] == ["GET", "GET"]  # a read is retried
+    request = recorder.requests[0]
+    assert request.url.path == "/internal/meetings/m-1/card-permission"
+    assert request.url.params["participant_id"] == "u-sarah"
+    assert request.headers["X-Internal-Token"] == TOKEN
+
+
+async def test_a_refused_participant_is_not_allowed():
+    recorder = Recorder(httpx.Response(200, json={"allowed": False}))
+
+    assert await client(recorder).card_permission("m-1", "u-priya") is False
+
+
+async def test_the_participant_id_is_sent_as_a_query_value_not_spliced_into_the_path():
+    recorder = Recorder(httpx.Response(200, json={"allowed": False}))
+
+    await client(recorder).card_permission("m-1", "u-x&participant_id=u-alex")
+
+    assert recorder.requests[0].url.params.get_list("participant_id") == [
+        "u-x&participant_id=u-alex"
+    ]
+
+
+async def test_a_card_permission_failure_raises():
+    with pytest.raises(BrainUnavailable):
+        await client(Recorder(503, 503, 503)).card_permission("m-1", "u-sarah")
+    with pytest.raises(BrainRejected):
+        await client(Recorder(404)).card_permission("m-1", "u-sarah")
+
+
+async def test_card_permission_matches_the_real_brain():
+    from brain.api.deps import get_settings, get_store
+    from brain.config import Settings as BrainSettings
+    from brain.main import create_app
+    from brain.store import InMemoryStore
+    from contracts import Person, Team
+
+    alex = Person(id="u-alex", name="Alex Chen", short="Alex", initials="AC")
+    sarah = Person(id="u-sarah", name="Sarah Kim", short="Sarah", initials="SK")
+    store = InMemoryStore(
+        teams=[Team(id="t-1", name="Checkout", member_ids=["u-alex", "u-sarah"])],
+        people=[alex, sarah],
+    )
+    meeting = await store.create_meeting("t-1", "Standup", host_id="u-alex")
+    for person in (alex, sarah):
+        await store.add_participant(meeting.id, person.id)
+    settings = await store.settings("t-1")
+    await store.save_settings(settings.model_copy(update={"who_can_allow": "host"}))
+    app = create_app()
+    app.dependency_overrides[get_store] = lambda: store
+    app.dependency_overrides[get_settings] = lambda: BrainSettings(
+        _env_file=None, brain_internal_token=TOKEN
+    )
+    brain = HttpBrainClient(
+        "http://brain.test", TOKEN, transport=httpx.ASGITransport(app=app), backoff=0
+    )
+
+    assert await brain.card_permission(meeting.id, "u-alex") is True
+    assert await brain.card_permission(meeting.id, "u-sarah") is False

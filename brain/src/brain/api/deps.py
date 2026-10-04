@@ -23,7 +23,7 @@ from ..auth import NOT_CONFIGURED, AuthNotConfigured, InvalidToken, LoginLimiter
 from ..config import Settings
 from ..jira import JiraPusher, jira_config
 from ..livekit_rooms import Rooms, rooms_from_settings
-from ..llm import LLM, LLMError, LLMUnavailable, make_embedder, make_llm
+from ..llm import LLM, LLMError, LLMUnavailable, make_embedder, make_llm, make_translation_llm
 from ..memory import MeetingMemory, PgMemoryStore, UnusableMemory
 from ..speech import MeetingLocks
 from ..store import NotFound, Store
@@ -67,6 +67,11 @@ def get_llm_factory(settings: Settings = Depends(get_settings)) -> Callable[[], 
     """Makes the LLM when the write-up needs it, so ending a meeting never fails on an
     unconfigured model; the write-up step shows LLMUnavailable instead. Tests override it."""
     return lambda: make_llm(settings)
+
+
+def get_translation_llm_factory(settings: Settings = Depends(get_settings)) -> Callable[[], LLM]:
+    """The cheap, single-attempt model live translation runs on (#106). Tests override it."""
+    return lambda: make_translation_llm(settings)
 
 
 def get_memory(
@@ -195,10 +200,16 @@ async def require_admin(user: Person = Depends(current_user)) -> Person:
 HOST_OR_ADMIN = "Only the host or an admin can do this"
 
 
+def is_host_or_admin(meeting: Meeting, person: Person) -> bool:
+    """The one rule for what a meeting's host does: its host, or an admin. Callers must already
+    know the person is on the meeting's team."""
+    return meeting.host_id == person.id or person.is_admin
+
+
 def host_or_admin(meeting: Meeting, user: Person) -> None:
     """403 unless the user hosts the meeting or is an admin, so a meeting whose host left can
     still be ended, have its invitees changed, its write-up retried and its tasks pushed."""
-    if meeting.host_id != user.id and not user.is_admin:
+    if not is_host_or_admin(meeting, user):
         raise HTTPException(status_code=403, detail=HOST_OR_ADMIN)
 
 

@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     gemini_fallback_models: str | None = None  # comma-separated, tried in order on overload or 404
     gemini_attempts: int = 2  # per model, including the first try
     gemini_max_delay: float = 4.0  # seconds between retries on the same model
+    # Live translation (#106): its own (cheaper) Gemini model, GEMINI_MODEL when unset, tried
+    # once with no fallback, and given up on before the worker's 4 s wait runs out.
+    translation_model: str | None = None
+    translation_timeout_seconds: float = 3.5
     gemini_embedding_model: str | None = None
     gemini_embedding_dim: int | None = None
     # comma-separated; one call never mixes models, and memory search only compares like with like

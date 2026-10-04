@@ -123,6 +123,9 @@ export const invite = (meetingId: string, body: InviteRequest) =>
   request<Meeting>("POST", `/meetings/${id(meetingId)}/invitees`, body);
 export const uninvite = (meetingId: string, personId: string) =>
   request<Meeting>("DELETE", `/meetings/${id(meetingId)}/invitees/${id(personId)}`);
+/** Host only, before anyone joins: live translation of non-English speech (#106). */
+export const setTranslation = (meetingId: string, translate: boolean) =>
+  request<Meeting>("PUT", `/meetings/${id(meetingId)}/translation`, { translate });
 export const askInMeeting = (meetingId: string, body: AskRequest) =>
   request<Answer>("POST", `/meetings/${id(meetingId)}/ask`, body);
 

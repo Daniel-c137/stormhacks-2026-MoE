@@ -45,6 +45,7 @@ export interface CreateMeetingRequest {
   scheduled_start?: string | null; // ISO 8601
   duration_min?: number | null;
   invitee_ids?: string[];
+  translate?: boolean; // live translation of non-English speech (#106); off by default
 }
 
 export interface JoinMeetingResponse {
@@ -145,6 +146,26 @@ export interface SegmentsIngest {
   segments: TranscriptSegment[];
 }
 
+/** board -> brain: the host switches live translation on or off before anyone joins. */
+export interface TranslationUpdate {
+  translate: boolean;
+}
+
+/**
+ * realtime -> brain: speech to put into English. `language` is Scribe's detected ISO 639-1
+ * code when it gave one; null asks the brain to detect it.
+ */
+export interface TranslateRequest {
+  text: string;
+  language?: string | null;
+}
+
+/** `language` is the detected (or given) language; `text` is English, unchanged when it already was. */
+export interface TranslateResponse {
+  language: string;
+  text: string;
+}
+
 export interface InvokeRequest {
   invocation: Invocation;
   recent_segments: TranscriptSegment[];
@@ -158,6 +179,13 @@ export interface InvokeResponse {
  * Scribe Realtime's limits (brain.keyterms). */
 export interface KeytermsResponse {
   terms: string[];
+}
+
+/** realtime -> brain before the worker acts on a shared answer card (Speak, Post in chat,
+ * Dismiss) for a participant: whether TeamSettings.who_can_allow lets them. With "host", only the
+ * meeting's host or an admin; with "everyone", any participant. Never the agent itself. */
+export interface CardPermissionResponse {
+  allowed: boolean;
 }
 
 /** realtime -> brain when the worker joins a meeting's room (named by the meeting id) and before
