@@ -448,3 +448,22 @@ async def test_the_assistant_is_called_in_persian_through_the_latin_spelling(
     await finish(manager, stt)
 
     assert [i.question for i in invocations] == ["what's the status of DS-104?"]
+
+
+async def test_a_persian_speaker_switching_to_english_mid_sentence_is_shown_as_said(
+    manager, stt, translator, bus
+):
+    persian = "فعلاً با پستگرس می‌مونیم و بعد تصمیم می‌گیریم"
+    translator.answers[persian] = ("fa", "We stay with Postgres for now and decide later")
+    translator.answers["did you merge the PR"] = ("en", "did you merge the PR")
+    stt.final(persian, "fa")  # Reza is known to speak Persian
+    await until(lambda: len(bus.shown()) == 1)
+
+    stt.partial("did you merge the PR")
+    await until(lambda: "did you merge the PR" in bus.shown())
+    stt.partial("did you merge the PR yet")
+    await until(lambda: "did you merge the PR yet" in bus.shown())
+    await finish(manager, stt)
+
+    assert all(c.language in (None, "fa") for c in bus.captions)
+    assert not any(c.language == "fa" and c.text.startswith("did you") for c in bus.captions)

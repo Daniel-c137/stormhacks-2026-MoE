@@ -178,6 +178,7 @@ class MeetingSession:
             clock=clock,
             translate=speech_translator(brain, meeting),
             provisional_seconds=settings.translation_provisional_seconds,
+            translation_pause_seconds=settings.translation_pause_seconds,
         )
         agent.transcription = transcription
         router = TrackRouter(transcription)

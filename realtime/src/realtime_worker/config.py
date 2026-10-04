@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     # With translation on, a sentence still going after this long is translated so far, again
     # each period while it grows.
     translation_provisional_seconds: float = Field(default=1.5, gt=0)
+    # After a failed translation (the model down or slow), provisional ones pause this long.
+    translation_pause_seconds: float = Field(default=45, ge=0)
     elevenlabs_tts_model: str | None = None
     elevenlabs_voice_id: str | None = None  # the default; a team's chosen voice wins
 

@@ -161,5 +161,8 @@ def test_a_meeting_with_translation_off_never_translates_and_stays_on_english():
     assert scribe_language(pinned, meeting) == "fr"
 
 
-def test_a_sentence_still_going_waits_one_and_a_half_seconds_by_default():
-    assert Settings(_env_file=None).translation_provisional_seconds == 1.5
+def test_a_sentence_still_going_waits_one_and_a_half_seconds_and_failures_pause_45():
+    settings = Settings(_env_file=None)
+
+    assert settings.translation_provisional_seconds == 1.5
+    assert settings.translation_pause_seconds == 45

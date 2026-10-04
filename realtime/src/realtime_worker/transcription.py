@@ -53,6 +53,8 @@ RECENT_FINALS = 20
 
 # translate(text, language) -> the language and the English; language is a hint or None.
 Translate = Callable[[str, str | None], Awaitable[TranslateResponse]]
+# A final this short ("Okay.", "Sí") never changes what language a speaker is known to speak.
+LANGUAGE_MIN_WORDS = 3
 
 
 @dataclass
@@ -80,6 +82,7 @@ class TranscriptionManager:
         backlog_limit: int = 1000,
         translate: Translate | None = None,
         provisional_seconds: float = 1.5,
+        translation_pause_seconds: float = 45.0,
     ):
         """clock() returns seconds since the meeting started (Meeting.started_at); every
         segment time and the Ask window are on it. on_unavailable(participant_id, name) is
@@ -103,6 +106,9 @@ class TranscriptionManager:
         self._translate = translate
         self._provisional_seconds = provisional_seconds
         self._languages: dict[str, str] = {}  # participant -> the language they speak, once known
+        self._translation_pause_seconds = translation_pause_seconds
+        self._translation_off = False  # no model configured: stop asking for this meeting
+        self._provisional_paused_until = 0.0  # time.monotonic(); after a failed translation
 
         self._sessions: dict[str, Session] = {}
         self._background: set[asyncio.Task[None]] = set()
@@ -224,7 +230,7 @@ class TranscriptionManager:
                         if live is None or live.seg_id != segment.seg_id:
                             live = OpenSentence(self, segment)
                         live.latest = segment
-                        if not self._speaks_another_language(participant_id):
+                        if self._show_original(participant_id, live):
                             await self._handle(segment)
                 return
             except asyncio.CancelledError:
@@ -290,21 +296,52 @@ class TranscriptionManager:
         language = self._languages.get(participant_id)
         return language is not None and language != "en"
 
+    def _translating(self) -> bool:
+        return self._translate is not None and not self._translation_off
+
+    def _provisional_paused(self) -> bool:
+        return time.monotonic() < self._provisional_paused_until
+
+    def _show_original(self, participant_id: str, live: "OpenSentence") -> bool:
+        """The speaker's own words, unless a translation is on its way: they speak another
+        language and translation is working. Never a blank caption while it isn't."""
+        if not self._speaks_another_language(participant_id) or not self._translating():
+            return True
+        return live.failing or live.english or self._provisional_paused()
+
+    def _translation_failed(self, error: Exception) -> None:
+        """Back off: no model configured (503) ends translation for the meeting; any other
+        failure (502, 504, a timeout) pauses provisional translation for a while."""
+        if getattr(error, "status", None) == 503:
+            if not self._translation_off:
+                log.error("Live translation is off for meeting %s: %s", self.meeting_id, error)
+            self._translation_off = True
+        else:
+            self._provisional_paused_until = time.monotonic() + self._translation_pause_seconds
+
+    def _learn_language(self, participant_id: str, language: str | None, text: str) -> None:
+        """A final of LANGUAGE_MIN_WORDS or more sets the language a speaker is known to speak;
+        a provisional answer only when nothing is known yet."""
+        if language and len(text.split()) >= LANGUAGE_MIN_WORDS:
+            self._languages[participant_id] = language
+
     async def _in_english(
         self, segment: TranscriptSegment, detected: str | None
     ) -> TranscriptSegment:
         """A finished sentence as the room should read it. English (or no translator, or no
-        language known) is unchanged; otherwise translated, or kept untranslated on failure."""
+        language known) is unchanged; otherwise translated, or kept untranslated (its language
+        set, no original_text) when translation is off or fails."""
         language = normalise_language(detected) or self._languages.get(segment.speaker_id)
-        if language:
-            self._languages[segment.speaker_id] = language
+        self._learn_language(segment.speaker_id, language, segment.text)
         if self._translate is None or language in (None, "en"):
             return segment
-        try:
-            english = (await self._translate(segment.text, language)).text.strip()
-        except Exception as e:
-            log.warning("Could not translate %s (%s): %s", segment.seg_id, language, e)
-            english = ""
+        english = ""
+        if not self._translation_off:
+            try:
+                english = (await self._translate(segment.text, language)).text.strip()
+            except Exception as e:
+                log.warning("Could not translate %s (%s): %s", segment.seg_id, language, e)
+                self._translation_failed(e)
         if not english:
             return segment.model_copy(update={"language": language})
         return segment.model_copy(
@@ -407,6 +444,8 @@ class OpenSentence:
         self.sent = 0
         self.shown = 0
         self.in_flight = False
+        self.failing = False  # the latest request failed: the speaker's own words are shown
+        self.english = False  # the model found this sentence English: shown as said
         self.closed = False
         self.timer = asyncio.create_task(self._tick())
 
@@ -418,8 +457,10 @@ class OpenSentence:
         m = self.manager
         while not self.closed:
             await asyncio.sleep(m._provisional_seconds)
-            if m._languages.get(self.latest.speaker_id) == "en":
-                return  # known English: the original is what the room reads
+            if m._languages.get(self.latest.speaker_id) == "en" or m._translation_off:
+                return  # the original is what the room reads
+            if m._provisional_paused():
+                continue
             if not self.in_flight and self.latest.text != self.requested:
                 m._spawn(self._request(self.latest))
 
@@ -428,22 +469,32 @@ class OpenSentence:
         self.in_flight, self.requested = True, segment.text
         self.sent += 1
         number = self.sent
-        hint = m._languages.get(segment.speaker_id)
         try:
-            answer = await m._translate(segment.text, hint)  # type: ignore[misc]
+            # No hint: the speaker may have switched language; the model detects it.
+            answer = await m._translate(segment.text, None)  # type: ignore[misc]
         except Exception as e:
             log.info("Provisional translation of %s failed: %s", segment.seg_id, e)
+            m._translation_failed(e)
+            if not self.closed and not self.failing:
+                self.failing = True
+                await m._publish(self.latest)  # the speaker's own words, not a blank caption
             return
         finally:
             self.in_flight = False
         if self.closed or number <= self.shown:
             return  # the sentence finished, or a newer answer was shown
-        self.shown = number
+        self.shown, self.failing = number, False
         language = normalise_language(answer.language)
         if language is None:
             return
-        m._languages[segment.speaker_id] = language
-        if language == "en" or not answer.text.strip():
+        was_hidden = not m._show_original(segment.speaker_id, self)
+        m._languages.setdefault(segment.speaker_id, language)  # finals decide once known
+        if language == "en":
+            self.english = True
+            if was_hidden:  # switched to English mid-sentence: show it as said
+                await m._publish(self.latest)
+            return
+        if not answer.text.strip():
             return
         await m._publish(
             segment.model_copy(

@@ -28,7 +28,12 @@ log = logging.getLogger(__name__)
 
 
 class BrainUnavailable(RuntimeError):
-    """The brain is not configured or did not answer after every attempt."""
+    """The brain is not configured or did not answer after every attempt. status is the last
+    HTTP status it answered with (503: what it needs isn't configured), None if it never did."""
+
+    def __init__(self, message: str, *, status: int | None = None):
+        super().__init__(message)
+        self.status = status
 
 
 class BrainRejected(RuntimeError):
@@ -225,6 +230,7 @@ class HttpBrainClient:
         """The response on success, or on a status in `keep`."""
         attempts = self._attempts if idempotent else 1
         last = "no attempt made"
+        status: int | None = None
         for attempt in range(attempts):
             if attempt:
                 await asyncio.sleep(self._backoff * 2 ** (attempt - 1))
@@ -233,14 +239,16 @@ class HttpBrainClient:
                     method, path, json=body, timeout=timeout or httpx.USE_CLIENT_DEFAULT
                 )
             except httpx.TransportError as e:
-                last = type(e).__name__
+                last, status = type(e).__name__, None
                 continue
             if response.is_success or response.status_code in keep:
                 return response
             if response.status_code not in RETRYABLE:
                 raise BrainRejected(response.status_code, short_detail(response))
-            last = f"HTTP {response.status_code}"
-        raise BrainUnavailable(f"{method} {path} failed after {attempts} attempt(s) ({last})")
+            last, status = f"HTTP {response.status_code}", response.status_code
+        raise BrainUnavailable(
+            f"{method} {path} failed after {attempts} attempt(s) ({last})", status=status
+        )
 
 
 def short_detail(response: httpx.Response) -> str:
