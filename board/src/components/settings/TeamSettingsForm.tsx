@@ -1,7 +1,7 @@
 "use client";
 
 import { type Sensitivity, type TeamSettings, type Voice, identity } from "@moe/contracts";
-import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from "react";
+import { type ChangeEvent, type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useTeam } from "@/components/AuthProvider";
 import { TeamAccounts } from "@/components/settings/TeamAccounts";
 import { Avatar } from "@/components/ui/Avatar";
@@ -12,6 +12,7 @@ import { useConnectors, useSettings, useVoices } from "@/hooks/useApi";
 import { ApiError, changePassword, deletePhoto, describeError, updateMe, updateSettings, uploadPhoto, waitText } from "@/lib/api";
 import { signOut } from "@/lib/auth";
 import { initialsOf } from "@/lib/format";
+import { defaultOptionLabel, isClip, savedVoice, voiceChoice } from "@/lib/voiceChoice";
 
 const SENSITIVITY: [Sensitivity, string, string][] = [
   [
@@ -24,7 +25,6 @@ const SENSITIVITY: [Sensitivity, string, string][] = [
 ];
 
 const PHOTO_SIZE = 256;
-const PREVIEW_MS = 4000;
 
 /** A new photo picked here, not saved yet: the upload and its local preview. */
 interface PickedPhoto {
@@ -171,12 +171,25 @@ export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  useEffect(() => {
-    if (!previewing) return;
-    const timer = setTimeout(() => setPreviewing(null), PREVIEW_MS);
-    return () => clearTimeout(timer);
-  }, [previewing]);
-  useEffect(() => () => audio.current?.pause(), []);
+  // Stops the voice sample that is playing, if any, and rewinds it.
+  const stopPreview = useCallback(() => {
+    const clip = audio.current;
+    audio.current = null; // its pause event then changes nothing
+    if (clip) {
+      clip.pause();
+      clip.currentTime = 0;
+    }
+    setPreviewing(null);
+  }, []);
+  // Leaving Settings stops the sample.
+  useEffect(
+    () => () => {
+      const clip = audio.current;
+      audio.current = null;
+      clip?.pause();
+    },
+    [],
+  );
   const preview = photo?.preview;
   useEffect(() => (preview ? () => URL.revokeObjectURL(preview) : undefined), [preview]);
 
@@ -207,21 +220,38 @@ export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
     }
   };
 
-  // Plays the voice's sample, or stops it when it is already playing.
+  // Plays the voice's sample (the clip ElevenLabs already has; nothing is generated), or stops
+  // it when it is already playing. The playing state follows the clip itself.
   const previewVoice = (voiceId: string, sample: string) => {
-    audio.current?.pause();
-    if (previewing === voiceId) {
-      setPreviewing(null);
+    const again = previewing === voiceId;
+    stopPreview();
+    if (again) return;
+    if (!isClip(sample)) {
+      setPreviewing(voiceId); // a line of text: shown until stopped
       return;
     }
-    setPreviewing(voiceId);
-    // A voice's sample is either a clip to play or the line it would say.
-    if (/^https?:\/\//.test(sample)) {
-      const clip = new Audio(sample);
-      clip.onended = () => setPreviewing((now) => (now === voiceId ? null : now));
-      audio.current = clip;
-      void clip.play().catch(() => setProblem("The voice sample couldn't be played."));
-    }
+    const clip = new Audio(sample);
+    audio.current = clip;
+    const current = () => audio.current === clip;
+    const started = () => {
+      if (current()) setPreviewing(voiceId);
+    };
+    const stopped = () => {
+      if (!current()) return;
+      audio.current = null;
+      setPreviewing(null);
+    };
+    const failed = () => {
+      if (!current()) return;
+      stopped();
+      setProblem("The voice sample couldn't be played.");
+    };
+    clip.addEventListener("play", started);
+    clip.addEventListener("playing", started);
+    clip.addEventListener("pause", stopped);
+    clip.addEventListener("ended", stopped);
+    clip.addEventListener("error", failed);
+    clip.play().catch(failed);
   };
 
   const save = async () => {
@@ -374,8 +404,7 @@ export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
                         saved={s.voice}
                         previewing={previewing}
                         onChange={(voice) => {
-                          audio.current?.pause();
-                          setPreviewing(null);
+                          stopPreview();
                           set({ voice });
                         }}
                         onPreview={previewVoice}
@@ -446,8 +475,8 @@ export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
 
 /** The agent's voice as one select (names only) with a play/stop preview of the chosen one,
  * instead of a card per voice: an ElevenLabs account can list hundreds (#137). No saved choice
- * means the agent's default voice; a saved voice the account no longer has stays selected,
- * marked unavailable, rather than silently becoming another. */
+ * is the "Default" option, the voice Speak and Listen fall back to; a saved voice the account no
+ * longer has stays selected, marked unavailable, rather than silently becoming another. */
 function VoicePicker({
   voices,
   saved,
@@ -458,37 +487,38 @@ function VoicePicker({
   voices: Voice[];
   saved: string | null | undefined;
   previewing: string | null;
-  onChange: (voice: string) => void;
+  onChange: (voice: string | null) => void;
   onPreview: (voiceId: string, sample: string) => void;
 }) {
-  const fallback = voices.find((v) => v.default_label) ?? voices[0];
-  const chosen = saved ?? fallback?.id ?? "";
-  const current = voices.find((v) => v.id === chosen);
-  const playing = current !== undefined && previewing === current.id;
+  const { value, defaultVoice, unavailable, shown } = voiceChoice(voices, saved);
+  const playing = shown !== undefined && previewing === shown.id;
+  const name = shown ? `Preview ${shown.name}` : "Preview voice";
   return (
     <div className="voice-pick">
       <div className="voice-row">
-        <select className="field" aria-labelledby="s-voice" value={chosen} onChange={(e) => onChange(e.target.value)}>
-          {saved && !current && <option value={saved}>Saved voice (no longer available)</option>}
+        <select className="field" aria-labelledby="s-voice" value={value} onChange={(e) => onChange(savedVoice(e.target.value))}>
+          <option value="">{defaultOptionLabel(defaultVoice)}</option>
+          {unavailable && <option value={value}>Saved voice (no longer available)</option>}
           {voices.map((v) => (
             <option key={v.id} value={v.id}>
-              {v.default_label ? `${v.name} (default)` : v.name}
+              {v.name}
             </option>
           ))}
         </select>
         <button
           type="button"
           className="btn btn-outline voice-play"
-          onClick={() => current && onPreview(current.id, current.sample)}
-          disabled={!current?.sample}
+          onClick={() => shown && onPreview(shown.id, shown.sample)}
+          disabled={!shown?.sample}
           aria-pressed={playing}
-          aria-label={current ? `${playing ? "Stop" : "Preview"} ${current.name}` : "Preview"}
+          aria-label={name}
+          title={name}
         >
-          <Icon name={playing ? "square" : "play"} />
-          {playing ? "Stop" : "Preview"}
+          <Icon name={playing ? "x" : "play"} />
+          <span className="voice-play-text">{playing ? "Stop" : "Preview"}</span>
         </button>
       </div>
-      {playing && current && !/^https?:\/\//.test(current.sample) && <p className="note">“{current.sample}”</p>}
+      {playing && shown && !isClip(shown.sample) && <p className="note">“{shown.sample}”</p>}
     </div>
   );
 }
