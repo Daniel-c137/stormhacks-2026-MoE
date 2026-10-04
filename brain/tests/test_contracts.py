@@ -11,6 +11,10 @@ from pydantic import BaseModel, ValidationError
 
 import contracts
 from contracts import (
+    Agenda,
+    AgendaItem,
+    AgendaTrackRequest,
+    AgendaTrackResponse,
     AgendaUpdate,
     AskRequest,
     ConnectorStatus,
@@ -83,6 +87,33 @@ def test_an_agenda_edit_may_add_items_without_ids():
     )
 
     assert [(i.id, i.minutes) for i in update.items] == [("a1", 10), (None, None)]
+
+
+def test_agendas_saved_before_timekeeping_still_parse():
+    old = Agenda.model_validate(
+        {
+            "meeting_id": "m1",
+            "items": [{"id": "a1", "title": "Refunds", "sources": [], "status": "pending"}],
+            "generated_at": "2026-10-01T16:00:00Z",
+        }
+    )
+
+    assert (old.current_item_id, old.tracked_until) == (None, None)
+    assert (old.items[0].discussed_s, old.items[0].nudged_t) == (0, None)
+
+
+def test_a_track_request_may_omit_now_but_never_goes_negative():
+    assert AgendaTrackRequest().now is None
+    assert AgendaTrackRequest(now=90.5).now == 90.5
+    with pytest.raises(ValidationError):
+        AgendaTrackRequest(now=-1)
+    with pytest.raises(ValidationError):
+        AgendaItem(id="a1", title="Refunds", discussed_s=-1)
+    response = AgendaTrackResponse(
+        agenda=Agenda(meeting_id="m1", items=[], generated_at=datetime(2026, 10, 1, tzinfo=UTC)),
+        nudges=[],
+    )
+    assert AgendaTrackResponse.model_validate(response.model_dump()) == response
 
 
 def test_connector_status_names_only_known_connectors_and_states():
