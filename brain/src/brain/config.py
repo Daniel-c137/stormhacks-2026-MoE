@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     gemini_max_delay: float = 4.0  # seconds between retries on the same model
     gemini_embedding_model: str | None = None
     gemini_embedding_dim: int | None = None
+    # comma-separated; one call never mixes models, and memory search only compares like with like
+    gemini_embedding_fallback_models: str | None = None
 
     livekit_url: str | None = None
     livekit_api_key: str | None = None
