@@ -44,6 +44,7 @@ from contracts import (
     ChatMessage,
     Decision,
     DecisionRelation,
+    DecisionStep,
     FactCheck,
     GitHubSettings,
     JiraSettings,
@@ -180,6 +181,10 @@ def report_for(meeting_id: str, *, owner: Person, decisions: list[str], tasks: l
                 made_by=owner.name,
                 t=float(i * 60),
                 quote=text,
+                chain=[
+                    DecisionStep(text="Why it came up", t=float(i * 60) - 20, seg_ids=["a", "b"]),
+                    DecisionStep(text="Agreed", t=float(i * 60), seg_ids=["c"]),
+                ],
             )
             for i, text in enumerate(decisions, start=1)
         ],

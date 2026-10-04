@@ -9,6 +9,7 @@ from brain.report import (
     ExtractedDecision,
     ExtractedLink,
     ExtractedRisk,
+    ExtractedStep,
     ExtractedTask,
     ReportExtraction,
     TranscriptInput,
@@ -42,7 +43,17 @@ EXTRACTION = ReportExtraction(
     summary="Bob merged the fix and will refund users. The waitlist email waits for v0.9.4.",
     topics=["Double charge", " ", "Waitlist email"],
     decisions=[
-        ExtractedDecision(text="Hold the waitlist email", made_by_id="p-alice", evidence=["s4"]),
+        ExtractedDecision(
+            text="Hold the waitlist email",
+            made_by_id="p-alice",
+            evidence=["s4"],
+            chain=[
+                ExtractedStep(text="Alice agreed to hold the email", evidence=["s4"]),
+                ExtractedStep(text=" Production is still on v0.9.3 ", evidence=["s3", "s3", "s99"]),
+                ExtractedStep(text="Invented step", evidence=["s99"]),
+                ExtractedStep(text="  ", evidence=["s2"]),
+            ],
+        ),
         ExtractedDecision(text="Production stays on v0.9.3", made_by_id=None, evidence=["s3"]),
         ExtractedDecision(text="Invented decision", made_by_id="p-alice", evidence=[]),
     ],
@@ -122,6 +133,51 @@ async def test_decisions_name_who_made_them_and_quote_the_transcript():
     assert (hold.made_by, hold.t, hold.quote) == ("Alice Moreau", 24, segment(4).text)
     assert stays.made_by == "Carol Jensen"  # no participant given: whoever said the cited line
     assert hold.id == "mtg-standup-decision-1"
+
+
+async def test_a_decision_carries_the_chain_of_what_was_said_that_led_to_it():
+    report, _ = await report_for()
+
+    hold, stays = report.decisions
+    # In the order it was said, each step pointing at the segments it describes. Steps the
+    # transcript does not support, and blank ones, are dropped.
+    assert [(step.text, step.t, step.seg_ids) for step in hold.chain] == [
+        ("Production is still on v0.9.3", 15, ["seg-3"]),
+        ("Alice agreed to hold the email", 24, ["seg-4"]),
+    ]
+    assert stays.chain == []  # none given: the decision still has its quote
+
+
+async def test_a_step_lists_its_segments_in_the_order_they_were_said():
+    decision = ExtractedDecision(
+        text="Hold the waitlist email",
+        evidence=["s4"],
+        chain=[ExtractedStep(text="The fix is merged but not released", evidence=["s3", "s2"])],
+    )
+    llm = MockLLM(structured={ReportExtraction: ReportExtraction(summary="S", decisions=[decision])})
+
+    report = await build_report(llm, standup())
+
+    (step,) = report.decisions[0].chain
+    assert (step.t, step.seg_ids) == (6, ["seg-2", "seg-3"])
+
+
+async def test_a_long_chain_keeps_only_its_last_few_steps():
+    steps = [ExtractedStep(text=f"Step {n}", evidence=[f"s{n}"]) for n in range(1, 7)]
+    decision = ExtractedDecision(text="Hold the waitlist email", evidence=["s4"], chain=steps)
+    llm = MockLLM(structured={ReportExtraction: ReportExtraction(summary="S", decisions=[decision])})
+
+    report = await build_report(llm, standup())
+
+    assert [step.text for step in report.decisions[0].chain] == [f"Step {n}" for n in range(2, 7)]
+
+
+async def test_the_system_prompt_asks_for_the_chain_behind_each_decision():
+    _, llm = await report_for()
+
+    (call,) = llm.calls
+    assert "chain" in call.system
+    assert "single step" in call.system
 
 
 async def test_links_are_kept_only_when_the_transcript_mentions_them():
