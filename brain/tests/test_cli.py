@@ -1,4 +1,5 @@
 import asyncio
+import io
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -283,3 +284,168 @@ def test_purge_without_a_database_says_what_is_missing(monkeypatch):
         main(["purge-transcripts", "--dry-run"])
 
     assert "DATABASE_URL is not configured" in str(exit_info.value.code)
+
+
+# add-team and add-user: accounts are made from the command line; there is no public sign-up
+
+
+@pytest.fixture
+def db(monkeypatch, pg_dsn):
+    """DATABASE_URL on a fresh migrated database, and a store to read it back with."""
+    from brain.db import migrate
+    from brain.pg_store import PostgresStore
+
+    asyncio.run(migrate(pg_dsn))
+    monkeypatch.setenv("DATABASE_URL", pg_dsn)
+    return PostgresStore(pg_dsn)
+
+
+def printed_password(out: str) -> str:
+    """The one-time password add-user prints on its own line."""
+    lines = [line for line in out.splitlines() if "password" in line.lower()]
+    assert len(lines) == 1, out
+    return lines[0].rsplit(" ", 1)[-1]
+
+
+def add_alex(*extra: str) -> int:
+    return main(
+        [
+            "add-user",
+            "--team",
+            "t-1",
+            "--name",
+            "Alex van der Berg",
+            "--email",
+            "Alex@Example.com",
+            *extra,
+        ]
+    )
+
+
+def test_add_team_creates_a_team(db, capsys):
+    assert main(["add-team", "--id", "t-1", "--name", "Checkout"]) == 0
+
+    team = asyncio.run(db.team("t-1"))
+    assert (team.name, team.member_ids) == ("Checkout", [])
+    assert "t-1" in capsys.readouterr().out
+
+
+def test_add_team_again_renames_it_and_keeps_its_members(db, capsys):
+    main(["add-team", "--id", "t-1", "--name", "Checkout"])
+    add_alex()
+
+    assert main(["add-team", "--id", "t-1", "--name", "Payments"]) == 0
+
+    team = asyncio.run(db.team("t-1"))
+    assert team.name == "Payments"
+    assert len(team.member_ids) == 1
+
+
+def test_add_user_creates_the_person_on_the_team_with_a_one_time_password(db, capsys):
+    from brain.auth import verify_password
+
+    main(["add-team", "--id", "t-1", "--name", "Checkout"])
+    capsys.readouterr()
+
+    assert add_alex() == 0
+
+    out = capsys.readouterr().out
+    password = printed_password(out)
+    assert len(password) >= 16
+    login = asyncio.run(db.login_by_email("alex@example.com"))
+    assert verify_password(login.password_hash, password)
+    assert login.password_hash not in out
+    assert "argon2" not in out
+    person = asyncio.run(db.person(login.person_id))
+    assert (person.name, person.short, person.initials, person.email) == (
+        "Alex van der Berg",
+        "Alex",
+        "AB",
+        "Alex@Example.com",
+    )
+    assert asyncio.run(db.team("t-1")).member_ids == [person.id]
+    assert asyncio.run(db.team_for_user(person.id)).id == "t-1"
+
+
+def test_add_user_reads_the_password_from_stdin_and_prints_none(db, monkeypatch, capsys):
+    from brain.auth import verify_password
+
+    main(["add-team", "--id", "t-1", "--name", "Checkout"])
+    capsys.readouterr()
+    monkeypatch.setattr("sys.stdin", io.StringIO("a-chosen-password\n"))
+
+    assert add_alex("--password-stdin") == 0
+
+    out = capsys.readouterr().out
+    assert "a-chosen-password" not in out
+    assert "argon2" not in out
+    login = asyncio.run(db.login_by_email("alex@example.com"))
+    assert verify_password(login.password_hash, "a-chosen-password")
+
+
+def test_add_user_refuses_a_short_password_from_stdin(db, monkeypatch):
+    main(["add-team", "--id", "t-1", "--name", "Checkout"])
+    monkeypatch.setattr("sys.stdin", io.StringIO("short\n"))
+
+    with pytest.raises(SystemExit) as exit_info:
+        add_alex("--password-stdin")
+
+    assert "10" in str(exit_info.value.code)
+    from brain.store import NotFound
+
+    with pytest.raises(NotFound):
+        asyncio.run(db.login_by_email("alex@example.com"))
+
+
+def test_add_user_again_updates_the_same_person_and_resets_the_password(db, capsys):
+    from brain.auth import verify_password
+
+    main(["add-team", "--id", "t-1", "--name", "Checkout"])
+    add_alex()
+    first = asyncio.run(db.login_by_email("alex@example.com"))
+    capsys.readouterr()
+
+    code = main(["add-user", "--team", "t-1", "--name", "Alex Chen", "--email", "alex@example.com"])
+
+    assert code == 0
+    password = printed_password(capsys.readouterr().out)
+    second = asyncio.run(db.login_by_email("alex@example.com"))
+    assert second.person_id == first.person_id
+    assert verify_password(second.password_hash, password)
+    assert (asyncio.run(db.person(first.person_id))).name == "Alex Chen"
+    assert asyncio.run(db.team("t-1")).member_ids == [first.person_id]
+
+
+def test_add_user_needs_an_existing_team(db):
+    with pytest.raises(SystemExit) as exit_info:
+        add_alex()
+
+    assert "t-1" in str(exit_info.value.code)
+    assert "add-team" in str(exit_info.value.code)
+
+
+@pytest.mark.parametrize("email", ["", "not-an-email", "two@@example.com"])
+def test_add_user_refuses_an_invalid_email(db, email):
+    main(["add-team", "--id", "t-1", "--name", "Checkout"])
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(["add-user", "--team", "t-1", "--name", "Alex Chen", "--email", email])
+
+    assert "email" in str(exit_info.value.code).lower()
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["add-team", "--id", "t-1", "--name", "Checkout"],
+        ["add-user", "--team", "t-1", "--name", "Alex Chen", "--email", "alex@example.com"],
+    ],
+    ids=["add-team", "add-user"],
+)
+def test_account_commands_without_database_url_say_what_is_missing(monkeypatch, argv):
+    monkeypatch.setenv("DATABASE_URL", "")
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(argv)
+
+    assert "DATABASE_URL" in str(exit_info.value.code)

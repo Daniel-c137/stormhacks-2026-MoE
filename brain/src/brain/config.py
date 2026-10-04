@@ -11,13 +11,12 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=REPO_ROOT / ".env", extra="ignore")
 
-    database_url: str | None = None  # Supabase Postgres (or any Postgres with the migrations)
+    database_url: str | None = None  # our Postgres 16 + pgvector, with db/migrations applied
     transcript_retention_days: int = Field(default=14, ge=1)
 
-    supabase_url: str | None = None
-    supabase_service_role_key: str | None = None
-    supabase_jwt_secret: str | None = None  # legacy HS256 secret; asymmetric keys use the JWKS
-    supabase_jwt_audience: str = "authenticated"
+    # HS256 key for the session tokens the brain issues at login; under 32 characters is unset
+    auth_secret: str | None = None
+    session_hours: int = Field(default=12, ge=1)
 
     gemini_api_key: str | None = None
     gemini_model: str | None = None

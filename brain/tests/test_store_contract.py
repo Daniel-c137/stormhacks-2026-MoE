@@ -28,7 +28,15 @@ from uuid import uuid4
 import anyio
 import pytest
 
-from brain.store import Conflict, FactCheckState, InMemoryStore, NotFound, ReportAudio, Store
+from brain.store import (
+    Conflict,
+    FactCheckState,
+    InMemoryStore,
+    Login,
+    NotFound,
+    ReportAudio,
+    Store,
+)
 from contracts import (
     AGENT_PARTICIPANT_ID,
     Agenda,
@@ -369,6 +377,68 @@ async def test_saved_settings_are_read_back_per_team(store):
     assert (await store.settings(other.id)).timezone == "UTC"
     with pytest.raises(NotFound):
         await store.save_settings(saved.model_copy(update={"team_id": new_id()}))
+
+
+# logins (email and password sign-in; the store only ever sees the hash)
+
+
+async def test_a_login_is_found_by_email_ignoring_case_and_by_person(store):
+    _, alex, sarah, *_ = await two_teams(store)
+
+    saved = await store.set_login(alex.id, "Alex.Chen@Example.com", "hash-1")
+
+    assert isinstance(saved, Login)
+    assert (saved.person_id, saved.email, saved.password_hash) == (
+        alex.id,
+        "Alex.Chen@Example.com",
+        "hash-1",
+    )
+    assert saved.created_at.tzinfo is not None
+    assert saved.updated_at >= saved.created_at
+    assert await store.login_by_email("alex.chen@example.com") == saved
+    assert await store.login_by_email("ALEX.CHEN@EXAMPLE.COM") == saved
+    assert await store.login(alex.id) == saved
+    with pytest.raises(NotFound):
+        await store.login_by_email("sarah@example.com")
+    with pytest.raises(NotFound):
+        await store.login(sarah.id)
+
+
+async def test_setting_a_login_again_replaces_it(store):
+    _, alex, *_ = await two_teams(store)
+    first = await store.set_login(alex.id, "alex@example.com", "hash-1")
+
+    second = await store.set_login(alex.id, "alex.chen@example.com", "hash-2")
+
+    assert (second.email, second.password_hash) == ("alex.chen@example.com", "hash-2")
+    assert second.created_at == first.created_at
+    assert second.updated_at >= first.updated_at
+    assert await store.login_by_email("alex.chen@example.com") == second
+    assert await store.login(alex.id) == second
+    with pytest.raises(NotFound):
+        await store.login_by_email("alex@example.com")
+
+
+async def test_an_email_used_by_another_person_is_a_conflict(store):
+    _, alex, sarah, *_ = await two_teams(store)
+    alex_login = await store.set_login(alex.id, "alex@example.com", "hash-1")
+
+    with pytest.raises(Conflict):
+        await store.set_login(sarah.id, "ALEX@example.com", "hash-2")
+
+    assert await store.login_by_email("alex@example.com") == alex_login
+    with pytest.raises(NotFound):
+        await store.login(sarah.id)
+    # the same person may change their email's case
+    recased = await store.set_login(alex.id, "Alex@Example.com", "hash-1")
+    assert await store.login_by_email("alex@example.com") == recased
+
+
+async def test_a_login_needs_an_existing_person(store):
+    with pytest.raises(NotFound):
+        await store.set_login(new_id(), "ghost@example.com", "hash-1")
+    with pytest.raises(NotFound):
+        await store.login_by_email("ghost@example.com")
 
 
 # meetings

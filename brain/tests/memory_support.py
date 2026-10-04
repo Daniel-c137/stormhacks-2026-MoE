@@ -8,10 +8,7 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 MIGRATION = (
-    Path(__file__).resolve().parents[2]
-    / "supabase"
-    / "migrations"
-    / "20261003000100_meeting_memory.sql"
+    Path(__file__).resolve().parents[2] / "db" / "migrations" / "20261003000100_meeting_memory.sql"
 )
 
 

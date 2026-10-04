@@ -19,7 +19,7 @@ from ..agent.ask import (
 from ..agent.code import code_evidence
 from ..agent.factcheck import FactChecker
 from ..agent.pipeline import PipelineRunner, PostMeetingPipeline, ReportPipeline
-from ..auth import AuthNotConfigured, InvalidToken, KeysUnavailable, TokenVerifier
+from ..auth import NOT_CONFIGURED, AuthNotConfigured, InvalidToken, LoginLimiter, TokenVerifier
 from ..config import Settings
 from ..jira import JiraPusher, jira_config
 from ..livekit_rooms import Rooms, rooms_from_settings
@@ -139,16 +139,16 @@ def get_rooms(settings: Settings = Depends(get_settings)) -> Rooms:
     return rooms_from_settings(settings)
 
 
-def get_verifier(request: Request, settings: Settings = Depends(get_settings)) -> TokenVerifier:
-    """One verifier per app and auth config, so the JWKS cache outlives a request."""
+def get_verifier(settings: Settings = Depends(get_settings)) -> TokenVerifier:
+    return TokenVerifier.from_settings(settings)
+
+
+def get_login_limiter(request: Request) -> LoginLimiter:
+    """The app's count of failed logins per email (in process; reset on restart)."""
     state = request.app.state
-    if not hasattr(state, "token_verifiers"):
-        state.token_verifiers = {}
-    cache: dict[tuple, TokenVerifier] = state.token_verifiers
-    key = (settings.supabase_url, settings.supabase_jwt_secret, settings.supabase_jwt_audience)
-    if key not in cache:
-        cache[key] = TokenVerifier.from_settings(settings)
-    return cache[key]
+    if not hasattr(state, "login_limiter"):
+        state.login_limiter = LoginLimiter()
+    return state.login_limiter
 
 
 def _unauthorized(detail: str, error: str | None = None) -> HTTPException:
@@ -156,15 +156,13 @@ def _unauthorized(detail: str, error: str | None = None) -> HTTPException:
     return HTTPException(status_code=401, detail=detail, headers={"WWW-Authenticate": challenge})
 
 
-NOT_CONFIGURED = "Supabase auth is not configured"
-
-
 async def current_user(
     authorization: str | None = Header(default=None),
     verifier: TokenVerifier = Depends(get_verifier),
     store: Store = Depends(get_store),
 ) -> Person:
-    """Resolve the Supabase session; every query is scoped to this user's team."""
+    """Resolve the session token from POST /auth/login; every query is scoped to this user's
+    team."""
     if not verifier.configured:
         raise HTTPException(status_code=503, detail=NOT_CONFIGURED)
     scheme, _, token = (authorization or "").partition(" ")
@@ -172,13 +170,9 @@ async def current_user(
     if scheme.lower() != "bearer" or not token or " " in token:
         raise _unauthorized("Missing bearer token")
     try:
-        claims = await verifier.verify(token)
+        claims = verifier.verify(token)
     except AuthNotConfigured:
         raise HTTPException(status_code=503, detail=NOT_CONFIGURED) from None
-    except KeysUnavailable:
-        raise HTTPException(
-            status_code=503, detail="Supabase signing keys are unavailable"
-        ) from None
     except InvalidToken:
         raise _unauthorized("Invalid or expired session", "invalid_token") from None
     try:

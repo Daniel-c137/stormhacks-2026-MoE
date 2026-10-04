@@ -23,7 +23,10 @@ from contracts import (
     FactCheck,
     FactCheckRequest,
     FactCheckResponse,
+    LoginRequest,
+    LoginResponse,
     Meeting,
+    PasswordChange,
     Person,
     ReportProgress,
 )
@@ -166,6 +169,16 @@ def test_connector_status_names_only_known_connectors_and_states():
         ConnectorStatus(name="slack", state="connected")
     with pytest.raises(ValidationError):
         ConnectorStatus(name="jira", state="maybe")
+
+
+def test_login_bodies_carry_no_password_back():
+    alex = Person(id="u1", name="Alex Chen", short="Alex", initials="AC")
+    response = LoginResponse(token="t", expires_at=datetime(2026, 10, 4, tzinfo=UTC), person=alex)
+
+    assert set(LoginResponse.model_fields) == {"token", "expires_at", "person"}
+    assert LoginResponse.model_validate(response.model_dump()) == response
+    assert set(LoginRequest.model_fields) == {"email", "password"}
+    assert set(PasswordChange.model_fields) == {"current_password", "new_password"}
 
 
 # the TypeScript mirror

@@ -7,10 +7,32 @@ from pydantic import BaseModel, Field
 
 from .agenda import Agenda, AgendaItemStatus, AgendaNudge
 from .agent import AgentState, Answer, CodeSnippet, FactCheck, Invocation, Visibility
-from .meeting import Meeting
+from .meeting import Meeting, Person
 from .transcript import TranscriptSegment
 
 AskTurnRole = Literal["user", "agent"]
+
+
+class LoginRequest(BaseModel):
+    """POST /auth/login. There is no public sign-up; accounts come from `brain add-user`."""
+
+    email: str
+    password: str
+
+
+class LoginResponse(BaseModel):
+    """The board sends `token` as `Authorization: Bearer <token>` until `expires_at`."""
+
+    token: str
+    expires_at: datetime
+    person: Person
+
+
+class PasswordChange(BaseModel):
+    """POST /auth/password while signed in. The new password is at least 10 characters."""
+
+    current_password: str
+    new_password: str
 
 
 class CreateMeetingRequest(BaseModel):

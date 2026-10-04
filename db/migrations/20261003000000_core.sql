@@ -2,8 +2,8 @@
 --
 -- Ids are text: the app makes them (UUID strings, or ids like "<meeting>-task-1").
 -- Private chat has no table: it is never stored.
--- Every table has row level security on and no policies, so Supabase's anon and authenticated
--- keys read nothing; the brain's own connection owns the tables and bypasses RLS.
+-- Every table has row level security on and no policies, so other database roles read nothing;
+-- the brain's own role owns the tables and bypasses RLS.
 -- pgvector and memory_chunks come with 20261003000100_meeting_memory.sql.
 
 create table teams (
