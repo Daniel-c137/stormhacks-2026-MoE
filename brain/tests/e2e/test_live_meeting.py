@@ -23,8 +23,8 @@ It takes about a minute and a half (84 s on 3 Oct 2026), plus a minute for each 
 Cost: roughly 15-20 Gemini generate calls and about 5 embedding calls, a large share of the free
 tier's per-minute quota, so run it once and space runs at least a minute apart. If the write-up
 hits the quota, the host retries it through POST /meetings/{id}/report/retry after a minute's
-wait, up to three times. An OpenRouter fallback (#61) is landing separately; once it does, the
-brain picks it up from any OPENROUTER_* settings in the environment or .env, with no change here.
+wait, up to three times. With OPENROUTER_API_KEY and OPENROUTER_MODELS set (environment or
+.env), the brain falls back to OpenRouter when Gemini is out of capacity (#76), so retries are rare.
 
 ElevenLabs: listing voices is free and runs whenever ELEVENLABS_API_KEY is set. Listen (the
 summary read aloud) spends credits, so it runs only with E2E_LISTEN=1 and ELEVENLABS_API_KEY,
