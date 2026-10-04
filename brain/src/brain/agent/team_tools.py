@@ -14,7 +14,7 @@ from brain.config import Settings
 from brain.github import GitHubItem, GitHubReader, GitHubRelease
 from brain.github_account import Unusable, repo_target
 from brain.gitlab import GitLabDiff, GitLabItem, GitLabReader, web_address
-from brain.integrations import McpEndpoint, ToolRefused
+from brain.integrations import McpEndpoint, ToolRefused, search_words
 from brain.jira import JiraConfig, JiraIssue, JiraReader, root_cause
 from brain.jira_rest import JiraRestReader, account_access, reads_with_account
 from brain.memory import Chunk, MeetingMemory
@@ -135,7 +135,8 @@ SPECS: list[tuple[ToolSpec, str]] = [
         ToolSpec(
             name="github_search",
             description="Search the team's GitHub repositories' issues (kind issue) or pull "
-            "requests (kind pr).",
+            "requests (kind pr). An empty query lists the most recently updated ones, for the "
+            "latest or recent issues or pull requests.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -616,12 +617,14 @@ class TeamToolbox:
         self, query: str | None = None, kind: str | None = None, repo: str | None = None, **_: Any
     ) -> list[Finding]:
         assert isinstance(self.github, list)
-        if not (query or "").strip():
-            return []
         wanted = "pr" if kind == "pr" else "issue"
+        latest = asks_for_latest(query or "")
 
         async def search(reader: GitHubReader) -> list[Finding]:
-            items = await reader.search(query or "", wanted, PER_REPO_SEARCH)
+            if latest:
+                items = await reader.latest(wanted, PER_REPO_SEARCH)
+            else:
+                items = await reader.search(query or "", wanted, PER_REPO_SEARCH)
             return [github_finding(reader.full_name, item, self.zone) for item in items]
 
         return await across(pick(self.github, repo), search, SEARCH_LIMIT)
@@ -816,6 +819,31 @@ def jira_finding(issue: JiraIssue) -> Finding:
     return Finding(text=text, source=Source(kind="jira_issue", label=issue.key, url=issue.url))
 
 
+# Words that ask for the newest items rather than name a topic: a query of only these lists.
+LATEST_WORDS = {
+    "latest",
+    "recent",
+    "recently",
+    "newest",
+    "new",
+    "last",
+    "updated",
+    "issue",
+    "issues",
+    "pr",
+    "prs",
+    "pull",
+    "pulls",
+    "request",
+    "requests",
+}
+
+
+def asks_for_latest(query: str) -> bool:
+    """Whether a search names no topic, only that it wants the newest items (or nothing)."""
+    return all(word.casefold() in LATEST_WORDS for word in search_words(query).split())
+
+
 def github_finding(repo: str, item: GitHubItem, zone: tzinfo = UTC) -> Finding:
     label = f"{repo}#{item.number}"
     state = item.state or "unknown"
@@ -826,6 +854,8 @@ def github_finding(repo: str, item: GitHubItem, zone: tzinfo = UTC) -> Finding:
             state += f" {merged_on.isoformat()}"
     noun = "Pull request" if item.kind == "pr" else "Issue"
     text = f"{noun} {label}: {item.title} ({state})"
+    if updated_on := local_date(item.updated_at, zone):
+        text += f"; updated {updated_on.isoformat()}"
     if item.checks:
         text += f"; checks: {item.checks}"
     if item.reviews:
