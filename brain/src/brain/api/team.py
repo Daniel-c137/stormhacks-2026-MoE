@@ -25,7 +25,14 @@ from ..config import Settings
 from ..connectors import connector_statuses
 from ..gitlab import valid_project
 from ..jira import site_host
-from ..jira_rest import NOT_A_SITE, JiraAccess, JiraCloud, JiraRejected, JiraUnreachable
+from ..jira_rest import (
+    NOT_A_SITE,
+    JiraAccess,
+    JiraCloud,
+    JiraRejected,
+    JiraUnreachable,
+    issue_type_for_tasks,
+)
 from ..sealing import seal
 from ..store import JiraAccount, NotFound, Store
 from ..voices import VoicesFailed, VoicesUnavailable, fetch_voices, with_default
@@ -148,12 +155,35 @@ async def list_members(
 # workspace settings
 
 
+NO_JIRA_ACCOUNT = {
+    "connected": False,
+    "account_email": None,
+    "account_site": None,
+    "account_project": None,
+}
+
+
+async def shown(store: Store, settings: TeamSettings) -> TeamSettings:
+    """Settings as they are sent: what they say about the Jira account is read from the saved
+    account itself, the one a push uses, so the two can never disagree."""
+    account = await store.jira_account(settings.team_id)
+    about = NO_JIRA_ACCOUNT
+    if account is not None:
+        about = {
+            "connected": True,
+            "account_email": account.email,
+            "account_site": account.site,
+            "account_project": account.project,
+        }
+    return settings.model_copy(update={"jira": settings.jira.model_copy(update=about)})
+
+
 @router.get("/settings")
 async def read_team_settings(
     user: Person = Depends(current_user), store: Store = Depends(get_store)
 ) -> TeamSettings:
     team = await user_team(store, user)
-    return await store.settings(team.id)
+    return await shown(store, await store.settings(team.id))
 
 
 @router.put("/settings")
@@ -175,7 +205,7 @@ async def write_team_settings(
         )
     team = await user_team(store, user)
     current = await store.settings(team.id)
-    return await store.save_settings(
+    saved = await store.save_settings(
         body.model_copy(
             update={
                 "team_id": team.id,
@@ -188,6 +218,7 @@ async def write_team_settings(
             }
         )
     )
+    return await shown(store, saved)
 
 
 @router.put("/settings/connectors")
@@ -205,8 +236,9 @@ async def write_connectors(
     gitlab = repos(body.gitlab, current.gitlab.projects, "GitLab project", gitlab_path)
     jira = current.jira.model_copy(
         update={"site": site_host(text(body.jira.site)), "project": jira_key(body.jira.project)}
+        | NO_JIRA_ACCOUNT  # the account is not kept here: `shown` reads it from where it is
     )
-    return await store.save_settings(
+    saved = await store.save_settings(
         current.model_copy(
             update={
                 "github": current.github.model_copy(update={"repos": github}),
@@ -215,6 +247,7 @@ async def write_connectors(
             }
         )
     )
+    return await shown(store, saved)
 
 
 def repos(
@@ -281,11 +314,12 @@ async def connect_jira_account(
     config: Settings = Depends(get_settings),
     transport: httpx.AsyncBaseTransport | None = Depends(get_http_transport),
 ) -> TeamSettings:
-    """Connects the team's Jira account; admins only. The email and API token are checked
-    against the site, and the project against what that account can see, before anything is
-    saved. The token is stored encrypted and never returned; approved task drafts are then
-    created as issues in that project as that account. The Jira site and project the agent
-    reads (PUT /settings/connectors) are not changed."""
+    """Connects the team's Jira account; admins only. Before anything is saved, Jira is asked
+    whether it accepts the email and API token, whether that account sees the project and may
+    create issues in it, and which issue type tasks become there. The token is stored encrypted
+    and never returned; approved task drafts are then created as issues in that project as that
+    account. The Jira site and project the agent reads (PUT /settings/connectors) are not
+    changed."""
     email, token = body.email.strip(), body.api_token.strip()
     project = jira_key(body.project)
     if not email or not token or project is None:
@@ -300,28 +334,7 @@ async def connect_jira_account(
         raise HTTPException(status_code=422, detail=NOT_A_SITE) from None
     if (secret := signing_secret(config)) is None:
         raise HTTPException(status_code=503, detail=NOT_CONFIGURED)
-
-    cloud = JiraCloud(access, transport=transport)
-    try:
-        try:
-            await cloud.myself()
-        except JiraRejected as e:
-            if e.status not in (401, 403):
-                raise
-            detail = f"{access.site} did not accept that email and API token"
-            raise HTTPException(status_code=422, detail=detail) from None
-        try:
-            await cloud.project(project)
-        except JiraRejected as e:
-            if e.status not in (403, 404):
-                raise
-            detail = f"{access.site} has no project {project} that this account can see"
-            raise HTTPException(status_code=422, detail=detail) from None
-    except JiraUnreachable as e:
-        raise HTTPException(status_code=502, detail=str(e)) from None
-    except JiraRejected as e:
-        detail = f"{access.site} answered {e.status}: {e}"
-        raise HTTPException(status_code=502, detail=detail) from None
+    issue_type = await checked_with_jira(JiraCloud(access, transport=transport))
 
     team = await user_team(store, user)
     await store.save_jira_account(
@@ -329,22 +342,54 @@ async def connect_jira_account(
             team_id=team.id,
             site=access.site,
             project=project,
+            issue_type_id=issue_type,
             email=email,
-            sealed_token=seal(token, secret),
+            sealed_token=seal(token, secret, team.id),
             connected_by=user.id,
             connected_at=datetime.now(UTC),
         )
     )
-    current = await store.settings(team.id)
-    jira = current.jira.model_copy(
-        update={
-            "connected": True,
-            "account_email": email,
-            "account_site": access.site,
-            "account_project": project,
-        }
-    )
-    return await store.save_settings(current.model_copy(update={"jira": jira}))
+    return await shown(store, await store.settings(team.id))
+
+
+async def checked_with_jira(cloud: JiraCloud) -> str | None:
+    """The id of the issue type tasks are created as in the project (None when Jira does not
+    list its types: the type named Task is then used). 422 when the account or the project
+    cannot be used as given, 502 when Jira cannot be asked."""
+    site, project = cloud.access.site, cloud.access.project_key
+
+    def refuse(detail: str) -> HTTPException:
+        return HTTPException(status_code=422, detail=detail)
+
+    try:
+        try:
+            await cloud.myself()
+        except JiraRejected as e:
+            if e.status == 404:
+                raise refuse(f"There is no Jira site at {site}") from None
+            if e.status in (401, 403):
+                raise refuse(f"{site} did not accept that email and API token") from None
+            raise
+        try:
+            found = await cloud.project(project)
+        except JiraRejected as e:
+            if e.status in (403, 404):
+                raise refuse(f"{site} has no project {project} that this account can see") from None
+            raise
+        issue_type = issue_type_for_tasks(found)
+        if issue_type is None and isinstance(found.get("issueTypes"), list):
+            raise refuse(f"{project} has no issue type that tasks can be created as")
+        try:
+            allowed = await cloud.can_create(project)
+        except JiraRejected:
+            allowed = True  # Jira would not say; a push reports its own refusal
+        if not allowed:
+            raise refuse(f"This account is not allowed to create issues in {project}")
+    except JiraUnreachable as e:
+        raise HTTPException(status_code=502, detail=str(e)) from None
+    except JiraRejected as e:
+        raise HTTPException(status_code=502, detail=f"{site} answered {e.status}: {e}") from None
+    return issue_type
 
 
 @router.delete("/settings/jira/account")
@@ -355,16 +400,7 @@ async def disconnect_jira_account(
     the agent reads stay."""
     team = await user_team(store, user)
     await store.delete_jira_account(team.id)
-    current = await store.settings(team.id)
-    jira = current.jira.model_copy(
-        update={
-            "connected": False,
-            "account_email": None,
-            "account_site": None,
-            "account_project": None,
-        }
-    )
-    return await store.save_settings(current.model_copy(update={"jira": jira}))
+    return await shown(store, await store.settings(team.id))
 
 
 @router.get("/settings/connectors")

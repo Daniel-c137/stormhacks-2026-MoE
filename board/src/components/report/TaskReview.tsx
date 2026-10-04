@@ -34,7 +34,7 @@ export interface TaskReviewProps {
 /** Edit title, owner, due and description; include or exclude; then push. */
 export function TaskReview(props: TaskReviewProps) {
   const { tasks, members, locked, pushing, pushed, destination, destinationLabel } = props;
-  const included = tasks.filter((t) => t.include).length;
+  const included = tasks.filter((t) => t.include && !t.key).length; // what a push would create
 
   return (
     <>
@@ -49,13 +49,14 @@ export function TaskReview(props: TaskReviewProps) {
             props.onCommit(next);
           };
           const url = task.key ? props.keyUrl(task) : null;
+          const fixed = locked || Boolean(task.key); // an issue already: the draft is final
           return (
             <div key={task.id} className="task" data-inc={task.include}>
               <input
                 type="checkbox"
                 checked={task.include}
                 onChange={(e) => editNow({ include: e.target.checked })}
-                disabled={locked}
+                disabled={fixed}
                 aria-label={`Include “${task.title}”`}
               />
               <div className="task-fields">
@@ -65,7 +66,7 @@ export function TaskReview(props: TaskReviewProps) {
                     value={task.title}
                     onChange={(e) => edit({ title: e.target.value })}
                     onBlur={() => props.onCommit(task)}
-                    disabled={locked}
+                    disabled={fixed}
                     aria-label="Task title"
                   />
                   {task.t != null && (
@@ -88,7 +89,7 @@ export function TaskReview(props: TaskReviewProps) {
                     value={task.description ?? ""}
                     onChange={(e) => edit({ description: e.target.value || null })}
                     onBlur={() => props.onCommit(task)}
-                    disabled={locked}
+                    disabled={fixed}
                     rows={1}
                   />
                 </label>
@@ -99,7 +100,7 @@ export function TaskReview(props: TaskReviewProps) {
                     className="field"
                     value={task.owner_id ?? ""}
                     onChange={(e) => editNow({ owner_id: e.target.value || null })}
-                    disabled={locked}
+                    disabled={fixed}
                   >
                     <option value="">No owner</option>
                     {task.owner_id && !members.some((m) => m.id === task.owner_id) && (
@@ -119,7 +120,7 @@ export function TaskReview(props: TaskReviewProps) {
                     type="date"
                     value={task.due ?? ""}
                     onChange={(e) => editNow({ due: e.target.value || null })}
-                    disabled={locked}
+                    disabled={fixed}
                   />
                 </label>
                 <div className="task-src">

@@ -51,6 +51,7 @@ class JiraAccount(BaseModel):
     team_id: str
     site: str  # name.atlassian.net
     project: str
+    issue_type_id: str | None = None  # the project's type tasks are created as; None: "Task"
     email: str
     sealed_token: str
     connected_by: str  # the admin's person id

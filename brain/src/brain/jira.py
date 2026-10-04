@@ -8,6 +8,7 @@ A team whose admin connected its Jira account pushes through the site's REST API
 
 import json
 import re
+from collections.abc import Awaitable, Callable
 from typing import Literal
 
 from mcp import Client
@@ -60,11 +61,19 @@ def jira_config(settings: Settings) -> JiraConfig:
     )
 
 
+OnCreated = Callable[[TaskPushResult], Awaitable[None]]
+"""Called with each new issue's result as soon as it exists, so its key can be saved at once."""
+
+
 class TaskPusher:
     """An approved push, wherever the issues are created: which drafts go, and one result each."""
 
     async def push(
-        self, meeting: ProcessedMeeting, request: TaskPushRequest
+        self,
+        meeting: ProcessedMeeting,
+        request: TaskPushRequest,
+        *,
+        on_created: OnCreated | None = None,
     ) -> list[TaskPushResult]:
         """One result per requested draft, in request order. Never raises for one bad draft."""
         if not request.approved_by.strip():
@@ -83,26 +92,39 @@ class TaskPusher:
                 results[task_id] = TaskPushResult(task_id=task_id, error="No such task draft")
             elif not draft.include:
                 results[task_id] = TaskPushResult(task_id=task_id, error="Draft is excluded")
-            elif draft.key:  # pushed before: its saved link, which may be to another site
+            elif draft.key:  # pushed before, never again
                 results[task_id] = TaskPushResult(
-                    task_id=task_id, key=draft.key, url=draft.url or self.url(draft.key)
+                    task_id=task_id, key=draft.key, url=self.pushed_url(draft)
                 )
             else:
                 to_create.append(draft)
 
         if to_create:
-            results |= await self.create_all(to_create, meeting, request)
+            results |= await self.create_all(to_create, meeting, request, on_created or _nothing)
         return [results[task_id] for task_id in task_ids]
 
     async def create_all(
-        self, drafts: list[TaskDraft], meeting: ProcessedMeeting, request: TaskPushRequest
+        self,
+        drafts: list[TaskDraft],
+        meeting: ProcessedMeeting,
+        request: TaskPushRequest,
+        on_created: OnCreated,
     ) -> dict[str, TaskPushResult]:
-        """A result for every draft: its new key, or why it was not created."""
+        """A result for every draft: its new key, or why it was not created. `on_created` is
+        awaited for each issue as it is created."""
         raise NotImplementedError
 
     def url(self, key: str) -> str | None:
         """Where the issue can be opened, when the site's address is known."""
         raise NotImplementedError
+
+    def pushed_url(self, draft: TaskDraft) -> str | None:
+        """The link of a draft pushed earlier: the one saved with it, else this site's."""
+        return draft.url or self.url(draft.key or "")
+
+
+async def _nothing(result: TaskPushResult) -> None:
+    return None
 
 
 class JiraPusher(TaskPusher):
@@ -111,13 +133,19 @@ class JiraPusher(TaskPusher):
         self.target = target or config.mcp_url
 
     async def create_all(
-        self, drafts: list[TaskDraft], meeting: ProcessedMeeting, request: TaskPushRequest
+        self,
+        drafts: list[TaskDraft],
+        meeting: ProcessedMeeting,
+        request: TaskPushRequest,
+        on_created: OnCreated,
     ) -> dict[str, TaskPushResult]:
         results: dict[str, TaskPushResult] = {}
         try:
             async with Client(self.target) as client:
                 for draft in drafts:
-                    results[draft.id] = await self.create(client, draft, meeting, request)
+                    results[draft.id] = result = await self.create(client, draft, meeting, request)
+                    if result.key:
+                        await on_created(result)
         except Exception as e:  # transport failure: report it per draft, keep what was created
             error = f"Jira MCP call failed: {root_cause(e)}"
             for draft in drafts:

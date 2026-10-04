@@ -73,7 +73,9 @@ FACT_CHECK = (
 )
 FACT_CHECK_STATE = "meeting_id, checked_until, checked_at"
 LOGIN = "person_id, email, password_hash, created_at, updated_at"
-JIRA_ACCOUNT = "team_id, site, project, email, sealed_token, connected_by, connected_at"
+JIRA_ACCOUNT = (
+    "team_id, site, project, issue_type_id, email, sealed_token, connected_by, connected_at"
+)
 # Newest first by started_at, or scheduled_start before it starts; ties in creation order.
 NEWEST_MEETING_FIRST = "coalesce(m.started_at, m.scheduled_start) desc nulls last, m.seq"
 REPORT_ROWS = ("meeting_id", "summary", "tasks", "decisions")
@@ -296,8 +298,8 @@ class PostgresStore:
             await self._team(cur, account.team_id)
             await cur.execute(
                 f"insert into jira_accounts ({JIRA_ACCOUNT})"
-                " values (%(team_id)s, %(site)s, %(project)s, %(email)s, %(sealed_token)s,"
-                " %(connected_by)s, %(connected_at)s)"
+                " values (%(team_id)s, %(site)s, %(project)s, %(issue_type_id)s, %(email)s,"
+                " %(sealed_token)s, %(connected_by)s, %(connected_at)s)"
                 f" on conflict (team_id) do update set {_from_excluded(JIRA_ACCOUNT)}",
                 account.model_dump(),
             )
