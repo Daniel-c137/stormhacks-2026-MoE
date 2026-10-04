@@ -50,6 +50,13 @@ def generate_password() -> str:
     return secrets.token_urlsafe(18)
 
 
+def name_from_email(email: str) -> str:
+    """A stand-in name for someone invited by email only, from the address's local part
+    ("priya.natarajan@…" is "Priya Natarajan"), until they choose their own."""
+    words = re.split(r"[._+\-]+", email.partition("@")[0])
+    return " ".join(w[:1].upper() + w[1:] for w in words if w)[:MAX_NAME_LENGTH] or email
+
+
 def name_fields(name: str) -> dict[str, str]:
     """The short name and initials shown on tiles, from a cleaned full name."""
     words = name.split()

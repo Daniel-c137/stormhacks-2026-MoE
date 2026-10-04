@@ -9,9 +9,6 @@ import { useMembers } from "@/hooks/useApi";
 import { createAccount, describeError } from "@/lib/api";
 
 type Role = "member" | "admin";
-/** Invite: no login; the person creates their account on the sign-in page. Password: the server
- * makes one, shown here once. */
-type How = "invite" | "password";
 
 /** The sign-in page opened on Create account, to send to someone invited. */
 const signUpLink = () => `${window.location.origin}/login?mode=signup`;
@@ -32,26 +29,23 @@ function copySelected(text: string): boolean {
   }
 }
 
-/** Admins only: the team's members and adding a person (POST /team/accounts), invited or with a
- * generated password. The password shows here once and is never sent anywhere else. */
+/** Admins only: the team's members, and inviting someone by email (POST /team/accounts with
+ * invite). They create their own account on the sign-in page with that email, choosing their name
+ * and password, or with Google. */
 export function TeamAccounts() {
   const members = useMembers();
   const [adding, setAdding] = useState(false);
-  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Role>("member");
-  const [how, setHow] = useState<How>("invite");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
-  const [created, setCreated] = useState<CreateAccountResponse | null>(null);
+  const [invited, setInvited] = useState<CreateAccountResponse | null>(null);
   const [copied, setCopied] = useState(false);
 
   const close = () => {
     setAdding(false);
-    setName("");
     setEmail("");
     setRole("member");
-    setHow("invite");
     setProblem("");
   };
 
@@ -60,7 +54,7 @@ export function TeamAccounts() {
     setBusy(true);
     setProblem("");
     try {
-      setCreated(await createAccount({ name, email, is_admin: role === "admin", invite: how === "invite" }));
+      setInvited(await createAccount({ email, is_admin: role === "admin", invite: true }));
       setCopied(false);
       close();
       members.reload();
@@ -72,26 +66,15 @@ export function TeamAccounts() {
     }
   };
 
-  /** The password, or the sign-up link for an invite. */
   const copy = async () => {
-    if (!created) return;
     setProblem("");
     try {
-      await navigator.clipboard.writeText(created.password ?? signUpLink());
+      await navigator.clipboard.writeText(signUpLink());
       setCopied(true);
     } catch {
       // The Clipboard API can be refused (an embedded or unfocused page); copy the selected text.
-      if (!created.password) {
-        if (copySelected(signUpLink())) return setCopied(true);
-        return setProblem(`Couldn't copy. The link is ${signUpLink()}`);
-      }
-      const code = document.getElementById("new-password");
-      const selection = window.getSelection();
-      if (code && selection) {
-        selection.selectAllChildren(code);
-        if (document.execCommand("copy")) return setCopied(true);
-      }
-      setProblem("Couldn't copy. Select the password and copy it.");
+      if (copySelected(signUpLink())) return setCopied(true);
+      setProblem(`Couldn't copy. The link is ${signUpLink()}`);
     }
   };
 
@@ -105,59 +88,30 @@ export function TeamAccounts() {
             className="btn btn-outline btn-sm"
             onClick={() => {
               setAdding(true);
-              setCreated(null);
+              setInvited(null);
             }}
           >
             <Icon name="plus" />
-            Add person
+            Invite
           </button>
         )}
       </div>
-      {created && (
+      {invited && (
         <div className="once" role="status">
-          {created.password ? (
-            <>
-              <span>
-                One-time password for <b>{created.person.name}</b>
-              </span>
-              <code id="new-password">{created.password}</code>
-            </>
-          ) : (
-            <span>
-              Invited <b>{created.person.name}</b>.
-            </span>
-          )}
+          <span>
+            Invited <b>{invited.person.email}</b>
+          </span>
           <button type="button" className="btn btn-outline btn-sm" onClick={() => void copy()}>
-            <Icon name={copied ? "check" : created.password ? "copy" : "link"} />
-            {copied ? "Copied" : created.password ? "Copy" : "Copy link"}
+            <Icon name={copied ? "check" : "link"} />
+            {copied ? "Copied" : "Copy link"}
           </button>
-          <button type="button" className="icon-btn sm" onClick={() => setCreated(null)} aria-label={created.password ? "Dismiss password" : "Dismiss"}>
+          <button type="button" className="icon-btn sm" onClick={() => setInvited(null)} aria-label="Dismiss">
             <Icon name="x" />
           </button>
         </div>
       )}
       {adding && (
-        <form className="member-add" onSubmit={submit} aria-label="Add person">
-          <div className="seg" role="radiogroup" aria-label="How they sign in">
-            <button type="button" role="radio" aria-checked={how === "invite"} onClick={() => setHow("invite")}>
-              <Icon name="link" />
-              Invite
-            </button>
-            <button type="button" role="radio" aria-checked={how === "password"} onClick={() => setHow("password")}>
-              <Icon name="lock" />
-              Generate password
-            </button>
-          </div>
-          <input
-            className="field"
-            placeholder="Name"
-            aria-label="Name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            autoComplete="off"
-            autoFocus
-            required
-          />
+        <form className="member-add" onSubmit={submit} aria-label="Invite">
           <input
             className="field"
             type="email"
@@ -166,6 +120,7 @@ export function TeamAccounts() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             autoComplete="off"
+            autoFocus
             required
           />
           <select className="field" aria-label="Role" value={role} onChange={(e) => setRole(e.target.value as Role)}>
@@ -176,9 +131,9 @@ export function TeamAccounts() {
             <button type="button" className="btn btn-quiet btn-sm" onClick={close}>
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary btn-sm" disabled={busy || !name.trim() || !email.trim()}>
+            <button type="submit" className="btn btn-primary btn-sm" disabled={busy || !email.trim()}>
               {busy && <Spinner />}
-              {how === "invite" ? "Invite" : "Add"}
+              Invite
             </button>
           </div>
         </form>

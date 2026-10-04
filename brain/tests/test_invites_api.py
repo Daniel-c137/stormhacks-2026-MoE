@@ -114,7 +114,7 @@ def test_a_teammates_email_cant_be_invited_twice(client_as, store):
 
 @pytest.mark.parametrize(
     "changes",
-    [{"email": "not-an-email"}, {"email": ""}, {"name": "   "}, {"name": "x" * 81}],
+    [{"email": "not-an-email"}, {"email": ""}, {"name": "x" * 81}],
 )
 def test_a_bad_invite_is_422(client_as, store, changes):
     response = invite(client_as(ALEX), **changes)
@@ -123,7 +123,57 @@ def test_a_bad_invite_is_422(client_as, store, changes):
     assert len(run(store.team(TEAM.id)).member_ids) == 2
 
 
+@pytest.mark.parametrize(
+    ("email", "name"),
+    [
+        ("priya.natarajan@example.com", "Priya Natarajan"),
+        ("priya@example.com", "Priya"),
+        ("sam_lee-2@example.com", "Sam Lee 2"),
+    ],
+)
+@pytest.mark.parametrize(
+    "given", [{}, {"name": None}, {"name": "   "}], ids=["none", "null", "blank"]
+)
+def test_an_invite_needs_only_an_email(client_as, store, email, name, given):
+    """The admin adds only the email; until the person signs up they show under a name made from
+    it, and they choose their own name and password when they create the account."""
+    body = {"email": email, "invite": True} | given
+    response = client_as(ALEX).post("/team/accounts", json=body)
+
+    assert response.status_code == 201, response.text
+    person = response.json()["person"]
+    assert (person["name"], person["email"], person["invited"]) == (name, email, True)
+    assert response.json()["password"] is None
+    with pytest.raises(NotFound):
+        run(store.login(person["id"]))
+
+
+def test_an_account_with_a_generated_password_still_needs_a_name(client_as, store):
+    response = client_as(ALEX).post("/team/accounts", json={"email": "sam@example.com"})
+
+    assert response.status_code == 422
+    assert len(run(store.team(TEAM.id)).member_ids) == 2
+
+
 # signing up
+
+
+def test_signing_up_after_an_email_only_invite_sets_the_name_they_choose(app, client_as, store):
+    person = (
+        client_as(ALEX)
+        .post("/team/accounts", json={"email": "priya@example.com", "invite": True})
+        .json()["person"]
+    )
+
+    response = sign_up(app)
+
+    assert response.status_code == 201, response.text
+    signed_up = run(store.person(person["id"]))
+    assert (signed_up.name, signed_up.short, signed_up.initials) == (
+        "Priya Natarajan",
+        "Priya",
+        "PN",
+    )
 
 
 def test_the_invited_person_signs_up_with_a_password_once(app, client_as, store):
@@ -262,3 +312,28 @@ def test_google_refuses_an_email_invited_by_two_teams(app, google, store):
 
     assert google_sign_in(app, google, "priya@example.com") == {"google_error": "ambiguous"}
     assert len(run(store.invited_people("priya@example.com"))) == 2  # no login reserved
+
+
+def test_google_names_someone_invited_by_email_only(app, client_as, google, store):
+    person = (
+        client_as(ALEX)
+        .post("/team/accounts", json={"email": "priya@example.com", "invite": True})
+        .json()["person"]
+    )
+
+    browser = google_browser(app)
+    back = google_sign_in(app, google, "priya@example.com", browser)
+    session = browser.post("/auth/google/exchange", json={"code": back["google"]})
+
+    assert session.status_code == 200, session.text
+    assert run(store.person(person["id"])).name == "From Google"
+
+
+def test_google_keeps_the_name_an_admin_gave(app, client_as, google, store):
+    person = invite(client_as(ALEX)).json()["person"]
+
+    browser = google_browser(app)
+    back = google_sign_in(app, google, "priya@example.com", browser)
+    browser.post("/auth/google/exchange", json={"code": back["google"]})
+
+    assert run(store.person(person["id"])).name == "Priya Natarajan"
