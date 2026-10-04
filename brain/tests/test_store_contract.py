@@ -428,7 +428,9 @@ async def test_deleting_a_team_removes_everything_under_it_and_keeps_its_people(
     await store.add_participant(meeting.id, sarah.id)
     await store.add_segments(meeting.id, [segment(meeting.id, 1, alex)])
     await store.add_public_chat(chat(meeting.id, alex, "hi", at(1)))
-    await store.save_agenda(Agenda(meeting_id=meeting.id, items=[], generated_at=at(0)))
+    await store.save_agenda(
+        Agenda(meeting_id=meeting.id, person_id=alex.id, items=[], generated_at=at(0))
+    )
     report = report_for(meeting.id, owner=alex, decisions=["Use Redis"], tasks=["Ship it"])
     await store.complete_report(report)
     await store.save_report_progress(
@@ -453,7 +455,7 @@ async def test_deleting_a_team_removes_everything_under_it_and_keeps_its_people(
     assert await store.meetings(team.id) == []
     assert await store.transcript(meeting.id) == []
     assert await store.public_chat(meeting.id) == []
-    assert await store.agenda(meeting.id) is None
+    assert await store.agendas(meeting.id) == []
     assert await store.report_progress(meeting.id) is None
     with pytest.raises(NotFound):
         await store.report_audio(meeting.id)
@@ -1103,16 +1105,17 @@ async def test_public_chat_for_a_missing_meeting_is_refused(store):
 async def test_an_agenda_is_none_until_saved_then_replaced_on_save(store):
     team, alex, sarah, *_ = await two_teams(store)
     meeting = await store.create_meeting(team.id, "Planning", alex.id, scheduled_start=at(60))
-    assert await store.agenda(meeting.id) is None
+    assert await store.agenda(meeting.id, alex.id) is None
 
     first = Agenda(
         meeting_id=meeting.id,
+        person_id=alex.id,
         items=[AgendaItem(id="a1", title="Refund status", minutes=10, added_by=alex.id)],
         generated_at=at(0),
     )
     saved = await store.save_agenda(first)
     assert saved == first.model_copy(update={"revision": 1})
-    assert await store.agenda(meeting.id) == saved
+    assert await store.agenda(meeting.id, alex.id) == saved
 
     edited = first.model_copy(
         update={
@@ -1125,7 +1128,7 @@ async def test_an_agenda_is_none_until_saved_then_replaced_on_save(store):
     )
     await store.save_agenda(edited)
 
-    assert await store.agenda(meeting.id) == edited.model_copy(update={"revision": 2})
+    assert await store.agenda(meeting.id, alex.id) == edited.model_copy(update={"revision": 2})
 
 
 async def test_an_agendas_timekeeping_state_is_saved_with_it(store):
@@ -1133,6 +1136,7 @@ async def test_an_agendas_timekeeping_state_is_saved_with_it(store):
     meeting = await store.create_meeting(team.id, "Standup", alex.id)
     tracked = Agenda(
         meeting_id=meeting.id,
+        person_id=alex.id,
         items=[
             AgendaItem(
                 id="a1",
@@ -1153,7 +1157,7 @@ async def test_an_agendas_timekeeping_state_is_saved_with_it(store):
 
     await store.save_agenda(tracked)
 
-    saved = await store.agenda(meeting.id)
+    saved = await store.agenda(meeting.id, alex.id)
     assert saved == tracked.model_copy(update={"revision": 1})
     assert (saved.current_item_id, saved.tracked_until) == ("a1", 1265.25)
     assert [(i.discussed_s, i.nudged_t) for i in saved.items][:2] == [(312.5, None), (0, 1260.0)]
@@ -1166,6 +1170,7 @@ async def test_a_conditional_save_goes_through_only_at_the_revision_it_read(stor
     meeting = await store.create_meeting(team.id, "Standup", alex.id)
     planned = Agenda(
         meeting_id=meeting.id,
+        person_id=alex.id,
         items=[AgendaItem(id="a1", title="Waitlist email", minutes=10)],
         generated_at=at(0),
     )
@@ -1186,12 +1191,12 @@ async def test_a_conditional_save_goes_through_only_at_the_revision_it_read(stor
     )
     with pytest.raises(Conflict):  # read at revision 1; the tracked save landed since
         await store.save_agenda_if(renamed)
-    assert await store.agenda(meeting.id) == second
+    assert await store.agenda(meeting.id, alex.id) == second
 
     await store.save_agenda(second)  # an unconditional save bumps the revision too
     with pytest.raises(Conflict):
         await store.save_agenda_if(second)
-    assert (await store.agenda(meeting.id)).revision == 3
+    assert (await store.agenda(meeting.id, alex.id)).revision == 3
 
 
 async def test_overlapping_conditional_saves_let_exactly_one_through(store):
@@ -1199,6 +1204,7 @@ async def test_overlapping_conditional_saves_let_exactly_one_through(store):
     meeting = await store.create_meeting(team.id, "Standup", alex.id)
     planned = Agenda(
         meeting_id=meeting.id,
+        person_id=alex.id,
         items=[AgendaItem(id="a1", title="Waitlist email", minutes=10)],
         generated_at=at(0),
     )
@@ -1216,30 +1222,79 @@ async def test_overlapping_conditional_saves_let_exactly_one_through(store):
             tg.start_soon(save, planned.model_copy(update={"tracked_until": float(n)}))
     assert sorted(outcomes) == ["conflict"] * 4 + ["saved"]
 
-    read = await store.agenda(meeting.id)
+    read = await store.agenda(meeting.id, alex.id)
     outcomes.clear()
     async with anyio.create_task_group() as tg:  # five saves of what was read at revision 1
         for n in range(5):
             tg.start_soon(save, read.model_copy(update={"tracked_until": 55.0 + n}))
     assert sorted(outcomes) == ["conflict"] * 4 + ["saved"]
-    assert (await store.agenda(meeting.id)).revision == 2
+    assert (await store.agenda(meeting.id, alex.id)).revision == 2
 
 
 async def test_overlapping_unconditional_saves_each_bump_the_revision(store):
     team, alex, *_ = await two_teams(store)
     meeting = await store.create_meeting(team.id, "Standup", alex.id)
-    planned = Agenda(meeting_id=meeting.id, items=[], generated_at=at(0))
+    planned = Agenda(meeting_id=meeting.id, person_id=alex.id, items=[], generated_at=at(0))
 
     async with anyio.create_task_group() as tg:
         for _ in range(5):
             tg.start_soon(store.save_agenda, planned)
 
-    assert (await store.agenda(meeting.id)).revision == 5
+    assert (await store.agenda(meeting.id, alex.id)).revision == 5
 
 
 async def test_an_agenda_for_a_missing_meeting_is_refused(store):
     with pytest.raises(NotFound):
-        await store.save_agenda(Agenda(meeting_id=new_id(), items=[], generated_at=at(0)))
+        await store.save_agenda(
+            Agenda(meeting_id=new_id(), person_id=new_id(), items=[], generated_at=at(0))
+        )
+
+
+async def test_everyone_in_a_meeting_has_their_own_agenda(store):
+    """Personal agendas: an edit to one person's never shows in anyone else's."""
+    team, alex, sarah, *_ = await two_teams(store)
+    meeting = await store.create_meeting(team.id, "Planning", alex.id)
+    mine = Agenda(
+        meeting_id=meeting.id,
+        person_id=alex.id,
+        items=[AgendaItem(id="a1", title="Refund status", minutes=10, added_by=alex.id)],
+        generated_at=at(0),
+    )
+    theirs = Agenda(
+        meeting_id=meeting.id,
+        person_id=sarah.id,
+        items=[AgendaItem(id="s1", title="Mobile release", minutes=5, added_by=sarah.id)],
+        generated_at=at(1),
+    )
+
+    await store.save_agenda(mine)
+    assert await store.agenda(meeting.id, sarah.id) is None
+    await store.save_agenda(theirs)
+    await store.save_agenda(mine.model_copy(update={"items": []}))  # Alex clears his
+
+    assert (await store.agenda(meeting.id, alex.id)).items == []
+    assert [i.title for i in (await store.agenda(meeting.id, sarah.id)).items] == ["Mobile release"]
+    assert {a.person_id for a in await store.agendas(meeting.id)} == {alex.id, sarah.id}
+
+
+async def test_each_persons_agenda_has_its_own_revision(store):
+    team, alex, sarah, *_ = await two_teams(store)
+    meeting = await store.create_meeting(team.id, "Standup", alex.id)
+    first = Agenda(meeting_id=meeting.id, person_id=alex.id, items=[], generated_at=at(0))
+
+    alexs = await store.save_agenda_if(first)
+    sarahs = await store.save_agenda_if(first.model_copy(update={"person_id": sarah.id}))
+
+    assert (alexs.revision, sarahs.revision) == (1, 1)  # neither conflicted with the other
+
+
+async def test_an_agenda_belongs_to_someone(store):
+    team, alex, *_ = await two_teams(store)
+    meeting = await store.create_meeting(team.id, "Standup", alex.id)
+
+    with pytest.raises(ValueError):
+        await store.save_agenda(Agenda(meeting_id=meeting.id, items=[], generated_at=at(0)))
+    assert await store.agendas(meeting.id) == []
 
 
 # fact-checks
