@@ -2,11 +2,22 @@
 
 from fastapi import APIRouter, Depends
 
-from contracts import Person, Team, TeamSettings, Voice
+from contracts import Person, Team, TeamSettings, UpdateProfileRequest, Voice
 
 from .deps import current_user, not_implemented
 
 router = APIRouter(tags=["team"])
+
+
+@router.get("/me")
+async def get_me(user: Person = Depends(current_user)) -> Person:
+    return user
+
+
+@router.patch("/me")
+async def update_me(body: UpdateProfileRequest, user: Person = Depends(current_user)) -> Person:
+    """Display name and photo, shown in meetings, transcripts and reports."""
+    not_implemented()
 
 
 @router.get("/team")

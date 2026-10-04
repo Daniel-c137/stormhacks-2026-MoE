@@ -10,6 +10,9 @@ from contracts import (
     JoinMeetingResponse,
     Meeting,
     Person,
+    RewriteTopicRequest,
+    RewriteTopicResponse,
+    UpdateAgendaRequest,
 )
 
 from .deps import current_user, not_implemented
@@ -62,4 +65,20 @@ async def get_agenda(meeting_id: str, user: Person = Depends(current_user)) -> A
 @router.post("/{meeting_id}/agenda")
 async def generate_agenda(meeting_id: str, user: Person = Depends(current_user)) -> Agenda:
     """Build the agenda from previous meetings and unfinished GitHub/Jira work."""
+    not_implemented()
+
+
+@router.put("/{meeting_id}/agenda")
+async def update_agenda(
+    meeting_id: str, body: UpdateAgendaRequest, user: Person = Depends(current_user)
+) -> Agenda:
+    """Replace the agenda with the topics people added or edited in the lobby."""
+    not_implemented()
+
+
+@router.post("/{meeting_id}/agenda/rewrite")
+async def rewrite_topic(
+    meeting_id: str, body: RewriteTopicRequest, user: Person = Depends(current_user)
+) -> RewriteTopicResponse:
+    """Tidy one topic's wording. Saves nothing; the user adds the result themselves."""
     not_implemented()

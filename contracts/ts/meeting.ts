@@ -1,4 +1,4 @@
-export type MeetingStatus = "live" | "processing" | "needs_review" | "pushed";
+export type MeetingStatus = "scheduled" | "live" | "processing" | "needs_review" | "pushed";
 export type ParticipantRole = "host" | "member";
 
 /** A team member account. */
@@ -8,6 +8,7 @@ export interface Person {
   short: string;
   initials: string;
   title?: string | null;
+  photo_url?: string | null;
 }
 
 export interface Team {
@@ -27,6 +28,7 @@ export interface Meeting {
   host_id: string;
   participant_ids: string[];
   started_at?: string | null; // ISO 8601
+  scheduled_for?: string | null; // ISO 8601; set while status is scheduled
   duration_min?: number | null;
   jira_keys: string[];
 }

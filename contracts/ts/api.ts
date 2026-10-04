@@ -1,10 +1,35 @@
 // HTTP request and response bodies. Board -> brain, and realtime -> brain (internal).
+import type { AgendaItem } from "./agenda";
 import type { Answer, Invocation, Visibility } from "./agent";
 import type { Meeting } from "./meeting";
 import type { TranscriptSegment } from "./transcript";
 
+/** No scheduled_for starts the meeting now. Invitees are team members; the creator organises. */
 export interface CreateMeetingRequest {
   title: string;
+  scheduled_for?: string | null; // ISO 8601
+  duration_min?: number | null;
+  invitee_ids?: string[];
+}
+
+/** The signed-in user's own profile. photo is an image data URL; null removes it. */
+export interface UpdateProfileRequest {
+  name: string;
+  photo?: string | null;
+}
+
+/** Topics people add in the lobby replace the meeting's agenda items. */
+export interface UpdateAgendaRequest {
+  items: AgendaItem[];
+}
+
+/** Tidy one agenda topic. The text comes back for the user to accept; nothing is saved. */
+export interface RewriteTopicRequest {
+  text: string;
+}
+
+export interface RewriteTopicResponse {
+  text: string;
 }
 
 export interface JoinMeetingResponse {
