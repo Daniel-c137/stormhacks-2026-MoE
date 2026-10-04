@@ -76,8 +76,9 @@ class Answer(BaseModel):
     unavailable: list[str] = []  # sources that were missing or failed; never papered over
 
 
-ResponseCardStatus = Literal["pending", "spoken", "sent_to_chat", "dismissed"]
-ResponseActionName = Literal["speak", "send_to_chat", "dismiss", "show_on_stage"]
+ResponseCardStatus = Literal["pending", "speaking", "spoken", "sent_to_chat", "dismissed"]
+# stop: cut the answer being spoken off; the card goes back to pending.
+ResponseActionName = Literal["speak", "stop", "send_to_chat", "dismiss", "show_on_stage"]
 
 
 class ResponseCard(BaseModel):

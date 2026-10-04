@@ -19,15 +19,16 @@ export function draftedTopics(current: { title: string }[], drafted: AgendaItem[
   });
 }
 
-/** Asks the agent for a draft and adds it after the meeting's saved items, as ordinary items. Returns how
- * many were added. Used when scheduling; the lobby does the same with its own edit queue. */
+/** Asks the agent for a draft and adds it after the meeting's saved items, as ordinary items without the
+ * timeboxes it suggests. Returns how many were added. Used when scheduling; the lobby does the same with
+ * its own edit queue. */
 export async function draftAgendaInto(meetingId: string): Promise<number> {
   const current = await getAgenda(meetingId);
   const result = await suggestAgenda(meetingId);
   const added = draftedTopics(current.items, result.items);
   if (added.length) {
     const keep = current.items.map((i) => ({ id: i.id, title: i.title, minutes: i.minutes ?? null }));
-    const add = added.map((i) => ({ title: i.title, minutes: i.minutes ?? null }));
+    const add = added.map((i) => ({ title: i.title }));
     await updateAgenda(meetingId, { items: [...keep, ...add] });
   }
   return added.length;

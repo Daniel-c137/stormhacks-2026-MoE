@@ -149,6 +149,7 @@ class FakeTranscription:
     def __init__(self):
         self.armed: list[str] = []
         self.cancelled: list[str] = []
+        self.stopped_listening: list[str] = []
         self.recent = [segment("Let's talk refunds.")]
 
     def arm_ask(self, participant_id: str) -> None:
@@ -157,6 +158,10 @@ class FakeTranscription:
     def cancel_ask(self, participant_id: str) -> bool:
         self.cancelled.append(participant_id)
         return participant_id in self.armed
+
+    def cancel_listening(self, participant_id: str) -> bool:
+        self.stopped_listening.append(participant_id)
+        return True
 
     def recent_finals(self) -> list[TranscriptSegment]:
         return list(self.recent)
@@ -176,16 +181,23 @@ class FakeTTS:
 
 
 class FakeSpeaker:
+    """`played` gets an answer only once it finished; `cut_off` counts answers stopped midway."""
+
     def __init__(self):
         self.played: list[list] = []
         self.hold: asyncio.Event | None = None
         self.started = asyncio.Event()
+        self.cut_off = 0
 
     async def play(self, frames) -> None:
         self.started.set()
         got = [f async for f in frames]
-        if self.hold:
-            await self.hold.wait()
+        try:
+            if self.hold:
+                await self.hold.wait()
+        except asyncio.CancelledError:
+            self.cut_off += 1
+            raise
         self.played.append(got)
 
 
@@ -384,6 +396,152 @@ async def test_the_question_after_an_ask_moves_from_listening_to_working(agent, 
     assert bus.states() == ["capturing", "working", "hand_raised"]
 
 
+# hearing its name: Polaris listens as soon as someone calls it
+
+
+ALEX = {"u-alex": "Alex Chen"}
+SARAH = {"u-sarah": "Sarah Kim"}
+
+
+def details(bus: FakeBus) -> list[str]:
+    return [p.detail for p, _ in bus.on(Topic.AGENT_STATE)]
+
+
+async def test_hearing_its_name_shows_polaris_listening_to_the_speaker(agent, bus):
+    await agent.on_listening(ALEX)
+
+    assert bus.states() == ["capturing"]
+    assert details(bus) == ["Listening to Alex Chen"]
+    assert all(to is None for _, to in bus.on(Topic.AGENT_STATE))
+
+
+async def test_listening_ends_when_nobody_is_calling_polaris_any_more(agent, bus):
+    await agent.on_listening(ALEX)
+    await agent.on_listening({})
+
+    assert bus.states() == ["capturing", "idle"]
+
+
+async def test_the_question_moves_listening_straight_to_working(agent, bus):
+    """The worker hands on the question and the end of listening together: never idle between."""
+    await agent.on_listening(ALEX)
+
+    await asyncio.gather(agent.on_invocation(invocation()), agent.on_listening({}))
+
+    assert bus.states() == ["capturing", "working", "hand_raised"]
+
+
+async def test_listening_while_an_answer_waits_goes_back_to_the_raised_hand(agent, bus):
+    await card_for(agent, bus)
+    await agent.on_listening(SARAH)
+    await agent.on_listening({})
+
+    assert bus.states() == ["working", "hand_raised", "capturing", "hand_raised"]
+
+
+async def test_someone_calling_polaris_while_it_works_is_listened_to_once_the_answer_is_in(
+    agent, bus, brain
+):
+    answered = asyncio.Event()
+    invoke = brain.invoke
+
+    async def slow_invoke(inv, recent):
+        await answered.wait()
+        return await invoke(inv, recent)
+
+    brain.invoke = slow_invoke
+    working = asyncio.create_task(agent.on_invocation(invocation()))
+    await until(lambda: bus.states() == ["working"])
+    await agent.on_listening(SARAH)
+    assert bus.states() == ["working"]
+
+    answered.set()
+    await working
+
+    assert bus.states() == ["working", "capturing"]
+    assert details(bus)[-1] == "Listening to Sarah Kim"
+
+
+async def test_someone_calling_polaris_while_it_speaks_is_listened_to_once_it_stops(
+    agent, bus, speaker
+):
+    card = await card_for(agent, bus)
+    speaker.hold = asyncio.Event()
+    speaking = asyncio.create_task(
+        bus.deliver(Topic.RESPONSE_ACTION, act(card, "speak"), "u-sarah")
+    )
+    await until(lambda: bus.states()[-1] == "speaking")
+    await agent.on_listening(ALEX)
+    assert bus.states()[-1] == "speaking"
+
+    speaker.hold.set()
+    await speaking
+
+    assert bus.states()[-1] == "capturing"
+
+
+async def test_speak_works_while_polaris_listens_to_someone(agent, bus, tts):
+    card = await card_for(agent, bus)
+    await agent.on_listening(ALEX)
+
+    await bus.deliver(Topic.RESPONSE_ACTION, act(card, "speak"), "u-sarah")
+
+    assert len(tts.calls) == 1
+    assert bus.states()[-3:] == ["capturing", "speaking", "capturing"]
+
+
+async def test_a_question_asked_while_polaris_speaks_shows_working_not_speaking(
+    agent, bus, brain, speaker
+):
+    card = await card_for(agent, bus)
+    speaker.hold = asyncio.Event()
+    speaking = asyncio.create_task(
+        bus.deliver(Topic.RESPONSE_ACTION, act(card, "speak"), "u-sarah")
+    )
+    await until(lambda: bus.states()[-1] == "speaking")
+    answered = asyncio.Event()
+    invoke = brain.invoke
+
+    async def slow_invoke(inv, recent):
+        await answered.wait()
+        return await invoke(inv, recent)
+
+    brain.invoke = slow_invoke
+    working = asyncio.create_task(agent.on_invocation(invocation()))
+    await until(lambda: bus.states()[-1] == "working")
+    speaker.hold.set()
+    await speaking
+    assert bus.states()[-1] == "working"
+
+    answered.set()
+    await working
+    assert bus.states()[-1] == "hand_raised"
+
+
+async def test_a_chat_question_leaves_polaris_listening_to_its_asker_by_voice(agent, bus):
+    """The voice wait belongs to the transcription; only a spoken question ends it."""
+    await agent.on_listening(ALEX)
+
+    await agent.on_invocation(invocation(via="chat"))
+
+    assert bus.states()[-1] == "capturing"
+
+
+async def test_the_ask_button_and_a_voice_call_together_show_the_ask(agent, bus):
+    await bus.deliver(Topic.ASK, AskSignal(by_id="u-sarah"), "u-sarah")
+    await agent.on_listening(ALEX)
+
+    assert details(bus)[-1] == "Listening for a question"
+
+
+async def test_cancel_stops_listening_to_the_pressers_voice_too(agent, bus, transcription):
+    await agent.on_listening(ALEX)
+
+    await bus.deliver(Topic.ASK, AskSignal(by_id="u-alex", cancel=True), "u-alex")
+
+    assert transcription.stopped_listening == ["u-alex"]
+
+
 # answering
 
 
@@ -505,6 +663,79 @@ async def test_two_speak_clicks_speak_once(agent, bus, tts, speaker):
     assert len(tts.calls) == 1
 
 
+async def test_the_card_says_it_is_being_spoken_while_the_audio_plays(agent, bus, speaker):
+    card = await card_for(agent, bus)
+    speaker.hold = asyncio.Event()
+
+    task = asyncio.create_task(bus.deliver(Topic.RESPONSE_ACTION, act(card, "speak"), "u-sarah"))
+    await speaker.started.wait()
+    assert bus.cards()[-1].status == "speaking"  # the board shows Stop
+    speaker.hold.set()
+    await task
+
+    assert [c.status for c in bus.cards()] == ["pending", "speaking", "spoken"]
+
+
+# stopping Polaris mid-answer
+
+
+async def start_speaking(agent, bus, speaker) -> tuple[ResponseCard, asyncio.Task]:
+    card = await card_for(agent, bus)
+    speaker.hold = asyncio.Event()  # the answer is long: it plays until stopped
+    task = asyncio.create_task(bus.deliver(Topic.RESPONSE_ACTION, act(card, "speak"), "u-sarah"))
+    await speaker.started.wait()
+    await asyncio.sleep(0)
+    return card, task
+
+
+async def test_pressing_stop_cuts_polaris_off_mid_answer(agent, bus, speaker):
+    card, speaking = await start_speaking(agent, bus, speaker)
+
+    await bus.deliver(Topic.RESPONSE_ACTION, act(card, "stop", by="u-alex"), "u-alex")
+    await asyncio.wait_for(speaking, 1)
+
+    assert speaker.cut_off == 1
+    assert speaker.played == []  # it never got to the end of the answer
+    assert bus.cards()[-1].status == "pending"  # back to an answer waiting
+    assert bus.states()[-1] == "hand_raised"
+
+
+async def test_a_stopped_answer_can_be_spoken_again(agent, bus, speaker, tts):
+    card, speaking = await start_speaking(agent, bus, speaker)
+    await bus.deliver(Topic.RESPONSE_ACTION, act(card, "stop"), "u-sarah")
+    await asyncio.wait_for(speaking, 1)
+
+    speaker.hold = None
+    await bus.deliver(Topic.RESPONSE_ACTION, act(card, "speak"), "u-sarah")
+
+    assert len(tts.calls) == 2
+    assert speaker.played == [["frame-0", "frame-1", "frame-2"]]
+    assert bus.cards()[-1].status == "spoken"
+
+
+async def test_stop_on_an_answer_that_is_not_being_spoken_does_nothing(agent, bus, speaker):
+    card = await card_for(agent, bus)
+    states = bus.states()
+
+    await bus.deliver(Topic.RESPONSE_ACTION, act(card, "stop"), "u-sarah")
+
+    assert [c.status for c in bus.cards()] == ["pending"]
+    assert bus.states() == states
+    assert speaker.cut_off == 0
+
+
+async def test_stop_follows_who_may_act_on_the_card(agent, bus, brain, speaker):
+    card, speaking = await start_speaking(agent, bus, speaker)
+    brain.allowed = {"u-alex"}  # the host
+
+    await bus.deliver(Topic.RESPONSE_ACTION, act(card, "stop"), "u-sarah")
+    assert bus.cards()[-1].status == "speaking"  # refused: still speaking
+
+    await bus.deliver(Topic.RESPONSE_ACTION, act(card, "stop", by="u-alex"), "u-alex")
+    await asyncio.wait_for(speaking, 1)
+    assert speaker.cut_off == 1
+
+
 async def test_a_failed_speech_leaves_the_card_pending_and_says_so(agent, bus, tts, speaker):
     tts.error = SpeechFailed("ElevenLabs refused the speech request (401)")
     card = await card_for(agent, bus)
@@ -512,7 +743,7 @@ async def test_a_failed_speech_leaves_the_card_pending_and_says_so(agent, bus, t
     await bus.deliver(Topic.RESPONSE_ACTION, act(card, "speak"), "u-sarah")
 
     assert speaker.played == []
-    assert [c.status for c in bus.cards()] == ["pending"]
+    assert [c.status for c in bus.cards()] == ["pending", "speaking", "pending"]
     assert bus.states() == ["working", "hand_raised", "speaking", "hand_raised"]
     assert "couldn't speak" in bus.on(Topic.AGENT_STATE)[-1][0].detail.lower()
 

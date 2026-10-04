@@ -236,7 +236,9 @@ function RoomView({
   };
 
   // ---- the shared answer card
-  const card = [...cards].reverse().find((c) => c.status === "pending" && !dismissed.includes(c.id)) ?? null;
+  // An answer waiting, or the one being spoken (which shows Stop).
+  const card =
+    [...cards].reverse().find((c) => (c.status === "pending" || c.status === "speaking") && !dismissed.includes(c.id)) ?? null;
   const cardKey = card ? `${card.id}:${card.status}` : "";
   useEffect(() => {
     setBusyCard(null);

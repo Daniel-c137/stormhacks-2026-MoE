@@ -2,7 +2,8 @@
 
 Audio goes up as 16-bit 16 kHz mono PCM in 0.1 s base64 chunks (wss .../v1/speech-to-text/
 realtime, audio_format=pcm_16000). Scribe's voice activity detection commits each utterance
-(commit_strategy=vad): partial_transcript messages become partial pieces and each
+(commit_strategy=vad, after vad_silence_threshold_secs of silence when one is configured):
+partial_transcript messages become partial pieces and each
 committed_transcript_with_timestamps becomes the final piece, timed by its words. Scribe sends
 every commit twice; the copy without timestamps is ignored. When the input ends the last utterance
 is committed by hand and its final awaited; if none comes, the last partial is kept as the final.
@@ -180,6 +181,7 @@ class ScribeSTT:
         connect: Connect = websocket_connect,
         finalize_seconds: float = 3.0,
         keepalive_seconds: float = 10.0,
+        vad_silence_seconds: float | None = None,
     ):
         self._api_key = api_key
         self._model = model
@@ -189,6 +191,7 @@ class ScribeSTT:
         self._connect = connect
         self._finalize_seconds = finalize_seconds
         self._keepalive_seconds = keepalive_seconds
+        self._vad_silence_seconds = vad_silence_seconds
 
     def realtime_url(self) -> str:
         base = self._url.rstrip("/").replace("https://", "wss://", 1).replace("http://", "ws://", 1)
@@ -196,6 +199,11 @@ class ScribeSTT:
             ("model_id", self._model),
             ("audio_format", f"pcm_{SCRIBE_SAMPLE_RATE}"),
             ("commit_strategy", "vad"),
+            *(
+                (("vad_silence_threshold_secs", f"{self._vad_silence_seconds:g}"),)
+                if self._vad_silence_seconds
+                else ()
+            ),
             ("include_timestamps", "true"),
             *(
                 (("language_code", self._language),)

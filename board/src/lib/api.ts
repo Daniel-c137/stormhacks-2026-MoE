@@ -12,12 +12,14 @@ import type {
   CreateAccountRequest,
   CreateAccountResponse,
   ConnectorsUpdate,
+  GitHubAccountConnect,
   JiraAccountConnect,
   CreateMeetingRequest,
   Decision,
   InviteRequest,
   JoinMeetingResponse,
   Meeting,
+  MeetingPresence,
   PasswordChange,
   Person,
   ProfileUpdate,
@@ -119,6 +121,8 @@ export const createMeeting = (body: CreateMeetingRequest) => request<Meeting>("P
 export const listMeetings = () => get<Meeting[]>("/meetings");
 export const getMeeting = (meetingId: string) => get<Meeting>(`/meetings/${id(meetingId)}`);
 export const joinMeeting = (code: string) => request<JoinMeetingResponse>("POST", `/meetings/join/${id(code)}`);
+/** Who is in the room now, for the lobby; participant_ids is everyone who ever joined. */
+export const getPresence = (meetingId: string) => get<MeetingPresence>(`/meetings/${id(meetingId)}/presence`);
 export const endMeeting = (meetingId: string) => request<Meeting>("POST", `/meetings/${id(meetingId)}/end`);
 export const invite = (meetingId: string, body: InviteRequest) =>
   request<Meeting>("POST", `/meetings/${id(meetingId)}/invitees`, body);
@@ -185,4 +189,8 @@ export const updateConnectors = (body: ConnectorsUpdate) => request<TeamSettings
 export const connectJiraAccount = (body: JiraAccountConnect) => request<TeamSettings>("PUT", "/settings/jira/account", body);
 /** Admins only: forgets the team's Jira account and its token. */
 export const disconnectJiraAccount = () => request<TeamSettings>("DELETE", "/settings/jira/account");
+/** Admins only: connects GitHub with a fine-grained token. The brain checks it with GitHub first. */
+export const connectGitHubAccount = (body: GitHubAccountConnect) => request<TeamSettings>("PUT", "/settings/github/account", body);
+/** Admins only: forgets the team's GitHub token; its repositories are then read without it. */
+export const disconnectGitHubAccount = () => request<TeamSettings>("DELETE", "/settings/github/account");
 export const listVoices = () => get<Voice[]>("/voices");

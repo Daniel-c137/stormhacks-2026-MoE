@@ -166,3 +166,13 @@ def test_a_sentence_still_going_waits_one_and_a_half_seconds_and_failures_pause_
 
     assert settings.translation_provisional_seconds == 1.5
     assert settings.translation_pause_seconds == 45
+
+
+def test_scribes_silence_threshold_defaults_to_one_second_within_what_scribe_accepts():
+    """Scribe refuses a session outside 0.3 to 3.0 s, which would end everyone's captions."""
+    assert Settings(_env_file=None).elevenlabs_vad_silence_seconds == 1.0
+    for accepted in (0.3, 3.0):
+        Settings(_env_file=None, elevenlabs_vad_silence_seconds=accepted)
+    for refused in (0.2, 3.5):
+        with pytest.raises(ValueError):
+            Settings(_env_file=None, elevenlabs_vad_silence_seconds=refused)

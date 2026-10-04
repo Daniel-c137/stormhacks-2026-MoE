@@ -14,8 +14,14 @@ export interface AgendaItem {
   // Timekeeping during the meeting; times are seconds from the meeting start.
   discussed_s?: number; // talk time attributed to this item so far
   nudged_t?: number | null; // when the agent nudged that it had not come up; once at most
+  // The end of the last thing said about it, as the tracker labelled it. Null until it comes
+  // up, and again once a person reopens it: the tracker only covers an item that has come up
+  // since.
+  last_discussed_t?: number | null;
   // Who marked it covered: a person id, or AGENT_PARTICIPANT_ID when the tracker did. Null
-  // while it is not covered. covered_t is when; null if the meeting had not started.
+  // while it is not covered. covered_t is when: for the tracker, when the item's discussion
+  // ended (not when it noticed); for a person, when they ticked it. null if the meeting had
+  // not started.
   covered_by?: string | null;
   covered_t?: number | null;
 }
@@ -26,7 +32,7 @@ export interface Agenda {
   generated_at: string; // ISO 8601
   updated_at?: string | null; // ISO 8601; last human edit
   current_item_id?: string | null; // being discussed now; null when off the agenda
-  tracked_until?: number | null; // transcript seconds tracked so far; null before any
+  tracked_until?: number | null; // end of the last caption tracked; null before any
   revision?: number; // bumped by every save; 0 until first saved
 }
 

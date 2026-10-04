@@ -33,6 +33,7 @@ from .db import connection
 from .store import (
     Conflict,
     FactCheckState,
+    GitHubAccount,
     JiraAccount,
     Login,
     NotFound,
@@ -76,6 +77,7 @@ LOGIN = "person_id, email, password_hash, created_at, updated_at"
 JIRA_ACCOUNT = (
     "team_id, site, project, issue_type_id, email, sealed_token, connected_by, connected_at"
 )
+GITHUB_ACCOUNT = "team_id, login, sealed_token, connected_by, connected_at"
 # Newest first by started_at, or scheduled_start before it starts; ties in creation order.
 NEWEST_MEETING_FIRST = "coalesce(m.started_at, m.scheduled_start) desc nulls last, m.seq"
 REPORT_ROWS = ("meeting_id", "summary", "tasks", "decisions")
@@ -308,6 +310,29 @@ class PostgresStore:
     async def delete_jira_account(self, team_id: str) -> None:
         async with self._tx() as cur:
             await cur.execute("delete from jira_accounts where team_id = %s", [team_id])
+
+    async def github_account(self, team_id: str) -> GitHubAccount | None:
+        async with self._tx() as cur:
+            row = await self._one(
+                cur, f"select {GITHUB_ACCOUNT} from github_accounts where team_id = %s", [team_id]
+            )
+        return GitHubAccount.model_validate(_utc(row)) if row else None
+
+    async def save_github_account(self, account: GitHubAccount) -> GitHubAccount:
+        async with self._tx() as cur:
+            await self._team(cur, account.team_id)
+            await cur.execute(
+                f"insert into github_accounts ({GITHUB_ACCOUNT})"
+                " values (%(team_id)s, %(login)s, %(sealed_token)s, %(connected_by)s,"
+                " %(connected_at)s)"
+                f" on conflict (team_id) do update set {_from_excluded(GITHUB_ACCOUNT)}",
+                account.model_dump(),
+            )
+        return account.model_copy()
+
+    async def delete_github_account(self, team_id: str) -> None:
+        async with self._tx() as cur:
+            await cur.execute("delete from github_accounts where team_id = %s", [team_id])
 
     # logins
 
@@ -623,7 +648,7 @@ class PostgresStore:
             items = await self._all(
                 cur,
                 "select id, title, why, owner_id, sources, status, minutes, added_by,"
-                " discussed_s, nudged_t, covered_by, covered_t from agenda_items"
+                " discussed_s, nudged_t, last_discussed_t, covered_by, covered_t from agenda_items"
                 " where meeting_id = %s order by ord",
                 [meeting_id],
             )
@@ -675,11 +700,11 @@ class PostgresStore:
         if agenda.items:
             await cur.executemany(
                 "insert into agenda_items (meeting_id, ord, id, title, why, owner_id,"
-                " sources, status, minutes, added_by, discussed_s, nudged_t, covered_by,"
-                " covered_t)"
+                " sources, status, minutes, added_by, discussed_s, nudged_t, last_discussed_t,"
+                " covered_by, covered_t)"
                 " values (%(meeting_id)s, %(ord)s, %(id)s, %(title)s, %(why)s, %(owner_id)s,"
                 " %(sources)s, %(status)s, %(minutes)s, %(added_by)s, %(discussed_s)s,"
-                " %(nudged_t)s, %(covered_by)s, %(covered_t)s)",
+                " %(nudged_t)s, %(last_discussed_t)s, %(covered_by)s, %(covered_t)s)",
                 [
                     self._agenda_item(agenda.meeting_id, i, item)
                     for i, item in enumerate(agenda.items)
