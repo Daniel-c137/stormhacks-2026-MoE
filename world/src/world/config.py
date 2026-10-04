@@ -2,7 +2,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 WORLD_ROOT = Path(__file__).resolve().parents[2]
@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     world_github_mcp_port: int = 8101
     world_jira_mcp_port: int = 8102
     world_overlay_dir: Path = OVERLAY_DIR
+    # world-seed: at most this many texts embedded a minute (Gemini's free tier allows 100)
+    world_seed_embeds_per_minute: int | None = Field(default=None, ge=1)
 
 
 def world_spec() -> WorldSpec:

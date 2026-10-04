@@ -14,7 +14,9 @@ import argparse
 import asyncio
 import re
 import sys
-from collections.abc import Callable, Sequence
+import time
+from collections import deque
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import date
 from typing import Literal
 
@@ -23,7 +25,17 @@ from pydantic import BaseModel
 from brain.agent.pipeline import INDEX, REPORT_STEPS, ReportPipeline
 from brain.config import Settings as BrainSettings
 from brain.db import migrate, open_pool
-from brain.llm import LLM, Embeddings, LLMUnavailable, OpenRouterLLM, make_embedder, make_llm
+from brain.llm import (
+    LLM,
+    Embedder,
+    Embeddings,
+    EmbedTask,
+    LLMError,
+    LLMUnavailable,
+    OpenRouterLLM,
+    make_embedder,
+    make_llm,
+)
 from brain.memory import MeetingMemory, PgMemoryStore
 from brain.memory.pg import DIM
 from brain.pg_store import PostgresStore
@@ -305,6 +317,52 @@ class Watched:
         return out
 
 
+class PacedEmbedder:
+    """Keeps an embedder under a quota of `per_minute` texts in any minute, waiting as needed:
+    Gemini's free tier counts each embedded text as a request. One call's texts are embedded in
+    slices and joined, and must all come from one model."""
+
+    def __init__(
+        self,
+        inner: Embedder,
+        per_minute: int,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], Awaitable[object]] = asyncio.sleep,
+    ):
+        if per_minute < 1:
+            raise ValueError("per_minute must be at least 1")
+        self.inner = inner
+        self.dim = inner.dim
+        self.per_minute = per_minute
+        self._clock = clock
+        self._sleep = sleep
+        self._sent: deque[tuple[float, int]] = deque()
+
+    async def embed(self, texts: list[str], *, task: EmbedTask = "document") -> Embeddings:
+        if not texts:
+            return await self.inner.embed(texts, task=task)
+        parts: list[Embeddings] = []
+        for start in range(0, len(texts), self.per_minute):
+            batch = texts[start : start + self.per_minute]
+            await self._wait_for(len(batch))
+            parts.append(await self.inner.embed(batch, task=task))
+        models = sorted({p.model for p in parts})
+        if len(models) > 1:
+            raise LLMError(f"Embeddings came from different models ({', '.join(models)})")
+        return Embeddings(model=models[0], vectors=[v for p in parts for v in p.vectors])
+
+    async def _wait_for(self, count: int) -> None:
+        while True:
+            now = self._clock()
+            while self._sent and now - self._sent[0][0] >= 60:
+                self._sent.popleft()
+            if sum(n for _, n in self._sent) + count <= self.per_minute:
+                break
+            await self._sleep(60 - (now - self._sent[0][0]))
+        self._sent.append((self._clock(), count))
+
+
 def describe(result: Seeded) -> str:
     return f"{result.day.isoformat()} {result.title}"
 
@@ -348,6 +406,8 @@ def main(argv: list[str] | None = None) -> int:
             f" {DIM}-dimension vectors"
         )
     meetings = snapshot_meetings(args.snapshot)
+    if per_minute := Settings().world_seed_embeds_per_minute:
+        embedder = PacedEmbedder(embedder, per_minute=per_minute)
     jira_site = settings.jira_base_url or JIRA_SITE
 
     async def run() -> int:

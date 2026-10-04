@@ -650,7 +650,12 @@ async def test_paced_embeddings_never_send_more_texts_in_a_minute_than_allowed()
 
     assert embedded == await MockEmbedder().embed(texts)  # same vectors, in order, one model
     assert again.vectors == (await MockEmbedder().embed(["one more"])).vectors
-    assert inner.batches == [(1000.0, 100), (1060.0, 100), (1120.0, 50), (1180.0, 1)]
+    assert inner.batches == [
+        (1000.0, 100),
+        (1060.0, 100),
+        (1120.0, 50),
+        (1120.0, 1),
+    ]  # 51 in that minute
     assert paced.dim == inner.dim
     assert inner.calls[-1] == (["one more"], "query")
 
