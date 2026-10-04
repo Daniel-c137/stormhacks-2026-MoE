@@ -24,6 +24,7 @@ const GOOGLE_ERRORS: Record<string, string> = {
   cancelled: "Google sign-in was cancelled.",
   state: "That sign-in didn't start in this browser. Try again.",
   not_invited: "That Google account hasn't been invited. Ask your team's admin to add you.",
+  ambiguous: "More than one team invited that email. Ask your team's admin.",
   unverified: "Google hasn't verified that email address.",
   failed: "Google sign-in didn't work. Try again.",
 };
@@ -39,7 +40,8 @@ function authProblem(err: unknown, mode: Mode | "google"): string {
   if (err instanceof LoginError) {
     if (err.status === 401) return mode === "google" ? GOOGLE_ERRORS.failed : "That email and password don't match an account.";
     if (err.status === 403) return "That email hasn't been invited. Ask your team's admin to add you.";
-    if (err.status === 409) return "An account already uses that email. Sign in instead.";
+    // An account already uses the email, or more than one team invited it: the brain says which.
+    if (err.status === 409) return err.message;
     if (err.status === 429)
       return err.retryAfter ? `Too many failed attempts. Try again in ${waitText(err.retryAfter)}.` : "Too many failed attempts. Try again later.";
     if (err.status === 503) return `This isn't available right now: ${err.message}`;
@@ -140,8 +142,7 @@ export function LoginForm() {
     void run(() => signUp(fullName.trim(), email.trim(), password));
   };
 
-  const onForgot = () =>
-    setNotice({ kind: "info", text: `Your team's admin can reset your ${identity.product_name} password.` });
+  const onForgot = () => setNotice({ kind: "info", text: "Ask your team's admin." });
 
   if (!apiConfigured()) {
     return (
