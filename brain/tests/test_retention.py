@@ -7,9 +7,16 @@ import pytest
 from pydantic import ValidationError
 
 from brain.config import Settings
+from brain.db import migrate
 from brain.llm.mock import MockEmbedder
-from brain.memory import InMemoryMemoryStore, MeetingMemory
-from brain.retention import purge_transcripts, transcripts_due
+from brain.memory import InMemoryMemoryStore, MeetingMemory, PgMemoryStore
+from brain.pg_store import PostgresStore
+from brain.retention import (
+    RetentionUnavailable,
+    open_retention_stores,
+    purge_transcripts,
+    transcripts_due,
+)
 from brain.store import InMemoryStore
 from contracts import Person, Report, TaskDraft, Team, TranscriptSegment
 
@@ -238,3 +245,46 @@ def test_retention_defaults_to_fourteen_days():
 def test_retention_below_one_day_is_refused():
     with pytest.raises(ValidationError):
         Settings(_env_file=None, transcript_retention_days=0)
+
+
+# the database stores retention runs against
+
+
+async def test_retention_needs_a_database():
+    with pytest.raises(RetentionUnavailable, match="DATABASE_URL is not configured"):
+        async with open_retention_stores(Settings(_env_file=None)):
+            pass
+
+
+async def test_retention_purges_postgres_and_its_memory_on_one_pool(pg_dsn):
+    await migrate(pg_dsn)
+    settings = Settings(_env_file=None, database_url=pg_dsn)
+    started = NOW - timedelta(days=20)
+
+    async with open_retention_stores(settings) as (store, memory):
+        assert isinstance(store, PostgresStore)
+        assert isinstance(memory, PgMemoryStore)
+        assert memory.pool is store.db
+        await store.create_team(TEAM.model_copy(update={"member_ids": []}))
+        await store.upsert_person(ALEX, TEAM.id)
+        meeting = await store.create_meeting(TEAM.id, "Old", ALEX.id, scheduled_start=started)
+        await store.start_meeting(meeting.id, started)
+        await store.add_segments(meeting.id, segments(meeting.id))
+        await store.transition_status(
+            meeting.id, {"live"}, "processing", at=started + timedelta(minutes=30)
+        )
+        await store.set_status(meeting.id, "needs_review")
+        await MeetingMemory(MockEmbedder(dim=memory.dim), memory).index_meeting(
+            TEAM.id, meeting.id, segments(meeting.id)
+        )
+
+        result = await purge_transcripts(store, memory, now=NOW, retention_days=14)
+
+        assert [m.id for m in result.deleted] == [meeting.id]
+        assert await store.transcript(meeting.id) == []
+        assert (await store.meeting(meeting.id)).transcript_deleted_at == NOW
+        async with memory.pool.connection() as conn:
+            cursor = await conn.execute(
+                "select count(*) from memory_chunks where meeting_id = %s", [meeting.id]
+            )
+            assert await cursor.fetchone() == (0,)
