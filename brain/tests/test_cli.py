@@ -1,8 +1,11 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from google.genai import errors as genai_errors
 
 from brain.cli import main
+from brain.llm import GeminiLLM
 from brain.report import ProcessedMeeting
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -33,6 +36,25 @@ def test_report_writes_a_review_file_with_the_mock_llm(tmp_path, capsys):
     printed = capsys.readouterr().out
     assert "MockLLM" in printed
     assert "2 task drafts" in printed
+
+
+def test_report_names_the_gemini_model_that_answered(monkeypatch, tmp_path, capsys):
+    extraction = (FIXTURES / "standup.extraction.json").read_text()
+
+    class Models:
+        async def generate_content(self, *, model, contents, config):
+            if model == "busy-model":
+                raise genai_errors.APIError(503, {"error": {"status": "UNAVAILABLE"}})
+            return SimpleNamespace(text=extraction, parsed=None)
+
+    client = SimpleNamespace(aio=SimpleNamespace(models=Models()))
+    llm = GeminiLLM(models=["busy-model", "spare-model"], client=client)
+    monkeypatch.setattr("brain.cli.make_llm", lambda: llm)
+
+    code = main(["report", str(FIXTURES / "standup.json"), "--out", str(tmp_path / "r.json")])
+
+    assert code == 0
+    assert "Gemini spare-model" in capsys.readouterr().out
 
 
 def test_report_without_gemini_config_says_what_is_missing(monkeypatch, tmp_path):
