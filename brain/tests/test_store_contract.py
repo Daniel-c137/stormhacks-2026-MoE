@@ -28,7 +28,7 @@ from uuid import uuid4
 import anyio
 import pytest
 
-from brain.store import Conflict, FactCheckState, InMemoryStore, NotFound, Store
+from brain.store import Conflict, FactCheckState, InMemoryStore, NotFound, ReportAudio, Store
 from contracts import (
     AGENT_PARTICIPANT_ID,
     Agenda,
@@ -1183,3 +1183,46 @@ async def test_report_progress_is_none_until_saved_and_keeps_its_error(store):
 
     with pytest.raises(NotFound):
         await store.save_report_progress(running.model_copy(update={"meeting_id": new_id()}))
+
+
+# the report read aloud
+
+MP3 = b"ID3\x04\x00\x00\x00\x00\x00\x00" + b"\xff\xfb" * 32
+
+
+async def test_report_audio_is_not_found_until_saved_then_read_back(store):
+    team, alex, *_ = await two_teams(store)
+    meeting = await ended_meeting(store, team, alex, "Standup", at(0))
+    with pytest.raises(NotFound):
+        await store.report_audio(meeting.id)
+
+    saved = await store.save_report_audio(meeting.id, "key-1", "audio/mpeg", MP3)
+
+    assert saved == ReportAudio(key="key-1", content_type="audio/mpeg", data=MP3)
+    assert await store.report_audio(meeting.id) == saved
+
+
+async def test_saving_report_audio_again_replaces_it(store):
+    team, alex, *_ = await two_teams(store)
+    meeting = await ended_meeting(store, team, alex, "Standup", at(0))
+    await store.save_report_audio(meeting.id, "key-1", "audio/mpeg", MP3)
+
+    await store.save_report_audio(meeting.id, "key-2", "audio/mpeg", b"other audio")
+
+    assert await store.report_audio(meeting.id) == ReportAudio(
+        key="key-2", content_type="audio/mpeg", data=b"other audio"
+    )
+
+
+async def test_report_audio_belongs_to_its_meeting(store):
+    team, alex, *_ = await two_teams(store)
+    first = await ended_meeting(store, team, alex, "Standup", at(0))
+    second = await ended_meeting(store, team, alex, "Retro", at(60))
+    await store.save_report_audio(first.id, "key-1", "audio/mpeg", MP3)
+
+    with pytest.raises(NotFound):
+        await store.report_audio(second.id)
+    with pytest.raises(NotFound):
+        await store.report_audio(new_id())
+    with pytest.raises(NotFound):
+        await store.save_report_audio(new_id(), "key-1", "audio/mpeg", MP3)
