@@ -15,6 +15,7 @@ from ..accounts import (
     existing_person,
     generate_password,
     invite_person,
+    name_from_email,
     save_account,
 )
 from ..auth import hash_password
@@ -38,8 +39,10 @@ async def create_account(
     With invite, the person gets no login and the password is None: they sign up themselves."""
     team = await user_team(store, admin)
     try:
-        name = clean_name(body.name)
         email = clean_email(body.email)
+        # An invite needs only the email; they choose their own name when they sign up.
+        given = (body.name or "").strip()
+        name = clean_name(given) if given or not body.invite else name_from_email(email)
     except InvalidAccount as e:
         raise HTTPException(status_code=422, detail=str(e)) from None
     title = " ".join((body.title or "").split()) or None
@@ -57,7 +60,9 @@ async def create_account(
         person = await invite_person(
             store, team, name=name, email=email, title=title, is_admin=body.is_admin
         )
-        return CreateAccountResponse(person=person, password=None)
+        return CreateAccountResponse(
+            person=person.model_copy(update={"invited": True}), password=None
+        )
     password = generate_password()
     hashed = await run_in_threadpool(hash_password, password)  # argon2 is deliberately slow
     try:

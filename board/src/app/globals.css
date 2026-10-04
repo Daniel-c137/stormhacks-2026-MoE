@@ -700,11 +700,9 @@
   .member-name { font-size: 14px; font-weight: 700; }
   .member-email { min-width: 0; max-width: 100%; font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .member-role { font-size: 12px; font-weight: 600; color: var(--muted); padding: 0 9px; }
-  .member-add { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.3fr) 120px auto; gap: 8px; align-items: center; padding: 4px 0 12px; }
+  .member-add { display: grid; grid-template-columns: minmax(0,1fr) 120px auto; gap: 8px; align-items: center; padding: 4px 0 12px; }
   .member-add .field { height: 40px; border-radius: 12px; }
   .member-add-acts { display: flex; gap: 6px; justify-content: flex-end; }
-  .member-add .seg { grid-column: 1 / -1; }
-  .member-add .seg button { height: 34px; padding: 0 12px; }
   .badge-invited { background: transparent; box-shadow: inset 0 0 0 1px var(--line-2); color: var(--muted); }
   .member-msg { padding: 0 0 10px; }
   .once { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; padding: 8px 8px 8px 14px; border-radius: 14px; background: var(--soft); font-size: 14px; }
@@ -742,8 +740,6 @@
     .room-notes, .room-notes[data-chat="false"] { top: 76px; right: 12px; width: min(380px, calc(100% - 24px)); }
     .at-label { display: none; }
     .task-fields, .two, .srow, .sched-grid, .member-add { grid-template-columns: minmax(0,1fr); }
-    .member-add .seg button { flex: 1 1 auto; min-width: 0; padding: 0 8px; }
-    .member-add .seg svg { display: none; }
     .rep-wrap, .settings-body { padding-left: 16px; padding-right: 16px; }
     .conn-row:not(.conn-edit) { display: grid; grid-template-columns: auto minmax(0,1fr) auto; grid-template-areas: "icon name more" "icon state more"; column-gap: 10px; row-gap: 2px; padding: 8px 0; }
     .conn-row > .conn-icon { grid-area: icon; }

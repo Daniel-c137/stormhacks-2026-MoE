@@ -49,7 +49,7 @@ export interface PasswordChange {
 
 /** POST /team/accounts, admin only: a person on the admin's own team with an email login. */
 export interface CreateAccountRequest {
-  name: string;
+  name?: string | null; // optional for an invite: they choose their own name when signing up
   email: string;
   title?: string | null;
   is_admin?: boolean;

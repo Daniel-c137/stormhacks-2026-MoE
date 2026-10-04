@@ -66,9 +66,10 @@ class PasswordChange(BaseModel):
 class CreateAccountRequest(BaseModel):
     """POST /team/accounts, admin only: a person on the admin's own team with an email login.
     With invite, the person gets no login: they create it themselves on the sign-in page, with
-    a password or Google (SignupRequest)."""
+    a password or Google (SignupRequest). An invite needs only the email: without a name the
+    person shows under one made from it until they choose their own when signing up."""
 
-    name: str
+    name: str | None = None
     email: str
     title: str | None = None
     is_admin: bool = False

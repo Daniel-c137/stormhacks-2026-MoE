@@ -22,12 +22,14 @@ from contracts import (
 )
 
 from ..accounts import (
+    MAX_NAME_LENGTH,
     InvalidAccount,
     InvitedTwice,
     accept_invite,
     clean_email,
     clean_name,
     invited_person,
+    name_from_email,
 )
 from ..auth import (
     MAX_PASSWORD,
@@ -281,7 +283,7 @@ async def google_callback(
                 keys=keys,
                 http=http,
             )
-        person = await google_person(store, identity.email)
+        person = await google_person(store, identity.email, identity.name)
         if person is None:
             raise GoogleSignInFailed("not_invited", identity.email)
     except GoogleSignInFailed as e:
@@ -301,7 +303,7 @@ async def google_callback(
     return response
 
 
-async def google_person(store: Store, email: str) -> Person | None:
+async def google_person(store: Store, email: str, google_name: str | None = None) -> Person | None:
     """Whoever signs in with this email, else the person invited with it, whose login is then
     reserved with a password nobody knows: the account is theirs through Google, and nobody can
     sign up for that email with a password. None for anyone else. Raises GoogleSignInFailed
@@ -319,7 +321,10 @@ async def google_person(store: Store, email: str) -> Person | None:
     person, _ = invited
     unusable = await run_in_threadpool(hash_password, secrets.token_urlsafe(32))
     try:
-        return await accept_invite(store, person, unusable)
+        # Someone invited by email only takes Google's name; a name the admin gave is kept.
+        stand_in = person.name == name_from_email(person.email or email)
+        name = " ".join((google_name or "").split())[:MAX_NAME_LENGTH] if stand_in else None
+        return await accept_invite(store, person, unusable, name=name or None)
     except Conflict:  # someone signed up for the email meanwhile: that account is the email's
         pass
     try:
