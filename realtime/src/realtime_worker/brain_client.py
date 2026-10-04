@@ -17,6 +17,8 @@ from contracts import (
     KeytermsResponse,
     SegmentsIngest,
     TranscriptSegment,
+    TranslateRequest,
+    TranslateResponse,
     WorkerMeetingResponse,
 )
 
@@ -26,7 +28,12 @@ log = logging.getLogger(__name__)
 
 
 class BrainUnavailable(RuntimeError):
-    """The brain is not configured or did not answer after every attempt."""
+    """The brain is not configured or did not answer after every attempt. status is the last
+    HTTP status it answered with (503: what it needs isn't configured), None if it never did."""
+
+    def __init__(self, message: str, *, status: int | None = None):
+        super().__init__(message)
+        self.status = status
 
 
 class BrainRejected(RuntimeError):
@@ -72,6 +79,10 @@ class BrainClient(Protocol):
         self, meeting_id: str, participant_id: str, since: float, until: float
     ) -> CatchUpResponse: ...
 
+    async def translate(
+        self, meeting_id: str, text: str, language: str | None
+    ) -> TranslateResponse: ...
+
 
 class HttpBrainClient:
     """Retries only idempotent calls: network failures and transient statuses, with backoff.
@@ -89,6 +100,7 @@ class HttpBrainClient:
         backoff: float = 0.5,
         timeout: float = 5.0,
         invoke_timeout: float = 30.0,
+        translate_timeout: float = 4.0,
     ):
         self._http = httpx.AsyncClient(
             base_url=base_url,
@@ -99,6 +111,7 @@ class HttpBrainClient:
         self._attempts = max(1, attempts)
         self._backoff = backoff
         self._invoke_timeout = invoke_timeout
+        self._translate_timeout = translate_timeout
 
     async def ingest_segments(self, meeting_id: str, segments: list[TranscriptSegment]) -> None:
         if not segments:
@@ -182,6 +195,20 @@ class HttpBrainClient:
         )
         return CatchUpResponse.model_validate_json(response.content)
 
+    async def translate(
+        self, meeting_id: str, text: str, language: str | None
+    ) -> TranslateResponse:
+        """Speech into English for a live caption (#106). One attempt with a short timeout: a
+        caption that arrives late is worse than the original shown untranslated."""
+        body = TranslateRequest(text=text, language=language).model_dump(mode="json")
+        response = await self._post(
+            f"/internal/meetings/{meeting_id}/translate",
+            body,
+            idempotent=False,
+            timeout=self._translate_timeout,
+        )
+        return TranslateResponse.model_validate_json(response.content)
+
     async def aclose(self) -> None:
         await self._http.aclose()
 
@@ -203,6 +230,7 @@ class HttpBrainClient:
         """The response on success, or on a status in `keep`."""
         attempts = self._attempts if idempotent else 1
         last = "no attempt made"
+        status: int | None = None
         for attempt in range(attempts):
             if attempt:
                 await asyncio.sleep(self._backoff * 2 ** (attempt - 1))
@@ -211,14 +239,16 @@ class HttpBrainClient:
                     method, path, json=body, timeout=timeout or httpx.USE_CLIENT_DEFAULT
                 )
             except httpx.TransportError as e:
-                last = type(e).__name__
+                last, status = type(e).__name__, None
                 continue
             if response.is_success or response.status_code in keep:
                 return response
             if response.status_code not in RETRYABLE:
                 raise BrainRejected(response.status_code, short_detail(response))
-            last = f"HTTP {response.status_code}"
-        raise BrainUnavailable(f"{method} {path} failed after {attempts} attempt(s) ({last})")
+            last, status = f"HTTP {response.status_code}", response.status_code
+        raise BrainUnavailable(
+            f"{method} {path} failed after {attempts} attempt(s) ({last})", status=status
+        )
 
 
 def short_detail(response: httpx.Response) -> str:

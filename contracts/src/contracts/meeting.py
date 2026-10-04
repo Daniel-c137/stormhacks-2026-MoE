@@ -46,6 +46,10 @@ class Meeting(BaseModel):
     jira_keys: list[str] = []
     transcript_deleted_at: datetime | None = None  # set once retention removed the segments
     agent_joined_at: datetime | None = None  # when the agent first joined; None if it never did
+    # Live translation of non-English speech into English (#106). Off unless the host turns it
+    # on before anyone joins: turning it on approves sending the meeting's non-English speech
+    # to the model as it's spoken. The worker reads it once, when it opens the meeting.
+    translate: bool = False
 
 
 class Participant(BaseModel):

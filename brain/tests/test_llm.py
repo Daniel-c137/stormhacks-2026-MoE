@@ -7,7 +7,14 @@ from google.genai import errors as genai_errors
 from pydantic import BaseModel
 
 from brain.config import Settings
-from brain.llm import FallbackLLM, LLMError, LLMOutOfCapacity, LLMUnavailable, make_llm
+from brain.llm import (
+    FallbackLLM,
+    LLMError,
+    LLMOutOfCapacity,
+    LLMUnavailable,
+    make_llm,
+    make_translation_llm,
+)
 from brain.llm.gemini import GeminiLLM
 from brain.llm.mock import MockLLM
 from brain.llm.openrouter import OpenRouterLLM
@@ -403,6 +410,44 @@ def test_retry_settings_default_to_two_attempts_and_no_fallbacks(monkeypatch):
     assert s.gemini_attempts == 2
     assert s.gemini_max_delay <= 5
     assert s.gemini_fallback_models is None
+
+
+# translation (#106 review): cheap, single attempt, never a paid fallback on a quota error
+
+
+def test_translation_runs_on_its_own_model_with_one_attempt_and_no_fallback(recorded_clients):
+    llm = make_translation_llm(
+        settings(
+            gemini_api_key="k",
+            gemini_model="main",
+            gemini_fallback_models="other",
+            translation_model="lite",
+            openrouter_api_key="or-key",
+            openrouter_models="some/model",
+        )
+    )
+
+    assert isinstance(llm, GeminiLLM)  # not a FallbackLLM: no OpenRouter bill for a caption
+    assert llm.models == ("lite",)
+    assert recorded_clients[-1]["http_options"].retry_options.attempts == 1
+
+
+def test_translation_uses_the_main_gemini_model_unless_given_its_own():
+    llm = make_translation_llm(settings(gemini_api_key="k", gemini_model="main"))
+
+    assert isinstance(llm, GeminiLLM)
+    assert llm.models == ("main",)
+
+
+def test_translation_uses_openrouter_only_when_there_is_no_gemini():
+    llm = make_translation_llm(settings(openrouter_api_key="or-key", openrouter_models="a/b"))
+
+    assert isinstance(llm, OpenRouterLLM)
+
+
+def test_translation_is_unavailable_without_any_model():
+    with pytest.raises(LLMUnavailable):
+        make_translation_llm(settings())
 
 
 async def test_mock_reports_itself_as_the_model():

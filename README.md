@@ -62,7 +62,7 @@ With `NEXT_PUBLIC_API_URL=/api` (as in `.env.example`), `next dev` forwards `/ap
 
 `uv run world-reset` clears the mocks' write journal.
 
-The realtime worker joins every meeting as the agent: `uv run realtime start` (or `dev` to reload on changes). It needs `LIVEKIT_*`, `ELEVENLABS_API_KEY`, `ELEVENLABS_STT_MODEL` (e.g. `scribe_v2_realtime`), `ELEVENLABS_TTS_MODEL`, `ELEVENLABS_VOICE_ID`, `BRAIN_URL` and `BRAIN_INTERNAL_TOKEN`, and exits naming whatever is missing. LiveKit dispatches it automatically to each room created while it is registered, so start it before people join; it leaves any room that is not a live meeting.
+The realtime worker joins every meeting as the agent: `uv run realtime start` (or `dev` to reload on changes). It needs `LIVEKIT_*`, `ELEVENLABS_API_KEY`, `ELEVENLABS_STT_MODEL` (e.g. `scribe_v2_realtime`), `ELEVENLABS_TTS_MODEL`, `ELEVENLABS_VOICE_ID`, `BRAIN_URL` and `BRAIN_INTERNAL_TOKEN`, and exits naming whatever is missing. When the host turns on live translation for a meeting (off by default, set before anyone joins), speech in another language is shown and saved in English: Scribe detects each utterance's language and the brain translates it with its LLM. Without it, Scribe is pinned to `ELEVENLABS_STT_LANGUAGE` (default `en`). Translation runs on `TRANSLATION_MODEL` (default `GEMINI_MODEL`) with one attempt and no paid fallback; if it fails, captions show the words as said. Wake detection reads the English, so "Polaris, …" works in any language once translated; a question left untranslated (the model down) won't wake Polaris. LiveKit dispatches it automatically to each room created while it is registered, so start it before people join; it leaves any room that is not a live meeting.
 
 ## Tests
 
