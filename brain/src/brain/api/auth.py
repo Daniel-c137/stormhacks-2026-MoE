@@ -24,10 +24,10 @@ from contracts import (
 from ..accounts import (
     InvalidAccount,
     InvitedTwice,
+    accept_invite,
     clean_email,
     clean_name,
     invited_person,
-    save_account,
 )
 from ..auth import (
     MAX_PASSWORD,
@@ -190,13 +190,11 @@ async def sign_up(
     if invited is None:
         limiter.fail(email)
         raise HTTPException(status_code=403, detail=NOT_INVITED)
-    person, team = invited
+    person, _ = invited
     hashed = await run_in_threadpool(hash_password, body.password)
-    try:
-        person = await save_account(
-            store, team, name=name, email=email, password_hash=hashed, person=person
-        )
-    except Conflict:  # only a race with another sign-up for the same email gets here
+    try:  # keeps the email as invited; only the first of racing sign-ups (or Google) gets it
+        person = await accept_invite(store, person, hashed, name=name)
+    except Conflict:
         raise HTTPException(status_code=409, detail=ALREADY_SIGNED_UP) from None
     limiter.clear(email)
     token, expires_at = issue_token(person.id, settings)
@@ -302,10 +300,13 @@ async def google_person(store: Store, email: str) -> Person | None:
     person, _ = invited
     unusable = await run_in_threadpool(hash_password, secrets.token_urlsafe(32))
     try:
-        await store.set_login(person.id, person.email or email, unusable)
-    except Conflict:  # someone signed up for the email meanwhile
+        return await accept_invite(store, person, unusable)
+    except Conflict:  # someone signed up for the email meanwhile: that account is the email's
+        pass
+    try:
+        return await store.person((await store.login_by_email(email)).person_id)
+    except NotFound:
         return None
-    return person
 
 
 @router.post("/google/exchange")

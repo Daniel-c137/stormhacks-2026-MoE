@@ -18,6 +18,7 @@ from contracts import (
     Voice,
 )
 
+from ..accounts import signs_in
 from ..config import Settings
 from ..connectors import connector_statuses
 from ..gitlab import valid_project
@@ -140,17 +141,9 @@ async def list_members(
     email and no login)."""
     team = await user_team(store, user)
     return [
-        p.model_copy(update={"invited": bool(p.email) and not await has_login(store, p.id)})
+        p.model_copy(update={"invited": bool(p.email) and not await signs_in(store, p.id)})
         for p in await store.members(team.id)
     ]
-
-
-async def has_login(store: Store, person_id: str) -> bool:
-    try:
-        await store.login(person_id)
-    except NotFound:
-        return False
-    return True
 
 
 # workspace settings

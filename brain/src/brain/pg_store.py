@@ -300,6 +300,19 @@ class PostgresStore:
             raise Conflict("another person signs in with this email") from None
         return Login.model_validate(_utc(row or {}))
 
+    async def add_login(self, person_id: str, email: str, password_hash: str) -> Login:
+        async with self._tx() as cur:
+            # no conflict target: neither the person's login nor the email's may exist yet
+            row = await self._one(
+                cur,
+                "insert into logins (person_id, email, password_hash) values (%s, %s, %s)"
+                f" on conflict do nothing returning {LOGIN}",
+                [person_id, email, password_hash],
+            )
+        if row is None:
+            raise Conflict("the person or the email has a login already")
+        return Login.model_validate(_utc(row))
+
     async def login_by_email(self, email: str) -> Login:
         async with self._tx() as cur:
             row = await self._one(

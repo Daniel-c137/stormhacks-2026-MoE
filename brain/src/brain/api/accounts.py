@@ -23,7 +23,8 @@ from .deps import get_store, require_admin, user_team
 
 router = APIRouter(tags=["team"])
 
-EMAIL_IN_USE = "Someone already signs in with this email"
+EMAIL_IN_USE = "This email is already on the team or has an account"
+INVITED_ELSEWHERE = "Another team has already invited this email"
 
 
 @router.post("/team/accounts", status_code=201)
@@ -48,6 +49,10 @@ async def create_account(
         )
     if await existing_person(store, team, email) is not None:
         raise HTTPException(status_code=409, detail=EMAIL_IN_USE)
+    # A second team's invite would leave the email unable to sign up (which team?), and a login
+    # here would strand the first team's invite; nobody can remove a member yet.
+    if await store.invited_people(email):
+        raise HTTPException(status_code=409, detail=INVITED_ELSEWHERE)
     if body.invite:
         person = await invite_person(
             store, team, name=name, email=email, title=title, is_admin=body.is_admin

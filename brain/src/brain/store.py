@@ -119,6 +119,12 @@ class Store(Protocol):
         email (ignoring case); NotFound when the person is missing."""
         ...
 
+    async def add_login(self, person_id: str, email: str, password_hash: str) -> Login:
+        """Inserts the person's first login and never replaces one: Conflict when the person
+        already has a login or another login has the email (ignoring case); NotFound when the
+        person is missing. Sign-up and Google claim an invited person's login with it."""
+        ...
+
     async def login_by_email(self, email: str) -> Login:
         """Ignores case; NotFound when no login has the email."""
         ...
@@ -477,6 +483,12 @@ class InMemoryStore:
         )
         self._logins[person_id] = login
         return _copy(login)
+
+    async def add_login(self, person_id: str, email: str, password_hash: str) -> Login:
+        self._person(person_id)
+        if person_id in self._logins:
+            raise Conflict("the person has a login already")
+        return await self.set_login(person_id, email, password_hash)
 
     async def login_by_email(self, email: str) -> Login:
         for login in self._logins.values():
