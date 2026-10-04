@@ -9,13 +9,15 @@ from .room import RoomBus
 # hand_raised is an answer card waiting.
 TRANSITIONS: dict[AgentStateName, frozenset[AgentStateName]] = {
     "idle": frozenset({"capturing", "working", "hand_raised", "speaking"}),
-    "capturing": frozenset({"working", "idle", "hand_raised"}),
+    # the question came, the wait ended, or someone chose Speak meanwhile
+    "capturing": frozenset({"working", "idle", "hand_raised", "speaking"}),
     # done, and someone called the agent meanwhile
     "working": frozenset({"hand_raised", "idle", "capturing"}),
     # a new question or an Ask press while an answer is waiting
     "hand_raised": frozenset({"speaking", "idle", "working", "capturing"}),
-    # after speaking, back to idle, to another answer still waiting, or to whoever called meanwhile
-    "speaking": frozenset({"followup", "idle", "hand_raised", "capturing"}),
+    # after speaking, back to idle, to another answer still waiting, or to whoever called meanwhile;
+    # working at once when someone asks while it speaks
+    "speaking": frozenset({"followup", "idle", "hand_raised", "capturing", "working"}),
     "followup": frozenset({"capturing", "idle"}),
 }
 

@@ -89,11 +89,12 @@ class Pending:
 @dataclass
 class Hearing:
     """An utterance still being said whose words so far call the assistant, or that follows the
-    name alone or a question that trailed off. Its final decides."""
+    name alone or a question that trailed off (`waited`). Its final decides."""
 
     seg_id: str
     name: str
     until: float
+    waited: bool = False
 
 
 @dataclass
@@ -232,21 +233,37 @@ class WakeDetector:
     def on_partial(self, segment: TranscriptSegment) -> None:
         """A partial caption: listened to if its words so far call the assistant at the start of
         the utterance or of a later sentence in it, or if its speaker said the name alone or
-        trailed off and is now going on. Looser than a final, which decides: a partial often
-        lacks the comma after the name, and "Polaris is" may yet become "Polaris is down"."""
+        trailed off and is now going on. Only the final decides whether it asks.
+
+        A partial's t_start is where the speaker's previous final ended, not where they began
+        speaking again, so the waits are judged by its t_end: when it was heard. An utterance
+        begun within a wait is listened to until its final."""
         speaker = segment.speaker_id
         if segment.is_final or speaker == AGENT_PARTICIPANT_ID:
             return
         if segment.seg_id in self._cancelled:
             return
-        if self._calls(segment.text) or self._waiting(speaker, segment.t_start):
-            until = segment.t_end + HEARD_SECONDS
+        hearing = self._hearing.get(speaker)
+        going_on = hearing is not None and hearing.waited and hearing.seg_id == segment.seg_id
+        until = segment.t_end + HEARD_SECONDS
+        if self._calls(segment.text):
             self._hearing[speaker] = Hearing(segment.seg_id, segment.speaker_name, until)
+        elif going_on or self._waiting(speaker, segment.t_end):
+            self._hearing[speaker] = Hearing(segment.seg_id, segment.speaker_name, until, True)
         else:
             self._hearing.pop(speaker, None)
 
     def _calls(self, text: str) -> bool:
-        return any(self._opening.search(text[start:]) for start in self._starts(text))
+        return any(self._opens(text[start:]) for start in self._starts(text))
+
+    def _opens(self, rest: str) -> re.Match[str] | None:
+        """The name addressing the assistant at the start of `rest`. After "is", "can" and the
+        like it must be a question: "Polaris is down again" is about it."""
+        opening = self._opening.search(rest)
+        if opening and (word := opening.group("word")) and word.casefold() in AUXILIARIES:
+            if not any(mark in rest[opening.end() :] for mark in QUESTION_MARKS):
+                return None
+        return opening
 
     def _waiting(self, speaker_id: str, t: float) -> bool:
         """Whether something this speaker says at `t` may still complete their question."""
@@ -359,11 +376,7 @@ class WakeDetector:
         name_alone = False
         for start in self._starts(text):
             rest = text[start:]
-            opening = self._opening.search(rest)
-            if opening and (word := opening.group("word")) and word.casefold() in AUXILIARIES:
-                if not any(mark in rest[opening.end() :] for mark in QUESTION_MARKS):
-                    opening = None  # "Polaris is down again"
-            if opening:
+            if opening := self._opens(rest):
                 if question := after(rest, opening):
                     return True, question
                 name_alone = True

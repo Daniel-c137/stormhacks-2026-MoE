@@ -205,7 +205,10 @@ class MeetingAgent:
             log.warning("Ignored a %s invocation in the room", invocation.visibility)
             return
         self._stop_asking(invocation.asked_by_id)
-        self._listening = {k: v for k, v in self._listening.items() if k != invocation.asked_by_id}
+        if invocation.via != "chat":  # a spoken question ends its asker's voice wait
+            self._listening = {
+                k: v for k, v in self._listening.items() if k != invocation.asked_by_id
+            }
         self._working += 1
         try:
             await self._move("working", clip(f"Looking into: {invocation.question}"))
