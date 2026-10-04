@@ -23,7 +23,7 @@ from ..auth import NOT_CONFIGURED, AuthNotConfigured, InvalidToken, LoginLimiter
 from ..config import Settings
 from ..jira import JiraPusher, jira_config
 from ..livekit_rooms import Rooms, rooms_from_settings
-from ..llm import LLM, LLMError, LLMUnavailable, make_embedder, make_llm
+from ..llm import LLM, LLMError, LLMUnavailable, make_embedder, make_llm, make_translation_llm
 from ..memory import MeetingMemory, PgMemoryStore, UnusableMemory
 from ..speech import MeetingLocks
 from ..store import NotFound, Store
@@ -67,6 +67,11 @@ def get_llm_factory(settings: Settings = Depends(get_settings)) -> Callable[[], 
     """Makes the LLM when the write-up needs it, so ending a meeting never fails on an
     unconfigured model; the write-up step shows LLMUnavailable instead. Tests override it."""
     return lambda: make_llm(settings)
+
+
+def get_translation_llm_factory(settings: Settings = Depends(get_settings)) -> Callable[[], LLM]:
+    """The cheap, single-attempt model live translation runs on (#106). Tests override it."""
+    return lambda: make_translation_llm(settings)
 
 
 def get_memory(

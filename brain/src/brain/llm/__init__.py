@@ -37,6 +37,7 @@ __all__ = [
     "comma_list",
     "make_embedder",
     "make_llm",
+    "make_translation_llm",
 ]
 
 
@@ -69,6 +70,18 @@ def make_llm(settings: Settings | None = None) -> LLM:
             "the OpenRouter fallback (set OPENROUTER_API_KEY and OPENROUTER_MODELS)"
         )
     return providers[0] if len(providers) == 1 else FallbackLLM(providers)
+
+
+def make_translation_llm(settings: Settings | None = None) -> LLM:
+    """Live translation (#106) runs on every non-English utterance, so it must stay cheap and
+    fast: TRANSLATION_MODEL (or GEMINI_MODEL) with one attempt and no fallback chain. A Gemini
+    quota error fails the caption instead of moving to paid OpenRouter; OpenRouter is used only
+    when Gemini isn't configured at all."""
+    settings = settings or Settings()
+    model = settings.translation_model or settings.gemini_model
+    if settings.gemini_api_key and model:
+        return GeminiLLM(models=(model,), api_key=settings.gemini_api_key, attempts=1, max_delay=0)
+    return make_llm(settings)
 
 
 def make_embedder(settings: Settings | None = None) -> Embedder:

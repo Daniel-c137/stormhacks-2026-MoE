@@ -26,9 +26,12 @@ def system_prompt() -> str:
 
 Say which language the speech is in, as an ISO 639-1 code, and give it in English.
 - Translate faithfully and plainly. Don't summarise, answer or add anything.
-- Keep names (people, products, and the meeting assistant "{agent}"), numbers and identifiers
-  such as issue keys (DS-104), pull request numbers, versions and code exactly as said.
-- The speech may stop mid-sentence: translate what is there, without finishing it.
+- Keep names of people and products, numbers and identifiers such as issue keys (DS-104), pull
+  request numbers, versions and code exactly as said.
+- The meeting assistant is "{agent}". Always write its name as "{agent}" in Latin letters, even
+  when the transcript spells it in another script (Persian: پولاریس).
+- The speech may stop mid-sentence: translate what is there, without finishing it, and keep a
+  trailing "-" or "..." where it was cut off.
 - If it is already English, give it back unchanged."""
 
 
@@ -37,16 +40,20 @@ class TranslationFailed(RuntimeError):
 
 
 async def translate(llm: LLM, text: str, language: str | None = None) -> TranslateResponse:
-    """`language` is Scribe's detected code when it gave one; it is trusted over the model's.
-    English comes back word for word, never as the model's rewording."""
+    """`language` is Scribe's detected code when it gave one. An English hint skips the model.
+    Otherwise a non-English hint is trusted over the model's guess, but speech the model finds
+    English stays English, word for word: people switch languages mid-meeting."""
     hint = normalise_language(language)
+    if hint == "en":
+        return TranslateResponse(language="en", text=text)
     prompt = f"Language detected by the transcriber: {hint or 'unknown'}\n\nSpeech:\n{text}"
     answer = await llm.generate_structured(prompt, Translation, system=system_prompt())
-    detected = hint or normalise_language(answer.language)
+    guessed = normalise_language(answer.language)
+    if guessed == "en":
+        return TranslateResponse(language="en", text=text)
+    detected = hint or guessed
     if detected is None:
         raise TranslationFailed(f"the model named the language {answer.language!r}")
-    if detected == "en":
-        return TranslateResponse(language="en", text=text)
     english = answer.english.strip()
     if not english:
         raise TranslationFailed("the model returned no English")
