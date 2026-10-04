@@ -4,11 +4,11 @@ Polaris reasons only when someone asks deliberately: by name, with the Ask butto
 @mention. A spoken question's answer is a shared card that stays silent until a participant
 chooses Speak, Post in chat or Dismiss; a chat mention is answered in chat. On timers it asks the
 brain to keep time against the agenda and to fact-check; with Jev keeping time, it also checks
-the agenda once each caption has settled in the brain. The agenda goes to the room; a fact-check
-goes only to whoever made the claim, as a private chat message from the agent that is never
-stored, spoken or shown to anyone else. Someone joining 5 minutes or more late, or back after 5
-minutes or more away, gets a private catch-up from the brain the same way, only to them. Other
-people's private chat never passes through here.
+the agenda once each caption has settled in the brain. Each person's agenda and its nudges go
+only to them; a fact-check goes only to whoever made the claim, as a private chat message from
+the agent that is never stored, spoken or shown to anyone else. Someone joining 5 minutes or more
+late, or back after 5 minutes or more away, gets a private catch-up from the brain the same way,
+only to them. Other people's private chat never passes through here.
 """
 
 import asyncio
@@ -141,7 +141,7 @@ class MeetingAgent:
         self._speaking = asyncio.Lock()
         self._playback: asyncio.Task[None] | None = None  # the answer being spoken
         self._stop_requested = False
-        self._last_agenda: str | None = None
+        self._last_agenda: dict[str, str] = {}  # what each person was last sent
         self._agenda_lock = asyncio.Lock()  # one agenda check at a time: a tick or a caption's
         self._agenda_due: list[float] = []  # when saved captions settle, on the meeting clock
         self._agenda_waiter: asyncio.Task[None] | None = None
@@ -498,12 +498,17 @@ class MeetingAgent:
     async def tick_agenda(self) -> None:
         async with self._agenda_lock:
             tracked = await self.brain.track_agenda(self.meeting_id)
-            shown = tracked.agenda.model_dump_json(exclude={"generated_at"})
-            if shown != self._last_agenda:
-                await self.bus.publish(Topic.AGENDA, tracked.agenda)
-                self._last_agenda = shown
+            # Agendas are personal: each agenda and nudge goes only to its owner, never the room.
+            for agenda in tracked.agendas:
+                if agenda.person_id is None:
+                    continue
+                shown = agenda.model_dump_json(exclude={"generated_at"})
+                if shown != self._last_agenda.get(agenda.person_id):
+                    await self.bus.publish(Topic.AGENDA, agenda, to=[agenda.person_id])
+                    self._last_agenda[agenda.person_id] = shown
             for nudge in tracked.nudges:
-                await self.bus.publish(Topic.AGENDA_NUDGE, nudge)
+                if nudge.person_id is not None:
+                    await self.bus.publish(Topic.AGENDA_NUDGE, nudge, to=[nudge.person_id])
 
     def caption_saved(self, t_end: float) -> None:
         """A final caption that ended at `t_end` (meeting clock) reached the brain. With Jev
