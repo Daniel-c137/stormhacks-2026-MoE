@@ -36,6 +36,7 @@ export interface Meeting {
   duration_min?: number | null;
   jira_keys: string[];
   transcript_deleted_at?: string | null; // ISO 8601; set once retention removed the segments
+  agent_joined_at?: string | null; // ISO 8601; when the agent first joined; null if it never did
 }
 
 /** Live participant view; id is the account id and the LiveKit identity. */

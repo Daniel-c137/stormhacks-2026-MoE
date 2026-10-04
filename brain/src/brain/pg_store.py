@@ -48,7 +48,7 @@ Cursor = AsyncCursor[Row]
 
 MEETING = (
     "id, team_id, title, status, code, host_id, participant_ids, invitee_ids, scheduled_start,"
-    " started_at, ended_at, duration_min, jira_keys, transcript_deleted_at"
+    " started_at, ended_at, duration_min, jira_keys, transcript_deleted_at, agent_joined_at"
 )
 PERSON = "p.id, p.name, p.short, p.initials, p.title, p.email, p.photo_url"
 TEAM = """
@@ -434,9 +434,23 @@ class PostgresStore:
             " invitee_ids = %(invitee_ids)s, scheduled_start = %(scheduled_start)s,"
             " started_at = %(started_at)s, ended_at = %(ended_at)s,"
             " duration_min = %(duration_min)s, jira_keys = %(jira_keys)s,"
-            " transcript_deleted_at = %(transcript_deleted_at)s",
+            " transcript_deleted_at = %(transcript_deleted_at)s,"
+            " agent_joined_at = %(agent_joined_at)s",
             **meeting.model_dump(exclude={"id"}),
         )
+
+    async def mark_agent_joined(self, meeting_id: str, at: datetime) -> Meeting:
+        async with self._tx() as cur:
+            row = await self._one(
+                cur,
+                "update meetings set agent_joined_at = coalesce(agent_joined_at, %s)"
+                f" where id = %s and status = 'live' returning {MEETING}",
+                [at, meeting_id],
+            )
+            if row is None:
+                current = await self._meeting(cur, meeting_id)
+                raise Conflict(f"meeting {meeting_id} is {current.status}")
+        return _meeting(row)
 
     # transcript and public chat
 

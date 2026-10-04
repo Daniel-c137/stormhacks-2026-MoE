@@ -62,6 +62,16 @@ export function joinNames(names: string[]): string {
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
+/** Who was in the meeting: its participants, then the agent only when it really joined. */
+export function attendeeNames(
+  meeting: Pick<Meeting, "participant_ids" | "agent_joined_at">,
+  nameOf: (id: string) => string,
+  agent: string,
+): string[] {
+  const people = meeting.participant_ids.map(nameOf);
+  return meeting.agent_joined_at ? [...people, agent] : people;
+}
+
 /** A stand-in for an account the members list does not include. */
 export const unknownPerson = (id: string): Person => ({ id, name: "Unknown", short: "Unknown", initials: "?" });
 

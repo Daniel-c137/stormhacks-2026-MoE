@@ -26,7 +26,7 @@ import {
   useSettings,
 } from "@/hooks/useApi";
 import { describeError, pushTasks, retryReport, updateTask } from "@/lib/api";
-import { fmtClock, fmtDate, fmtLongDate, fmtT, joinNames, meetingStart, shortOf } from "@/lib/format";
+import { attendeeNames, fmtClock, fmtDate, fmtLongDate, fmtT, joinNames, meetingStart, shortOf } from "@/lib/format";
 import { ListenButton } from "./ListenButton";
 import { TaskReview } from "./TaskReview";
 
@@ -262,7 +262,7 @@ function ReportView({ meeting, onPushed }: { meeting: Meeting; onPushed: () => v
     ["r-transcript", "Transcript", segs.length || ""],
   ];
 
-  const people = joinNames([...meeting.participant_ids.map((id) => person(id).short), agent]);
+  const people = joinNames(attendeeNames(meeting, (id) => person(id).short, agent));
   const timeText = start
     ? meeting.duration_min
       ? `${fmtClock(start)}–${fmtClock(new Date(start.getTime() + meeting.duration_min * 60_000))} · ${meeting.duration_min} min`

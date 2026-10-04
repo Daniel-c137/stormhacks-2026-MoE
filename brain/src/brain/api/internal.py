@@ -3,6 +3,7 @@
 import asyncio
 import math
 from collections.abc import Callable
+from datetime import UTC, datetime
 from weakref import WeakValueDictionary
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -120,6 +121,21 @@ async def worker_meeting(
         raise HTTPException(status_code=404, detail="Meeting not found") from None
     settings = await store.settings(meeting.team_id)
     return WorkerMeetingResponse(meeting=meeting, voice_id=settings.voice)
+
+
+@router.post("/meetings/{meeting_id}/agent-joined", status_code=204)
+async def agent_joined(meeting_id: str, store: Store = Depends(get_store)) -> None:
+    """The worker calls this once it has joined a live meeting's room, so the report and the
+    board list the agent as present only when it really was. A repeat (a retry, a reconnect)
+    keeps the first time; a meeting that is not live is refused."""
+    try:
+        await store.mark_agent_joined(meeting_id, datetime.now(UTC))
+    except NotFound:
+        raise HTTPException(status_code=404, detail="Meeting not found") from None
+    except Conflict as e:
+        raise HTTPException(
+            status_code=409, detail=f"Only a live meeting can be joined: {e}"
+        ) from None
 
 
 @router.post("/meetings/{meeting_id}/chat", status_code=204)

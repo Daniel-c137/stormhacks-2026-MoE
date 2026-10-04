@@ -14,6 +14,11 @@ class TranscriptInput(BaseModel):
     started_at: datetime | None = None
     members: list[Person] = []
     segments: list[TranscriptSegment]
+    agent_joined: bool = False  # the worker recorded the agent joining the meeting
+
+    def agent_attended(self) -> bool:
+        """The agent was there if it was recorded joining or it spoke."""
+        return self.agent_joined or any(s.speaker_id == AGENT_PARTICIPANT_ID for s in self.segments)
 
     def final_segments(self) -> list[TranscriptSegment]:
         """Final segments in time order, once each. Partial captions never reach the report."""

@@ -103,10 +103,12 @@ def render_prompt(
     labelled: dict[str, TranscriptSegment],
     agenda: Sequence[AgendaItem] = (),
     fact_checks: Sequence[FactCheck] = (),
+    agent_attended: bool,
 ) -> str:
     agent = get_identity().agent_name
     participants = [f"- {p.id}: {p.name}" for p in people]
-    participants.append(f"- {AGENT_PARTICIPANT_ID}: {agent} (meeting assistant)")
+    if agent_attended:
+        participants.append(f"- {AGENT_PARTICIPANT_ID}: {agent} (meeting assistant)")
     lines = [
         f"[{label} {clock(s.t_start)}] {speaker(s, agent)}: {s.text}"
         for label, s in labelled.items()

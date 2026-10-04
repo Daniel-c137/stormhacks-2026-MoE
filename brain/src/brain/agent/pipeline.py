@@ -183,6 +183,7 @@ class ReportPipeline:
             started_at=meeting.started_at,
             members=await self.store.members(meeting.team_id),
             segments=await self.store.transcript(meeting_id),
+            agent_joined=meeting.agent_joined_at is not None,
         )
         agenda = await self.store.agenda(meeting_id)
         return meeting, transcript, agenda.items if agenda else []
