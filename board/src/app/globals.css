@@ -660,8 +660,9 @@
   .range-row input { flex: 1; max-width: 360px; accent-color: var(--primary); }
   .range-val { font-family: var(--font-mono); font-size: 14px; font-weight: 600; width: 60px; }
   /* Admins: connectors as everyone else sees them, and the team's members. */
-  .admin-only { margin: -2px 0 4px; }
-  .sgroup > .admin-only + .srow { border-top: 0; }
+  .admin-only { padding: 0 22px; margin-bottom: -6px; }
+  fieldset.sgroup { min-width: 0; }
+  fieldset.sgroup:disabled .opt-label, fieldset.sgroup:disabled input { cursor: default; }
   .ro { margin-top: 11px; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
   .badge { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; background: var(--soft); color: var(--ink-2); font-size: 12px; font-weight: 700; white-space: nowrap; flex: none; }
   .members-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 54px; padding: 12px 0 8px; }

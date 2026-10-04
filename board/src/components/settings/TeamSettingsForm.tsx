@@ -171,7 +171,7 @@ function PasswordForm() {
 export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
   const agent = identity.agent_name;
   const { me, email, setMe } = useTeam();
-  const admin = me.is_admin === true; // only an admin changes connectors and creates accounts
+  const admin = me.is_admin === true; // only an admin changes team settings and creates accounts
   const settings = useSettings();
   const voices = useVoices();
   const connectors = useConnectors();
@@ -369,9 +369,9 @@ export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
 
           {s && (
             <>
+              {!admin && <p className="note admin-only">Only admins can change these.</p>}
               <div className="sgroup" role="group" aria-labelledby="g-conn">
                 <h2 id="g-conn">Connectors</h2>
-                {!admin && <p className="note admin-only">Only admins can change connectors.</p>}
                 <section className="srow" aria-labelledby="s-code">
                   <h3 id="s-code">Codebase</h3>
                   <div>
@@ -429,7 +429,7 @@ export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
                 </section>
               </div>
 
-              <div className="sgroup" role="group" aria-labelledby="g-agent">
+              <fieldset className="sgroup" disabled={!admin} aria-labelledby="g-agent">
                 <h2 id="g-agent">{agent}</h2>
                 <section className="srow" aria-labelledby="s-voice">
                   <h3 id="s-voice">{agent} voice</h3>
@@ -518,7 +518,7 @@ export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
                     </div>
                   </div>
                 </section>
-              </div>
+              </fieldset>
             </>
           )}
         </div>

@@ -10,7 +10,7 @@ export interface Person {
   title?: string | null;
   email?: string | null;
   photo_url?: string | null;
-  is_admin?: boolean; // only an admin changes the connectors and creates accounts
+  is_admin?: boolean; // changes team settings, creates accounts, manages any meeting
 }
 
 export interface Team {

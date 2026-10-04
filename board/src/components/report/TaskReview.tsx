@@ -23,6 +23,8 @@ export interface TaskReviewProps {
   onPush: () => void;
   /** Show the moment a task came from in the transcript; null when there is no transcript. */
   onJump: ((t: number) => void) | null;
+  /** Only the meeting's host or an admin approves a push; everyone may edit the drafts. */
+  canPush: boolean;
 }
 
 /** Edit title, owner, due and description; include or exclude; then push. */
@@ -135,7 +137,7 @@ export function TaskReview(props: TaskReviewProps) {
           );
         })}
       </div>
-      {tasks.length > 0 && (
+      {tasks.length > 0 && props.canPush && (
         <div className="push-row">
           <button
             type="button"

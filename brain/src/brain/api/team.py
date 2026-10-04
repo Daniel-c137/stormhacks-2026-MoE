@@ -10,7 +10,14 @@ from ..connectors import connector_statuses
 from ..store import NotFound, Store
 from ..voices import VoicesFailed, VoicesUnavailable, fetch_voices, with_default
 from ..zones import is_zone
-from .deps import ADMIN_ONLY, current_user, get_http_transport, get_settings, get_store, user_team
+from .deps import (
+    current_user,
+    get_http_transport,
+    get_settings,
+    get_store,
+    require_admin,
+    user_team,
+)
 
 router = APIRouter(tags=["team"])
 
@@ -19,8 +26,6 @@ MAX_PHOTO_BYTES = 2 * 1024 * 1024
 PHOTO_TYPES = {b"\x89PNG\r\n\x1a\n": "image/png", b"\xff\xd8\xff": "image/jpeg"}
 INTERRUPT_MINUTES = range(1, 16)  # the design's dot selector
 MAX_TEXT_SETTING = 200
-CONNECTOR_FIELDS = ("github", "jira")
-CONNECTOR_STATE = {"connected", "indexed_at", "files"}  # the server's, never set by a person
 
 
 # profile
@@ -133,10 +138,10 @@ async def read_team_settings(
 
 @router.put("/settings")
 async def write_team_settings(
-    body: TeamSettings, user: Person = Depends(current_user), store: Store = Depends(get_store)
+    body: TeamSettings, user: Person = Depends(require_admin), store: Store = Depends(get_store)
 ) -> TeamSettings:
-    """Any team member may change them, but only an admin the connectors. Always the caller's own
-    team; connection and index state belong to the server and are kept as they are."""
+    """Admin only. Always the caller's own team; connection and index state belong to the server
+    and are kept as they are."""
     if body.interrupt_minutes not in INTERRUPT_MINUTES:
         raise HTTPException(
             status_code=422,
@@ -150,8 +155,6 @@ async def write_team_settings(
         )
     team = await user_team(store, user)
     current = await store.settings(team.id)
-    if not user.is_admin and connectors_changed(current, body):
-        raise HTTPException(status_code=403, detail=ADMIN_ONLY)
     github = current.github.model_copy(
         update={"repo": text(body.github.repo), "ref": text(body.github.ref)}
     )
@@ -199,17 +202,6 @@ async def list_voices(
     except VoicesFailed as e:
         raise HTTPException(status_code=502, detail=str(e)) from None
     return with_default(voices, config.elevenlabs_voice_id)
-
-
-def connectors_changed(current: TeamSettings, body: TeamSettings) -> bool:
-    """Whether the body changes a connector value a person edits (today the repository and ref,
-    and the Jira site and project), compared as saved; the server's state is ignored."""
-    return any(editable(body, name) != editable(current, name) for name in CONNECTOR_FIELDS)
-
-
-def editable(settings: TeamSettings, connector: str) -> dict:
-    values = getattr(settings, connector).model_dump(exclude=CONNECTOR_STATE)
-    return {key: text(v) if isinstance(v, str) else v for key, v in values.items()}
 
 
 def text(value: str | None) -> str | None:

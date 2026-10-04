@@ -1,4 +1,4 @@
-"""Admin accounts: only an admin changes the connectors and creates accounts (POST /team/accounts).
+"""Admin accounts: only an admin changes team settings and creates accounts (POST /team/accounts).
 Alex is the test team's admin; Sarah and Olga (on the other team) are not."""
 
 import asyncio

@@ -95,7 +95,7 @@ uv run brain add-team --id <team-id> --name "<team name>"
 uv run brain add-user --team <team-id> --name "<full name>" --email <email> --admin
 ```
 
-Only an admin changes the team's connectors (GitHub and Jira), and an admin creates the other accounts in Settings → Accounts, which shows the generated password once (`POST /team/accounts`). `add-user` without `--admin` adds someone who is not an admin, and leaves an existing admin one. To grant or revoke admin later (the brain checks on every request, so it takes effect at once; a team's last admin can't be revoked):
+Only an admin changes the team's settings (connectors, the agent's voice and fact-checking, who may allow answers, time zone) and creates the other accounts, in Settings → Members, which shows the generated password once (`POST /team/accounts`). What a meeting's host does (ending it, changing its invitees, retrying its write-up, approving its push to Jira) an admin may do too, so a meeting whose host left can still be managed. Everyone keeps their own profile, photo and password. `add-user` without `--admin` adds someone who is not an admin, and leaves an existing admin one. To grant or revoke admin later (the brain checks on every request, so it takes effect at once; a team's last admin can't be revoked):
 
 ```sh
 uv run brain set-admin --email <email>

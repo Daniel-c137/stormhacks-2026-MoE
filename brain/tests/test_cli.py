@@ -434,7 +434,7 @@ def test_add_user_refuses_an_invalid_email(db, email):
     assert "email" in str(exit_info.value.code).lower()
 
 
-# admins: the only accounts that change connectors and create accounts
+# admins: the only accounts that change team settings and create accounts
 
 
 def is_admin(db, email: str) -> bool:

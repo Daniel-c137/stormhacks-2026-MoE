@@ -2,7 +2,7 @@
 `brain push` creates Jira issues for the drafts a named person approved.
 `brain migrate` applies db/migrations to DATABASE_URL.
 `brain add-team` and `brain add-user` make teams and accounts; there is no public sign-up.
-`brain set-admin` grants or revokes admin: only an admin changes connectors and creates accounts.
+`brain set-admin` grants or revokes admin: only an admin changes team settings and accounts.
 `brain purge-transcripts` deletes transcripts older than TRANSCRIPT_RETENTION_DAYS."""
 
 import argparse

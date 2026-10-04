@@ -12,6 +12,7 @@ import { Notice } from "@/components/ui/Notice";
 import { useSettings } from "@/hooks/useApi";
 import { useDismiss } from "@/hooks/useDismiss";
 import { joinNames } from "@/lib/format";
+import { hostOrAdmin } from "@/lib/roles";
 import { LobbyAgenda } from "./LobbyAgenda";
 
 /** What the person chose in the lobby, carried into the room. */
@@ -127,7 +128,7 @@ export function Lobby({ code, meeting, lookupError, joining, error, onJoin }: Lo
   const others = (meeting?.participant_ids ?? []).filter((id) => id !== me.id).map(person);
   const inRoom = meeting?.status === "live" ? others : [];
   const ended = meeting && meeting.status !== "live" && meeting.status !== "scheduled";
-  const isHost = meeting?.host_id === me.id;
+  const isHost = meeting ? hostOrAdmin(meeting, me) : false;
   const hostOnly = settings.data?.who_can_allow === "host";
   const wake = settings.data?.wake_phrase || wakePhrase();
   const github = settings.data?.github;
@@ -212,9 +213,11 @@ export function Lobby({ code, meeting, lookupError, joining, error, onJoin }: Lo
                       {github.ref ? ` @ ${github.ref}` : ""}
                     </b>
                   </span>
-                  <Link className="link" href="/settings">
-                    Change
-                  </Link>
+                  {me.is_admin && (
+                    <Link className="link" href="/settings">
+                      Change
+                    </Link>
+                  )}
                 </div>
               )}
               <p>By joining, you agree to be transcribed. The transcript and report are shared with your team.</p>

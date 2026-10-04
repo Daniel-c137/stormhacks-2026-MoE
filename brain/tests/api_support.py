@@ -26,7 +26,7 @@ LIVEKIT_URL = "wss://skyroom-test.livekit.cloud"
 WORKER_TOKEN = "worker-shared-secret-0123456789abcdef"
 AUTH_SECRET = "a-session-signing-secret-of-at-least-32-characters"
 
-# Alex is the team's admin: the only one who changes connectors and creates accounts.
+# Alex is the team's admin: the only one who changes team settings and creates accounts.
 ALEX = Person(id="u-alex", name="Alex Chen", short="Alex", initials="AC", is_admin=True)
 SARAH = Person(id="u-sarah", name="Sarah Kim", short="Sarah", initials="SK")
 OUTSIDER = Person(id="u-olga", name="Olga Petrova", short="Olga", initials="OP")

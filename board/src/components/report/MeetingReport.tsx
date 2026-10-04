@@ -30,6 +30,7 @@ import {
 } from "@/hooks/useApi";
 import { describeError, pushTasks, retryReport, updateTask } from "@/lib/api";
 import { attendeeNames, fmtClock, fmtDate, fmtLongDate, fmtT, joinNames, meetingStart, shortOf } from "@/lib/format";
+import { hostOrAdmin } from "@/lib/roles";
 import { ListenButton } from "./ListenButton";
 import { TaskReview } from "./TaskReview";
 
@@ -157,10 +158,10 @@ function Processing({ meeting }: { meeting: Meeting }) {
       {stopped && (
         <Notice>
           The write-up stopped: {stopped}
-          {meeting.host_id === me.id ? "" : " The host can start it again."}
+          {hostOrAdmin(meeting, me) ? "" : " The host or an admin can start it again."}
         </Notice>
       )}
-      {stopped && meeting.host_id === me.id && (
+      {stopped && hostOrAdmin(meeting, me) && (
         <button type="button" className="btn btn-primary" onClick={() => void retry()} disabled={retrying}>
           {retrying ? <Spinner /> : <Icon name="rotate-ccw" />}
           Try the write-up again
@@ -633,6 +634,7 @@ function Tasks({
       onDestination={setDestination}
       onPush={() => void push()}
       onJump={onJump}
+      canPush={hostOrAdmin(meeting, me)}
     />
   );
 }

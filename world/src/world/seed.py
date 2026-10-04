@@ -65,7 +65,7 @@ JIRA_SITE = "https://dropsubs.atlassian.net"
 """The world's Jira site, as mock-data/jira records it; JIRA_BASE_URL wins when set."""
 TEAM_TIMEZONE = "America/Vancouver"
 ADMIN_EMAIL = f"danial@{EMAIL_DOMAIN}"
-"""The seeded team's one admin: the only account that changes connectors and creates accounts."""
+"""The seeded team's one admin: the only account that changes team settings and creates accounts."""
 
 Outcome = Literal["seeded", "resumed", "skipped"]
 
