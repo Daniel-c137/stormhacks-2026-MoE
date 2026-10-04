@@ -4,7 +4,9 @@ with PKCE, done server-side so no third-party auth service holds our users.
 The flow's state, PKCE verifier, nonce and where to go next live in a short-lived cookie signed
 with AUTH_SECRET, so only the browser that started a sign-in can finish it. Google's ID token is
 verified against its published keys (signature, issuer, audience, expiry, nonce) and must carry a
-verified email. The board gets a one-time code, never the session token in a URL.
+verified email that Google is authoritative for (Gmail, or a Workspace account). The board gets a
+one-time code, never the session token in a URL, and the code only works in the browser that
+signed in: a second HttpOnly cookie carries its other half.
 """
 
 import base64
@@ -26,12 +28,14 @@ AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 KEYS_URL = "https://www.googleapis.com/oauth2/v3/certs"
 ISSUERS = ("https://accounts.google.com", "accounts.google.com")
+GMAIL = ("gmail.com", "googlemail.com")
 SCOPE = "openid email profile"
 
 FLOW_COOKIE = "google_signin"
 FLOW_COOKIE_PATH = "/"  # the brain may be served under a prefix such as /api
 FLOW_SECONDS = 10 * 60  # time allowed at Google
 FLOW_AUDIENCE = "google-signin"
+HANDOFF_COOKIE = "google_handoff"  # binds the one-time code to the browser that signed in
 CODE_SECONDS = 60  # the board swaps its one-time code at once
 KEYS_SECONDS = 60 * 60  # Google rotates its keys rarely and publishes the new one early
 UNSAFE = re.compile(r"[\\\x00-\x1f\x7f]")  # a backslash or an ASCII control character
@@ -194,25 +198,43 @@ async def verify_callback(
     email = str(claims.get("email") or "").strip()
     if not email or claims.get("email_verified") is not True:
         raise GoogleSignInFailed("unverified", "Google hasn't verified this email")
+    if not google_hosts(email, claims.get("hd")):
+        raise GoogleSignInFailed("unverified", "Google isn't authoritative for this email")
     return GoogleIdentity(email=email, name=claims.get("name"))
+
+
+def google_hosts(email: str, hd: object) -> bool:
+    """Whether Google is authoritative for the email: a Gmail address, or a Google Workspace
+    account (`hd`, its domain). Any other address can be put on a Google account, and Google
+    keeps it verified after the mailbox changes hands, so it proves nothing about who owns it
+    now: Google's guidance is to not link accounts by such an email."""
+    domain = email.rpartition("@")[2].lower()
+    return domain in GMAIL or (isinstance(hd, str) and bool(hd.strip()))
 
 
 @dataclass
 class OneTimeCodes:
     """Sessions waiting for the board to collect them, each by a code that works once and
-    briefly. In process: a sign-in has to finish on the brain that started it."""
+    briefly, and only with the binding that went to the same browser in an HttpOnly cookie (so a
+    code put in someone else's link signs nobody in). In process: a sign-in has to finish on the
+    brain that started it."""
 
-    pending: dict[str, tuple[LoginResponse, float]] = field(default_factory=dict)
+    pending: dict[str, tuple[LoginResponse, str, float]] = field(default_factory=dict)
 
-    def issue(self, session: LoginResponse) -> str:
+    def issue(self, session: LoginResponse) -> tuple[str, str]:
+        """The code for the URL and the binding for the browser's cookie."""
         now = time.monotonic()
-        self.pending = {c: v for c, v in self.pending.items() if v[1] > now}
-        code = secrets.token_urlsafe(32)
-        self.pending[code] = (session, now + CODE_SECONDS)
-        return code
+        self.pending = {c: v for c, v in self.pending.items() if v[2] > now}
+        code, binding = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
+        self.pending[code] = (session, binding, now + CODE_SECONDS)
+        return code, binding
 
-    def redeem(self, code: str) -> LoginResponse | None:
+    def redeem(self, code: str, binding: str | None) -> LoginResponse | None:
+        """The session, once: a wrong binding spends the code too."""
         found = self.pending.pop(code, None)
-        if found is None or found[1] <= time.monotonic():
+        if found is None or found[2] <= time.monotonic():
             return None
-        return found[0]
+        session, expected, _ = found
+        if not binding or not secrets.compare_digest(expected, binding):
+            return None
+        return session

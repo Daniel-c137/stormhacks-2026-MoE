@@ -25,7 +25,8 @@ const GOOGLE_ERRORS: Record<string, string> = {
   state: "That sign-in didn't start in this browser. Try again.",
   not_invited: "That Google account hasn't been invited. Ask your team's admin to add you.",
   ambiguous: "More than one team invited that email. Ask your team's admin.",
-  unverified: "Google hasn't verified that email address.",
+  // Not verified, or not a Gmail or Workspace address, which Google can't vouch for.
+  unverified: "Google can't confirm that email address is yours. Use your email and a password instead.",
   failed: "Google sign-in didn't work. Try again.",
 };
 

@@ -42,9 +42,11 @@ from ..auth import (
 )
 from ..config import Settings
 from ..google_auth import (
+    CODE_SECONDS,
     FLOW_COOKIE,
     FLOW_COOKIE_PATH,
     FLOW_SECONDS,
+    HANDOFF_COOKIE,
     GoogleKeys,
     GoogleSignInFailed,
     OneTimeCodes,
@@ -88,6 +90,12 @@ def google_configured(settings: Settings) -> bool:
 def public_url(url: str | None) -> bool:
     parts = urlsplit(url or "")
     return parts.scheme in ("http", "https") and bool(parts.netloc)
+
+
+def secure_site(settings: Settings) -> bool:
+    """Whether the public site is https, which decides the sign-in cookies' Secure flag: behind
+    the /api proxy the brain itself is reached over plain http."""
+    return urlsplit(settings.google_redirect_url or "").scheme == "https"
 
 
 def password_problem(password: str) -> str | None:
@@ -226,7 +234,7 @@ async def google_sign_in(
         path=FLOW_COOKIE_PATH,
         httponly=True,
         samesite="lax",
-        secure=urlsplit(redirect_uri).scheme == "https",  # the public site's, not this hop's
+        secure=secure_site(settings),
     )
     return response
 
@@ -245,7 +253,8 @@ async def google_callback(
 ) -> RedirectResponse:
     """Where Google sends the browser back. Signs in the account with Google's verified email,
     or an invited email (whose login is then reserved for Google), and sends the browser to the
-    board's /login with a one-time code (`google`) or why it failed (`google_error`)."""
+    board's /login with a one-time code (`google`) or why it failed (`google_error`). The code's
+    other half goes in an HttpOnly cookie, so only this browser can swap it for the session."""
 
     def back(**query: str) -> RedirectResponse:
         board = (settings.board_url or "").rstrip("/")  # "": this site's /login
@@ -278,8 +287,18 @@ async def google_callback(
     except GoogleSignInFailed as e:
         return back(google_error=e.reason)
     token, expires_at = issue_token(person.id, settings)
-    session = LoginResponse(token=token, expires_at=expires_at, person=person)
-    return back(google=codes.issue(session), next=flow.next)
+    code, binding = codes.issue(LoginResponse(token=token, expires_at=expires_at, person=person))
+    response = back(google=code, next=flow.next)
+    response.set_cookie(
+        HANDOFF_COOKIE,
+        binding,
+        max_age=CODE_SECONDS,
+        path=FLOW_COOKIE_PATH,  # the exchange is under the brain's prefix, which it can't see
+        httponly=True,
+        samesite="lax",
+        secure=secure_site(settings),
+    )
+    return response
 
 
 async def google_person(store: Store, email: str) -> Person | None:
@@ -311,13 +330,18 @@ async def google_person(store: Store, email: str) -> Person | None:
 
 @router.post("/google/exchange")
 async def google_exchange(
-    body: GoogleExchangeRequest, codes: OneTimeCodes = Depends(get_one_time_codes)
+    body: GoogleExchangeRequest,
+    response: Response,
+    google_handoff: str | None = Cookie(default=None),
+    codes: OneTimeCodes = Depends(get_one_time_codes),
 ) -> LoginResponse:
     """The board swaps the one-time code from the callback for the session. Works once, within
-    a minute."""
-    session = codes.redeem(body.code)
+    a minute, and only in the browser the callback sent it to (its google_handoff cookie): a
+    code in a link someone else sent signs nobody in."""
+    session = codes.redeem(body.code, google_handoff)
     if session is None:
         raise HTTPException(status_code=401, detail="This sign-in has expired. Try again.")
+    response.delete_cookie(HANDOFF_COOKIE, path=FLOW_COOKIE_PATH)
     return session
 
 

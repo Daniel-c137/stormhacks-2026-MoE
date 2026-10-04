@@ -29,7 +29,7 @@ export interface AuthOptions {
   google: boolean;
 }
 
-/** POST /auth/google/exchange: the one-time code from the brain's Google callback, for a session. */
+/** POST /auth/google/exchange: the one-time code from the brain's Google callback, for a session. It only works with the HttpOnly google_handoff cookie the callback set in the same browser. */
 export interface GoogleExchangeRequest {
   code: string;
 }

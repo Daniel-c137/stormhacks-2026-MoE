@@ -42,7 +42,8 @@ class AuthOptions(BaseModel):
 
 class GoogleExchangeRequest(BaseModel):
     """POST /auth/google/exchange: the one-time code the brain's Google callback sent the board,
-    swapped for a session (a LoginResponse). The session token is never put in a URL."""
+    swapped for a session (a LoginResponse). The session token is never put in a URL, and the code
+    only works with the HttpOnly google_handoff cookie the callback set in the same browser."""
 
     code: str
 
