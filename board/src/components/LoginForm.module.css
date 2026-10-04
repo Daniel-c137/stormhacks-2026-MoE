@@ -32,6 +32,21 @@
 .brand svg { width: 34px; height: 34px; }
 .brand span { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; }
 
+/* Logo intro (option #3 "Star spin-in"): the star spins in, then the name slides out from it. Plays once. */
+.brandStar { animation: brandStarSpin 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.brandWord { display: inline-block; animation: brandWordSlide 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) 0.45s both; }
+@keyframes brandStarSpin {
+  from { transform: rotate(-180deg) scale(0.2); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+@keyframes brandWordSlide {
+  from { transform: translateX(-14px); opacity: 0; clip-path: inset(0 100% 0 0); }
+  to { transform: none; opacity: 1; clip-path: inset(0 0 0 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .brandStar, .brandWord { animation: none; }
+}
+
 .tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;

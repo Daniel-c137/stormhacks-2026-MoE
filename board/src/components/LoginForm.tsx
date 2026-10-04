@@ -133,7 +133,7 @@ export function LoginForm() {
     <div className={styles.page}>
       <main className={styles.card}>
         <div className={styles.brand}>
-          <svg viewBox="-50 -50 100 100" aria-hidden="true">
+          <svg className={styles.brandStar} viewBox="-50 -50 100 100" aria-hidden="true">
             <path
               d="M0 -46 Q5 -5 40 0 Q5 5 0 46 Q-5 5 -40 0 Q-5 -5 0 -46Z"
               fill="none"
@@ -143,7 +143,7 @@ export function LoginForm() {
             />
             <circle r="3.5" fill="currentColor" />
           </svg>
-          <span>{identity.product_name}</span>
+          <span className={styles.brandWord}>{identity.product_name}</span>
         </div>
 
         <div className={styles.tabs} role="tablist" aria-label="Sign in or create an account">
