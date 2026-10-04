@@ -6,6 +6,10 @@ realtime, audio_format=pcm_16000). Scribe's voice activity detection commits eac
 committed_transcript_with_timestamps becomes the final piece, timed by its words. Scribe sends
 every commit twice; the copy without timestamps is ignored. When the input ends the last utterance
 is committed by hand and its final awaited; if none comes, the last partial is kept as the final.
+
+Unless a language is configured, Scribe detects each utterance's language
+(include_language_detection) and the committed message carries it as language_code; partials
+don't, so a partial piece's language is None (#106).
 """
 
 import asyncio
@@ -22,6 +26,8 @@ from urllib.parse import urlencode
 import numpy as np
 from livekit import rtc
 from websockets.exceptions import ConnectionClosed
+
+from contracts.language import normalise_language
 
 from .stt import SpeechPiece
 
@@ -88,6 +94,7 @@ class ScribeEvent:
     start: float | None = None
     end: float | None = None
     error: str = ""
+    language: str | None = None
 
 
 def parse_event(raw: str | bytes) -> ScribeEvent:
@@ -103,7 +110,8 @@ def parse_event(raw: str | bytes) -> ScribeEvent:
         start = words[0].get("start") if words else None
         end = words[-1].get("end") if words else None
         text = normalise(str(message.get("text") or ""))
-        return ScribeEvent("final", text=text, start=start, end=end)
+        language = normalise_language(message.get("language_code"))
+        return ScribeEvent("final", text=text, start=start, end=end, language=language)
     if kind in ERRORS:
         return ScribeEvent(
             "error", error=f"{kind}: {message.get('error') or message.get('message')}"
@@ -167,7 +175,7 @@ class ScribeSTT:
         api_key: str,
         model: str,
         keyterms: Iterable[str] = (),
-        language: str | None = "en",
+        language: str | None = None,
         url: str = "https://api.elevenlabs.io",
         connect: Connect = websocket_connect,
         finalize_seconds: float = 3.0,
@@ -189,7 +197,11 @@ class ScribeSTT:
             ("audio_format", f"pcm_{SCRIBE_SAMPLE_RATE}"),
             ("commit_strategy", "vad"),
             ("include_timestamps", "true"),
-            *((("language_code", self._language),) if self._language else ()),
+            *(
+                (("language_code", self._language),)
+                if self._language
+                else (("include_language_detection", "true"),)
+            ),
             *(("keyterms", term) for term in self._keyterms),
         ]
         return f"{base}/v1/speech-to-text/realtime?{urlencode(query)}"
@@ -313,7 +325,7 @@ class _Session:
                 if text:
                     start = event.start if event.start is not None else utterance_start
                     end = event.end if event.end is not None else self.sent_seconds
-                    yield SpeechPiece(text, True, start, max(start, end))
+                    yield SpeechPiece(text, True, start, max(start, end), event.language)
                     utterance_start = max(start, end)
                 if deadline is not None:
                     break

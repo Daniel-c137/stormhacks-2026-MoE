@@ -25,6 +25,7 @@ from contracts import (
     TranslateResponse,
     WorkerMeetingResponse,
 )
+from contracts.language import ISO_CODE
 from contracts.meeting import MeetingStatus
 
 from ..agent.ask import Question, ToolOrchestrator
@@ -39,7 +40,7 @@ from ..config import Settings
 from ..keyterms import meeting_keyterms
 from ..llm import LLM, LLMError, LLMUnavailable
 from ..store import Conflict, NotFound, Store
-from ..translation import ISO_CODE, TranslationFailed, translate
+from ..translation import TranslationFailed, translate
 from .deps import (
     ask_agent,
     get_fact_checker,

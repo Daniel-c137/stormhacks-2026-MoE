@@ -20,7 +20,9 @@ class Settings(BaseSettings):
     elevenlabs_api_key: str | None = None
     elevenlabs_api_url: str = "https://api.elevenlabs.io"
     elevenlabs_stt_model: str | None = None
-    elevenlabs_stt_language: str = "en"  # ISO 639-1; meetings are in English for now
+    # ISO 639-1 to pin one language; unset lets Scribe detect each utterance's, so speech in
+    # another language can be translated into English (#106).
+    elevenlabs_stt_language: str | None = None
     elevenlabs_tts_model: str | None = None
     elevenlabs_voice_id: str | None = None  # the default; a team's chosen voice wins
 

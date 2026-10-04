@@ -5,22 +5,12 @@ it is one small structured call: detect the language and give the English. Nothi
 about the meeting.
 """
 
-import re
-
 from pydantic import BaseModel, Field
 
 from contracts import TranslateResponse, get_identity
+from contracts.language import normalise_language
 
 from .llm import LLM
-
-# ISO 639-2/3 codes Scribe or a model may give for common languages, to ISO 639-1.
-THREE_TO_TWO = {
-    "ara": "ar", "chi": "zh", "zho": "zh", "deu": "de", "ger": "de", "eng": "en", "fas": "fa",
-    "per": "fa", "fra": "fr", "fre": "fr", "hin": "hi", "ita": "it", "jpn": "ja", "kor": "ko",
-    "nld": "nl", "dut": "nl", "pol": "pl", "por": "pt", "rus": "ru", "spa": "es", "tur": "tr",
-    "ukr": "uk", "vie": "vi",
-}  # fmt: skip
-ISO_CODE = re.compile(r"^[a-z]{2,3}$")
 
 
 class Translation(BaseModel):
@@ -28,19 +18,6 @@ class Translation(BaseModel):
 
     language: str = Field(description="ISO 639-1 code of the speech, lowercase, e.g. 'es'.")
     english: str = Field(description="The speech in English; unchanged if it already is.")
-
-
-def normalise_language(code: str | None) -> str | None:
-    """'ES', ' fr ', 'zh-CN' or 'spa' -> an ISO 639-1 code; None when it isn't a code at all."""
-    if not code:
-        return None
-    base = re.split(r"[-_]", code.strip().lower())[0]
-    base = THREE_TO_TWO.get(base, base)
-    return base if ISO_CODE.match(base) else None
-
-
-def is_english(code: str | None) -> bool:
-    return normalise_language(code) == "en"
 
 
 def system_prompt() -> str:
