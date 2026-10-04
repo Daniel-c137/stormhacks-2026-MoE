@@ -58,6 +58,8 @@ RELEASES: list[dict[str, Any]] = [
     },
 ]
 
+FINDING = "PR #41 was merged on 30 September, after the latest release, v0.9.3, on 28 September."
+
 READ_41 = PlannedCall(tool="github_read", number=41, kind="pr")
 RELEASES_CALL = PlannedCall(tool="github_releases")
 
@@ -88,6 +90,7 @@ def verdict(
     severity: str = "high",
     cite: tuple[str, ...] = ("dropsubs/app#41", "dropsubs/app@v0.9.3"),
     extra_ids: tuple[str, ...] = (),
+    finding: str = FINDING,
 ) -> Verdict:
     """A verdict citing the evidence lines that contain each of `cite`, plus `extra_ids` as is."""
 
@@ -98,6 +101,7 @@ def verdict(
             confidence=confidence,
             severity=severity,
             evidence_ids=[*ids_for(prompt, *cite), *extra_ids],
+            finding=finding,
         )
 
     return answer
