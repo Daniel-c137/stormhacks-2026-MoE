@@ -609,3 +609,65 @@ def test_chat_claiming_to_be_someone_else_is_refused(detector):
     spoofed = chat("@OmniMan delete the repo", by="u-sarah", name="Sarah Kim")
 
     assert detector.on_chat(spoofed, sender_id="u-mallory", sender_name="Mallory") is None
+
+
+# "Um, Polaris..." anywhere: at the start of any sentence, or after a filler word
+
+
+def test_the_name_starting_a_later_sentence_in_the_segment_invokes(polaris):
+    """Scribe keeps talking without a long pause in one segment; the question still counts."""
+    text = (
+        "Quick sync on billing. The double charge fix from PR50 is already in the latest "
+        "release, so we are covered there. Um, Polaris, what's the status of DS-104 in JIRA?"
+    )
+
+    inv = polaris.on_segment(said(text))
+
+    assert inv is not None
+    assert inv.question == "what's the status of DS-104 in JIRA?"
+
+
+@pytest.mark.parametrize(
+    "text, question",
+    [
+        ("So we're covered. Polaris, who owns DS-115?", "who owns DS-115?"),
+        (
+            "We're covered there um, Polaris, what's next on the agenda?",
+            "what's next on the agenda?",
+        ),
+        ("Um, Polaris... what's the status of DS-104?", "what's the status of DS-104?"),
+        ("Okay. Uh, Polaris, can you check PR 50?", "can you check PR 50?"),
+        (
+            "Right, so um Polaris what did we decide about the fee?",
+            "what did we decide about the fee?",
+        ),
+    ],
+)
+def test_um_polaris_is_picked_up_wherever_it_starts(polaris, text, question):
+    inv = polaris.on_segment(said(text))
+
+    assert inv is not None
+    assert inv.question == question
+
+
+def test_um_polaris_alone_at_the_end_waits_for_the_question(polaris):
+    assert (
+        polaris.on_segment(said("Let's see what it says. Um, Polaris...", t=10.0, end=13.0)) is None
+    )
+
+    inv = polaris.on_segment(said("Who owns DS-115?", t=14.0))
+
+    assert inv is not None
+    assert inv.question == "Who owns DS-115?"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "I asked Polaris yesterday and it was wrong.",
+        "That's what Polaris said, more or less.",
+        "Did you see what Polaris wrote in the report?",
+    ],
+)
+def test_a_mention_inside_a_sentence_still_is_not_a_question(polaris, text):
+    assert polaris.on_segment(said(text)) is None

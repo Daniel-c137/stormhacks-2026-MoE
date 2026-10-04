@@ -22,7 +22,13 @@ ARABIC_COMMA = chr(0x060C)
 # with en and em dashes, the ellipsis character and the Arabic comma
 LEADING_PUNCTUATION = " \t,.:;!?-" + chr(0x2013) + chr(0x2014) + chr(0x2026) + ARABIC_COMMA
 # Words people say before addressing someone: "Hey Polaris", "OK so, Polaris".
-OPENERS = r"(?:(?:hey|hi|ok|okay|so|um|uh|alright|right|and)\W+)*"
+OPENERS = r"(?:(?:hey|hi|ok|okay|so|um|uh|hmm|alright|right|and)\W+)*"
+# Where else in a segment someone may start addressing the assistant: a later sentence ("...we
+# are covered there. Um, Polaris, ...") or a filler word mid-sentence ("covered there um,
+# Polaris, ..."). Scribe keeps talk without a long pause in one segment.
+LATER_STARTS = re.compile(
+    r"(?<=[.!?\u2026\u061F])\s+|(?<!\w)(?=(?:um|uh|hmm|so|okay|ok|hey)\W)", re.IGNORECASE
+)
 # After the name, one of these, or a question or command word, says it is being addressed:
 # "Polaris, ...", "Polaris what's ...". "Polaris said earlier" is talking about it.
 SEPARATORS = ",:?!." + chr(0x2026) + ARABIC_COMMA
@@ -250,20 +256,31 @@ class WakeDetector:
 
     def _addressed(self, text: str) -> tuple[bool, str]:
         """(is the assistant addressed, the question). "Polaris, X", "Polaris what X" and
-        "X, Polaris?" ask X; any other mention is talking about the assistant, not to it."""
-        opening = self._opening.search(text)
-        if opening and (word := opening.group("word")) and word.casefold() in AUXILIARIES:
-            if not any(mark in text[opening.end() :] for mark in QUESTION_MARKS):
-                opening = None  # "Polaris is down again"
-        if opening:
-            if question := after(text, opening):
-                return True, question
+        "X, Polaris?" ask X, whether the name opens the segment, a later sentence in it, or
+        follows a filler word ("...covered there. Um, Polaris, X"); the question is the rest of
+        the segment. Any other mention is talking about the assistant, not to it."""
+        name_alone = False
+        for start in self._starts(text):
+            rest = text[start:]
+            opening = self._opening.search(rest)
+            if opening and (word := opening.group("word")) and word.casefold() in AUXILIARIES:
+                if not any(mark in rest[opening.end() :] for mark in QUESTION_MARKS):
+                    opening = None  # "Polaris is down again"
+            if opening:
+                if question := after(rest, opening):
+                    return True, question
+                name_alone = True
         if closing := self._closing.search(text):
             before = self._openers.sub("", text[: closing.start()])
             before = before.rstrip(LEADING_PUNCTUATION).strip()
             if before:
                 return True, before + "?"
-        return bool(opening), ""
+        return name_alone, ""
+
+    @staticmethod
+    def _starts(text: str) -> list[int]:
+        """Where addressing may begin: the segment's start, then each later sentence or filler."""
+        return [0, *(m.end() for m in LATER_STARTS.finditer(text) if m.end() > 0)]
 
     def on_chat(
         self, message: ChatMessage, *, sender_id: str, sender_name: str
