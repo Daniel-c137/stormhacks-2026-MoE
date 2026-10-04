@@ -1,0 +1,24 @@
+# HTTPS for {$DOMAIN}: Let's Encrypt for a public name, Caddy's own CA for localhost.
+# The board at /, the brain at /api/* with the prefix stripped.
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# The worker reaches the brain directly on the compose network; nothing outside may.
+	@internal path /api/internal /api/internal/*
+
+	# The brain's API docs stay private unless EXPOSE_API_DOCS=true.
+	@docs {
+		path /api/docs /api/docs/* /api/redoc /api/openapi.json
+		not vars {env.EXPOSE_API_DOCS} true
+	}
+
+	route {
+		respond @internal 404
+		respond @docs 404
+		handle_path /api/* {
+			reverse_proxy brain:8000
+		}
+		reverse_proxy board:3000
+	}
+}

@@ -32,6 +32,8 @@ class Settings(BaseSettings):
 
     world_snapshot: SnapshotName = "dev"
     world_today_override: datetime | None = None
+    # 0.0.0.0 in a container, so the brain can reach the mocks over the compose network
+    world_mcp_host: str = "127.0.0.1"
     world_github_mcp_port: int = 8101
     world_jira_mcp_port: int = 8102
     world_overlay_dir: Path = OVERLAY_DIR

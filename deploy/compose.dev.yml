@@ -1,0 +1,7 @@
+# Local development only: publishes the compose Postgres on 127.0.0.1:5432 for the brain run with
+# uv. Never use it on the server.
+#   docker compose -f docker-compose.yml -f deploy/compose.dev.yml up -d postgres
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"

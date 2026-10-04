@@ -29,3 +29,9 @@ world/.overlay/
 .DS_Store
 .idea/
 .vscode/
+
+# Database dumps from deploy/backup.sh
+backups/
+
+# Local embedded Postgres (pgserver)
+.pgdata/
