@@ -21,7 +21,7 @@ from contracts import AGENT_PARTICIPANT_ID, Person, Team
 
 KEY = "test-key"
 SECRET = "test-secret-that-is-long-enough-for-hs256"
-LIVEKIT_URL = "wss://omniroom-test.livekit.cloud"
+LIVEKIT_URL = "wss://skyroom-test.livekit.cloud"
 WORKER_TOKEN = "worker-shared-secret-0123456789abcdef"
 
 ALEX = Person(id="u-alex", name="Alex Chen", short="Alex", initials="AC")
