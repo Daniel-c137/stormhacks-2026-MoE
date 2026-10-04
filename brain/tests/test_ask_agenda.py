@@ -104,10 +104,23 @@ async def test_each_item_shows_its_timebox_status_and_time_used(store, settings)
     assert agenda_line(llm.calls[1].prompt) == (
         'Agenda: "Sprint review" agenda, in order: '
         "1. Release checklist (covered, timebox 10 min, 9 min used); "
-        "2. Billing bug (current, timebox 5 min, 2 min used); "
+        "2. Billing bug (current, being discussed now, timebox 5 min, 2 min used); "
         "3. Hiring plan (pending, timebox 15 min, 0 min used); "
-        "4. Offsite dates (skipped, no timebox, 0 min used)"
+        "4. Offsite dates (skipped, no timebox, 0 min used). "
+        "Still open: items 2, 3."
     )
+
+
+async def test_an_agenda_with_nothing_open_says_so(store, settings):
+    meeting = await meeting_with_agenda(store)
+    agenda = await store.agenda(meeting.id)
+    done = [i.model_copy(update={"status": "covered"}) for i in agenda.items]
+    await store.save_agenda(agenda.model_copy(update={"items": done, "current_item_id": None}))
+    llm = scripted(answer=citing("Agenda:"))
+
+    await orchestrator(llm, store, settings).ask(question(meeting_id=meeting.id))
+
+    assert agenda_line(llm.calls[1].prompt).endswith("Still open: none.")
 
 
 async def test_time_used_is_left_out_before_any_tracking(store, settings):

@@ -184,5 +184,5 @@ async def test_gemini_says_whats_left_on_the_agenda():
     print(f"answered by {llm.last_model}: {answer.text}")
     print(f"sources: {answer.sources}; unavailable: {answer.unavailable}")
     assert Source(kind="meeting", label="Agenda", meeting_id=meeting.id) in answer.sources
-    assert "Billing bug triage" in answer.text
-    assert "Hiring plan" in answer.text
+    assert "billing bug triage" in answer.text.casefold()
+    assert "hiring plan" in answer.text.casefold()

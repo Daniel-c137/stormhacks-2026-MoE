@@ -323,9 +323,11 @@ def agenda_finding(meeting: Meeting, agenda: Agenda | None) -> Finding | None:
 
 def render_agenda(meeting: Meeting, agenda: Agenda) -> str:
     """Each item in order with its status and timebox and, once timekeeping has run, the talk
-    time it has had so far."""
-    items = []
+    time it has had so far; then the items still open (pending or current)."""
+    items, still_open = [], []
     for n, item in enumerate(agenda.items, start=1):
+        if item.status == "pending":
+            still_open.append(str(n))
         details = [
             agenda_status(item, agenda),
             f"timebox {item.minutes} min" if item.minutes else "no timebox",
@@ -333,13 +335,14 @@ def render_agenda(meeting: Meeting, agenda: Agenda) -> str:
         if agenda.tracked_until is not None:
             details.append(f"{int(item.discussed_s / 60 + 0.5)} min used")
         items.append(f"{n}. {oneline(item.title)} ({', '.join(details)})")
-    return f'"{oneline(meeting.title)}" agenda, in order: ' + "; ".join(items)
+    left = f"items {', '.join(still_open)}" if still_open else "none"
+    return f'"{oneline(meeting.title)}" agenda, in order: {"; ".join(items)}. Still open: {left}.'
 
 
 def agenda_status(item: AgendaItem, agenda: Agenda) -> str:
     """pending, covered or skipped as saved; a pending item being discussed now is current."""
     if item.status == "pending" and item.id == agenda.current_item_id:
-        return "current"
+        return "current, being discussed now"
     return item.status
 
 
