@@ -6,6 +6,7 @@ import hashlib
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from urllib.parse import quote
 
 import httpx
 
@@ -58,7 +59,8 @@ async def synthesize(
     ) as client:
         try:
             response = await client.post(
-                f"/v1/text-to-speech/{voice_id}",
+                # The voice comes from team settings: one escaped path segment, never a path.
+                f"/v1/text-to-speech/{quote(voice_id or '', safe='')}",
                 params={"output_format": OUTPUT_FORMAT},
                 json={"text": text, "model_id": config.elevenlabs_tts_model},
                 headers={"accept": CONTENT_TYPE},
