@@ -201,6 +201,19 @@ def test_a_scheduled_meeting_can_have_its_agenda_set_in_the_lobby(client_as, sto
     assert response.status_code == 200, response.text
 
 
+def test_an_item_checked_before_the_meeting_starts_has_a_person_but_no_time(client_as, store):
+    start = datetime.now(UTC) + timedelta(days=1)
+    meeting = anyio.run(
+        lambda: store.create_meeting(TEAM.id, "Planning", ALEX.id, scheduled_start=start)
+    )
+
+    response = put(client_as(SARAH), meeting.id, {"title": "Roadmap", "status": "covered"})
+
+    assert response.status_code == 200, response.text
+    (item,) = response.json()["items"]
+    assert (item["covered_by"], item["covered_t"]) == (SARAH.id, None)
+
+
 def test_the_agenda_is_read_only_once_the_meeting_has_ended(client_as):
     alex = client_as(ALEX)
     meeting = create(alex)
