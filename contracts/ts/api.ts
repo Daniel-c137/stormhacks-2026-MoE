@@ -31,6 +31,7 @@ export interface CreateMeetingRequest {
   scheduled_start?: string | null; // ISO 8601
   duration_min?: number | null;
   invitee_ids?: string[];
+  translate?: boolean; // live translation of non-English speech (#106); off by default
 }
 
 export interface JoinMeetingResponse {
@@ -129,6 +130,11 @@ export interface ProfileUpdate {
 
 export interface SegmentsIngest {
   segments: TranscriptSegment[];
+}
+
+/** board -> brain: the host switches live translation on or off before anyone joins. */
+export interface TranslationUpdate {
+  translate: boolean;
 }
 
 /**

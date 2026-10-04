@@ -42,6 +42,7 @@ class CreateMeetingRequest(BaseModel):
     scheduled_start: datetime | None = None
     duration_min: int | None = None
     invitee_ids: list[str] = []
+    translate: bool = False  # live translation of non-English speech (#106)
 
 
 class JoinMeetingResponse(BaseModel):
@@ -151,6 +152,12 @@ class ProfileUpdate(BaseModel):
 
 class SegmentsIngest(BaseModel):
     segments: list[TranscriptSegment]
+
+
+class TranslationUpdate(BaseModel):
+    """board -> brain: the host switches live translation on or off before anyone joins."""
+
+    translate: bool
 
 
 class TranslateRequest(BaseModel):

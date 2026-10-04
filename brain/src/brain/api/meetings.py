@@ -15,6 +15,7 @@ from contracts import (
     JoinMeetingResponse,
     Meeting,
     Person,
+    TranslationUpdate,
 )
 
 from ..agent.ask import MAX_RECENT_SEGMENTS, Question, ToolOrchestrator
@@ -101,6 +102,7 @@ async def create_meeting(
         scheduled_start=start,
         duration_min=body.duration_min,
         invitee_ids=invitees,
+        translate=body.translate,
     )
 
 
@@ -191,6 +193,28 @@ async def end_meeting(
             logger.exception("could not start the write-up of meeting %s", meeting.id)
             await pipeline.not_started(meeting.id)
     return meeting
+
+
+@router.put("/{meeting_id}/translation")
+async def set_translation(
+    meeting_id: str,
+    body: TranslationUpdate,
+    user: Person = Depends(current_user),
+    store: Store = Depends(get_store),
+) -> Meeting:
+    """Host only: switch live translation of non-English speech (#106) before anyone joins.
+    Turning it on is the host's approval for sending the meeting's non-English speech to the
+    model as it's spoken. 409 once someone joined or the meeting ended: the worker reads it
+    once, when it opens the meeting."""
+    meeting = await team_meeting(store, user, meeting_id)
+    if meeting.host_id != user.id:
+        raise HTTPException(status_code=403, detail="Only the host can change translation")
+    try:
+        return await store.set_translate(meeting.id, body.translate)
+    except Conflict:
+        raise HTTPException(
+            status_code=409, detail="Translation can't change once someone has joined"
+        ) from None
 
 
 @router.post("/{meeting_id}/invitees")

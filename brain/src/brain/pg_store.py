@@ -48,7 +48,8 @@ Cursor = AsyncCursor[Row]
 
 MEETING = (
     "id, team_id, title, status, code, host_id, participant_ids, invitee_ids, scheduled_start,"
-    " started_at, ended_at, duration_min, jira_keys, transcript_deleted_at, agent_joined_at"
+    " started_at, ended_at, duration_min, jira_keys, transcript_deleted_at, agent_joined_at,"
+    " translate"
 )
 PERSON = "p.id, p.name, p.short, p.initials, p.title, p.email, p.photo_url"
 TEAM = """
@@ -329,14 +330,16 @@ class PostgresStore:
         scheduled_start: datetime | None = None,
         duration_min: int | None = None,
         invitee_ids: Sequence[str] = (),
+        translate: bool = False,
     ) -> Meeting:
         async with self._tx() as cur:
             row = await self._one(
                 cur,
                 "insert into meetings (id, team_id, title, status, code, host_id, invitee_ids,"
-                " scheduled_start, started_at, duration_min)"
+                " scheduled_start, started_at, duration_min, translate)"
                 " values (%(id)s, %(team_id)s, %(title)s, %(status)s, %(code)s, %(host_id)s,"
-                " %(invitee_ids)s, %(scheduled_start)s, %(started_at)s, %(duration_min)s)"
+                " %(invitee_ids)s, %(scheduled_start)s, %(started_at)s, %(duration_min)s,"
+                " %(translate)s)"
                 f" returning {MEETING}",
                 {
                     "id": str(uuid4()),
@@ -349,6 +352,7 @@ class PostgresStore:
                     "scheduled_start": scheduled_start,
                     "started_at": None if scheduled_start else datetime.now(UTC),
                     "duration_min": duration_min,
+                    "translate": translate,
                 },
             )
         assert row is not None
@@ -438,9 +442,23 @@ class PostgresStore:
             " started_at = %(started_at)s, ended_at = %(ended_at)s,"
             " duration_min = %(duration_min)s, jira_keys = %(jira_keys)s,"
             " transcript_deleted_at = %(transcript_deleted_at)s,"
-            " agent_joined_at = %(agent_joined_at)s",
+            " agent_joined_at = %(agent_joined_at)s, translate = %(translate)s",
             **meeting.model_dump(exclude={"id"}),
         )
+
+    async def set_translate(self, meeting_id: str, on: bool) -> Meeting:
+        async with self._tx() as cur:
+            row = await self._one(
+                cur,
+                "update meetings set translate = %s where id = %s"
+                " and status in ('scheduled', 'live') and cardinality(participant_ids) = 0"
+                f" returning {MEETING}",
+                [on, meeting_id],
+            )
+            if row is None:
+                await self._meeting(cur, meeting_id)  # NotFound when there's no such meeting
+                raise Conflict(f"meeting {meeting_id} can't change translation once someone joined")
+        return _meeting(row)
 
     async def mark_agent_joined(self, meeting_id: str, at: datetime) -> Meeting:
         async with self._tx() as cur:
