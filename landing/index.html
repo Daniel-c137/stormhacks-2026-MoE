@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SkyRoom · The agentic meeting platform for software teams</title>
+<meta name="description" content="SkyRoom is the meeting platform for software teams, with Polaris, the AI teammate in every meeting.">
+<link rel="icon" href="assets/polaris-app-icon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+/* --u is 1% of the widest 16:9 frame that fits the window, so the page keeps the
+   proportions of the 1920x1080 design on a laptop and falls back to the clamp
+   minimums on a phone. */
+:root{--u:min(1vw,1.7778vh);--bg:#f5f4fa;--ink:#16132e;--muted:#4a4670;--brand:#4b3fd4;}
+*{box-sizing:border-box;}
+html{background:var(--bg);}
+body{margin:0;min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;padding:clamp(24px,calc(4.17*var(--u)),96px) clamp(22px,calc(5.2*var(--u)),120px);color:var(--ink);font-family:'Manrope',system-ui,sans-serif;-webkit-font-smoothing:antialiased;overflow-x:hidden;}
+
+.brand{align-self:flex-start;display:flex;align-items:center;gap:clamp(10px,calc(1.15*var(--u)),26px);color:inherit;text-decoration:none;font-size:clamp(26px,calc(2.92*var(--u)),68px);font-weight:700;letter-spacing:-0.035em;border-radius:.3em;transition:color .2s;}
+.brand:hover{color:var(--brand);}
+.brand:focus-visible{outline:3px solid var(--brand);outline-offset:.2em;}
+.mark{width:1.29em;height:1.29em;flex:none;overflow:visible;transition:transform .6s cubic-bezier(.3,1.4,.5,1);}
+.brand:hover .mark{transform:rotate(90deg);}
+
+main{flex:1;display:flex;flex-direction:column;justify-content:center;gap:clamp(18px,calc(2.08*var(--u)),48px);padding-block:clamp(28px,calc(3*var(--u)),72px);}
+.tagline{margin:0;font-size:clamp(17px,calc(1.875*var(--u)),44px);font-weight:500;color:var(--muted);}
+h1{margin:0;max-width:10.5em;font-size:clamp(38px,calc(6.25*var(--u)),144px);line-height:1;font-weight:800;letter-spacing:-0.045em;text-wrap:balance;}
+
+/* Untyped text keeps its place in the layout so lines never reflow while typing. */
+.untyped{color:transparent;user-select:none;}
+.caret{position:relative;}
+.caret::after{content:"";position:absolute;left:.05em;bottom:.04em;width:.06em;min-width:2px;height:.86em;border-radius:1px;background:var(--brand);}
+
+.polaris{align-self:flex-end;display:flex;align-items:center;gap:clamp(14px,calc(1.25*var(--u)),28px);transition:opacity .8s ease,transform .8s cubic-bezier(.2,.8,.2,1);}
+.polaris-text{display:flex;flex-direction:column;align-items:flex-end;gap:.15em;font-size:clamp(20px,calc(2.08*var(--u)),48px);}
+.polaris-name{font-weight:700;letter-spacing:-0.02em;}
+.polaris-role{font-size:.7em;font-weight:500;color:var(--muted);white-space:nowrap;}
+.app-icon{flex:none;width:7em;height:7em;font-size:clamp(9px,calc(1.04*var(--u)),24px);border-radius:1.6em;box-shadow:0 1.2em 2.4em -1em rgba(22,19,46,0.45);}
+.typing .polaris{opacity:0;transform:translateY(1.2em);}
+
+.sky{position:fixed;inset:0;z-index:-1;pointer-events:none;}
+.sky svg{position:absolute;left:var(--x);top:var(--y);width:var(--s);height:var(--s);fill:var(--brand);opacity:.16;}
+.star{transform-box:fill-box;transform-origin:center;}
+
+@media (prefers-reduced-motion:no-preference){
+  .brand{animation:rise .8s cubic-bezier(.2,.8,.2,1) both;}
+  .mark .star{animation:spin-in 1.1s cubic-bezier(.2,.8,.2,1) both;}
+  .caret::after{animation:blink 1.05s steps(1) infinite;}
+  .typing .caret::after{animation:none;}
+  .app-icon .star{animation:twinkle 3.2s ease-in-out infinite;}
+  .sky svg{animation:glimmer var(--t) ease-in-out var(--d) infinite both;}
+}
+@keyframes rise{from{opacity:0;transform:translateY(-.5em);}}
+@keyframes spin-in{from{transform:rotate(-180deg) scale(.2);opacity:0;}}
+@keyframes blink{50%{opacity:0;}}
+@keyframes twinkle{50%{transform:scale(.84);opacity:.7;}}
+@keyframes glimmer{0%,100%{opacity:.04;transform:scale(.6);}50%{opacity:.3;transform:scale(1);}}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><path id="star" d="M0 -46 Q5 -5 40 0 Q5 5 0 46 Q-5 5 -40 0 Q-5 -5 0 -46Z"/></defs></svg>
+
+<div class="sky" aria-hidden="true">
+  <svg viewBox="-50 -50 100 100" style="--x:71%;--y:15%;--s:26px;--t:5.5s;--d:0s"><use href="#star"/></svg>
+  <svg viewBox="-50 -50 100 100" style="--x:88%;--y:27%;--s:44px;--t:7s;--d:1.4s"><use href="#star"/></svg>
+  <svg viewBox="-50 -50 100 100" style="--x:79%;--y:46%;--s:18px;--t:4.5s;--d:.6s"><use href="#star"/></svg>
+  <svg viewBox="-50 -50 100 100" style="--x:93%;--y:58%;--s:24px;--t:6s;--d:2.2s"><use href="#star"/></svg>
+  <svg viewBox="-50 -50 100 100" style="--x:62%;--y:31%;--s:14px;--t:5s;--d:3s"><use href="#star"/></svg>
+  <svg viewBox="-50 -50 100 100" style="--x:55%;--y:8%;--s:16px;--t:6.5s;--d:1s"><use href="#star"/></svg>
+</div>
+
+<!-- /home is answered by the proxy with a redirect to the app (deploy/Caddyfile). -->
+<a class="brand" href="/home" aria-label="SkyRoom, open the app">
+  <svg class="mark" viewBox="-50 -50 100 100" aria-hidden="true">
+    <g class="star">
+      <use href="#star" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+      <circle r="3.5" fill="currentColor"/>
+    </g>
+  </svg>
+  <span>SkyRoom</span>
+</a>
+
+<main>
+  <p class="tagline" data-type="24">The agentic meeting platform for software teams</p>
+  <h1 data-type="46">Agents already write our code. It's time they got a seat in the meeting.</h1>
+</main>
+
+<div class="polaris">
+  <div class="polaris-text">
+    <span class="polaris-name">Polaris</span>
+    <span class="polaris-role">The AI teammate in every meeting</span>
+  </div>
+  <svg class="app-icon" viewBox="0 0 512 512" role="img" aria-label="Polaris">
+    <rect width="512" height="512" fill="#0b1120"/>
+    <g transform="translate(256 256) scale(4)">
+      <g class="star">
+        <use href="#star" fill="none" stroke="#eef3fa" stroke-width="3" stroke-linejoin="round"/>
+        <circle r="3.5" fill="#eef3fa"/>
+      </g>
+    </g>
+  </svg>
+</div>
+
+<script>
+// Types each [data-type] line in turn (its value is the delay per character in
+// ms), then brings in the Polaris block. Runs inline so nothing paints first.
+(() => {
+  const root = document.documentElement;
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+  const SENTENCE_PAUSE = 420;
+  const LINE_PAUSE = 320;
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const caret = document.createElement("span");
+  caret.className = "caret";
+  caret.setAttribute("aria-hidden", "true");
+  caret.textContent = "⁠"; // word joiner: gives the caret a box without a line break
+
+  const lines = Array.from(document.querySelectorAll("[data-type]"), (el) => {
+    const text = el.textContent;
+    const typed = document.createElement("span");
+    const untyped = document.createElement("span");
+    untyped.className = "untyped";
+    untyped.textContent = text;
+    el.replaceChildren(typed, untyped);
+    return { text, typed, untyped, delay: Number(el.dataset.type) };
+  });
+  root.classList.add("typing");
+
+  async function type({ text, typed, untyped, delay }) {
+    typed.after(caret);
+    for (let i = 1; i <= text.length; i++) {
+      typed.textContent = text.slice(0, i);
+      untyped.textContent = text.slice(i);
+      const endsSentence = text[i - 1] === "." && i < text.length;
+      await sleep(endsSentence ? SENTENCE_PAUSE : delay * (0.6 + Math.random() * 0.8));
+    }
+  }
+
+  (async () => {
+    // Wait for Manrope so the lines are measured in the font they are typed in.
+    await Promise.race([document.fonts.ready, sleep(1500)]);
+    await sleep(600);
+    for (const line of lines) {
+      await type(line);
+      await sleep(LINE_PAUSE);
+    }
+    root.classList.remove("typing");
+  })();
+})();
+</script>
+</body>
+</html>
