@@ -329,6 +329,17 @@ def test_nobody_is_present_once_the_meeting_ended_and_livekit_is_not_asked(clien
     assert rooms.asked == []
 
 
+def test_nobody_is_present_before_a_scheduled_meeting_starts(client_as, rooms):
+    alex = client_as(ALEX)
+    meeting = alex.post(
+        "/meetings", json={"title": "Retro", "scheduled_start": "2030-01-01T16:00:00+00:00"}
+    ).json()
+
+    assert meeting["status"] == "scheduled"
+    assert presence(alex, meeting).json() == {"person_ids": []}
+    assert rooms.asked == []
+
+
 def test_presence_is_unavailable_when_livekit_cannot_be_reached(app, client_as):
     app.dependency_overrides[get_rooms] = lambda: FakeRooms(fail=True)
     alex = client_as(ALEX)

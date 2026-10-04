@@ -317,7 +317,7 @@ export function Lobby({ code, meeting, lookupError, joining, error, onJoin }: Lo
           <p className="eyebrow">{ended ? "This meeting has ended" : "Ready to join?"}</p>
           <h1 className="lobby-title">{meeting?.title ?? code}</h1>
         </div>
-        {!ended && (present || presence.error) && (
+        {!ended && (
           <div className="already">
             {inRoom.length > 0 && (
               <div className="stack">
@@ -331,7 +331,9 @@ export function Lobby({ code, meeting, lookupError, joining, error, onJoin }: Lo
                 ? `${joinNames(inRoom.map((p) => p.short))} ${inRoom.length === 1 ? "is" : "are"} already in.`
                 : present
                   ? "No one's here yet."
-                  : "Who's here can't be checked right now."}
+                  : presence.error
+                    ? "Who's here can't be checked right now."
+                    : "Checking who's here…"}
             </span>
           </div>
         )}
