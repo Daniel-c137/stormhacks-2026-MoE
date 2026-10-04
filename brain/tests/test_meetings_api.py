@@ -5,6 +5,7 @@ in-memory store and the LiveKit token is really signed, then verified with LiveK
 """
 
 import pytest
+from fastapi import Header
 from fastapi.testclient import TestClient
 from livekit.api import TokenVerifier
 
@@ -21,6 +22,7 @@ LIVEKIT_URL = "wss://omniroom-test.livekit.cloud"
 ALEX = Person(id="u-alex", name="Alex Chen", short="Alex", initials="AC")
 SARAH = Person(id="u-sarah", name="Sarah Kim", short="Sarah", initials="SK")
 OUTSIDER = Person(id="u-olga", name="Olga Petrova", short="Olga", initials="OP")
+NOBODY = Person(id="u-nobody", name="No Team", short="No", initials="NT")  # on no team
 TEAM = Team(id="t-1", name="Checkout", member_ids=[ALEX.id, SARAH.id])
 OTHER_TEAM = Team(id="t-2", name="Elsewhere", member_ids=[OUTSIDER.id])
 
@@ -37,21 +39,29 @@ def store() -> InMemoryStore:
     return InMemoryStore(teams=[TEAM, OTHER_TEAM], people=[ALEX, SARAH, OUTSIDER])
 
 
+PEOPLE = {p.id: p for p in [ALEX, SARAH, OUTSIDER, NOBODY]}
+
+
+def user_from_test_header(x_test_user: str = Header()) -> Person:
+    return PEOPLE[x_test_user]
+
+
 @pytest.fixture
 def app(store, settings):
     app = create_app()
     app.dependency_overrides[get_store] = lambda: store
     app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[current_user] = user_from_test_header
     return app
 
 
 @pytest.fixture
 def client_as(app):
-    """client_as(person) -> a TestClient whose requests are made as that person."""
+    """client_as(person) -> a TestClient whose requests are made as that person. Each client
+    carries its own identity, so several can be held at once."""
 
     def make(person: Person) -> TestClient:
-        app.dependency_overrides[current_user] = lambda: person
-        return TestClient(app)
+        return TestClient(app, headers={"X-Test-User": person.id})
 
     return make
 
@@ -60,6 +70,17 @@ def create(client: TestClient, title: str = "Standup") -> dict:
     response = client.post("/meetings", json={"title": title})
     assert response.status_code == 200, response.text
     return response.json()
+
+
+# test harness
+
+
+def test_two_clients_held_at_once_keep_their_own_identity(client_as):
+    alex = client_as(ALEX)
+    meeting = create(alex)
+    client_as(OUTSIDER)
+
+    assert alex.get(f"/meetings/{meeting['id']}").status_code == 200
 
 
 # create
