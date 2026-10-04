@@ -18,7 +18,7 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 import jwt
 import pytest
-from api_support import ALEX, AUTH_SECRET, TEAM
+from api_support import ALEX, AUTH_SECRET, SARAH, TEAM
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 from test_auth import base_settings, bearer
@@ -63,6 +63,7 @@ class FakeGoogle:
             "sub": "google-sub-1",
             "email": self.email,
             "email_verified": True,
+            "hd": self.email.rpartition("@")[2].lower(),  # a Google Workspace domain
             "name": "From Google",
             "iat": now,
             "exp": now + 600,
@@ -241,6 +242,30 @@ def test_google_racing_a_password_sign_up_doesnt_replace_its_password(
     assert verify_password(asyncio.run(store.login(PRIYA.id)).password_hash, password)
 
 
+@pytest.mark.parametrize("hd", [None, ""], ids=["no-hd", "empty-hd"])
+def test_google_signs_in_only_an_email_google_hosts(client, google, store, hd):
+    """Google is only authoritative for Gmail and Workspace accounts (`hd` set). Anyone can make a
+    Google account with another provider's address, and it stays verified after that address
+    changes hands, so it neither signs in an existing account nor takes an invite."""
+    google.tamper = {"hd": hd}
+
+    assert sign_in_with_google(client, google) == {"google_error": "unverified"}  # Alex
+    google.email = "priya@example.com"
+    assert sign_in_with_google(client, google) == {"google_error": "unverified"}
+    with pytest.raises(NotFound):
+        asyncio.run(store.login(PRIYA.id))
+
+
+def test_a_gmail_address_signs_in_without_a_workspace_domain(client, google, store):
+    asyncio.run(store.set_login(SARAH.id, "sarah.kim@gmail.com", hash_password("sarah-pw-123")))
+    google.email, google.tamper = "Sarah.Kim@gmail.com", {"hd": None}
+
+    session = exchange(client, sign_in_with_google(client, google)["google"])
+
+    assert session.status_code == 200, session.text
+    assert session.json()["person"]["id"] == SARAH.id
+
+
 def test_a_google_account_nobody_invited_is_turned_away(client, google, store):
     google.email = "stranger@example.com"
 
@@ -308,6 +333,31 @@ def test_the_one_time_code_works_once(client, google):
     assert exchange(client, code).status_code == 200
     assert exchange(client, code).status_code == 401
     assert exchange(client, "made-up").status_code == 401
+
+
+def test_the_one_time_code_only_works_in_the_browser_that_signed_in(app, client, google):
+    """Login CSRF: someone who signs in with their own Google account mustn't be able to send
+    another person a link to /login?google=<code> that signs that person's browser in as them."""
+    code = sign_in_with_google(client, google)["google"]
+
+    assert exchange(browser(app), code).status_code == 401
+    assert exchange(client, code).status_code == 401  # and the code is spent
+
+
+def test_the_code_is_bound_by_an_httponly_lax_cookie_that_the_exchange_clears(client, google):
+    sent = start(client, google)
+    back = back_from_google(client, code="google-code", state=sent["state"])
+    code = landed(back)["google"]
+
+    cookies = [c for c in back.headers.get_list("set-cookie") if c.startswith("google_handoff=")]
+    assert len(cookies) == 1, back.headers.get_list("set-cookie")
+    attributes = cookies[0].lower()
+    assert "httponly" in attributes and "samesite=lax" in attributes
+    assert "secure" in attributes and "path=/" in attributes
+    assert code not in cookies[0]
+    swapped = exchange(client, code)
+    assert swapped.status_code == 200, swapped.text
+    assert 'google_handoff=""' in swapped.headers["set-cookie"]
 
 
 def test_only_a_same_site_path_is_kept_as_where_to_go_next(client, google):

@@ -223,9 +223,13 @@ def google(app, settings) -> FakeGoogle:
     return fake
 
 
-def google_sign_in(app, google: FakeGoogle, email: str) -> dict:
+def google_browser(app) -> TestClient:
+    return TestClient(app, base_url="https://testserver", follow_redirects=False)
+
+
+def google_sign_in(app, google: FakeGoogle, email: str, browser: TestClient | None = None) -> dict:
     """The whole round trip; returns the query the browser lands on /login with."""
-    browser = TestClient(app, base_url="https://testserver", follow_redirects=False)
+    browser = browser or google_browser(app)
     started = browser.get("/auth/google", params={"next": "/"})
     sent = {k: v[0] for k, v in parse_qs(urlsplit(started.headers["location"]).query).items()}
     google.nonce, google.email = sent["nonce"], email
@@ -238,9 +242,10 @@ def test_an_invited_person_signs_in_with_google_which_reserves_the_login(
 ):
     person = invite(client_as(ALEX)).json()["person"]
 
-    back = google_sign_in(app, google, "priya@example.com")
+    browser = google_browser(app)
+    back = google_sign_in(app, google, "priya@example.com", browser)
 
-    session = TestClient(app).post("/auth/google/exchange", json={"code": back["google"]})
+    session = browser.post("/auth/google/exchange", json={"code": back["google"]})
     assert session.status_code == 200, session.text
     assert session.json()["person"]["id"] == person["id"]
     run(store.login(person["id"]))  # reserved: nobody can now sign up with a password
