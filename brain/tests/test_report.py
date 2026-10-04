@@ -3,7 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from brain.llm import MockLLM
+from brain.config import Settings
+from brain.llm import MockLLM, make_llm
 from brain.report import (
     ExtractedDecision,
     ExtractedLink,
@@ -13,7 +14,15 @@ from brain.report import (
     TranscriptInput,
     build_report,
 )
-from contracts import AGENT_PARTICIPANT_ID, AgendaItem, Report, TranscriptSegment, get_identity
+from contracts import (
+    AGENT_PARTICIPANT_ID,
+    AgendaItem,
+    FactCheck,
+    Report,
+    Source,
+    TranscriptSegment,
+    get_identity,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -231,6 +240,139 @@ async def test_without_an_agenda_the_prompt_is_unchanged():
     assert llm.calls[0].prompt == without.calls[0].prompt
 
 
+# fact-checks from the live meeting
+
+
+def fact_check(id: str, claim: str, verdict="contradicted", confidence=0.9, **fields) -> FactCheck:
+    return FactCheck(
+        id=id,
+        claim=claim,
+        speaker_name="Bob Okafor",
+        verdict=verdict,
+        confidence=confidence,
+        severity="high",
+        t=6,
+        **fields,
+    )
+
+
+MERGED_AFTER_RELEASE = Source(
+    kind="github_pr", label="dropsubs/app#50 merged 2026-10-02, after v0.9.3 (2026-09-30)"
+)
+CONTRADICTED = fact_check(
+    "fc-1",
+    "The double-charge fix is already in the latest release.",
+    sources=[MERGED_AFTER_RELEASE],
+)
+
+
+async def test_a_confident_contradiction_reaches_the_prompt_as_a_verdict_not_a_fact():
+    llm = MockLLM(structured={ReportExtraction: EXTRACTION})
+
+    report = await build_report(
+        llm,
+        standup(),
+        fact_checks=[
+            CONTRADICTED,
+            fact_check("fc-2", "Production is still on v0.9.3.", verdict="supported"),
+            fact_check("fc-3", "DS-104 is in progress.", verdict="unknown", confidence=0.2),
+            fact_check("fc-4", "The fix shipped on Monday.", confidence=0.4),
+        ],
+    )
+
+    call = llm.calls[0]
+    assert CONTRADICTED.claim in call.prompt
+    assert "Bob Okafor" in call.prompt.split(CONTRADICTED.claim)[0].splitlines()[-1]
+    assert MERGED_AFTER_RELEASE.label in call.prompt
+    assert "contradicted" in call.prompt.lower()
+    assert call.prompt.index(CONTRADICTED.claim) > call.prompt.index("Transcript")
+    for unsettled in ("Production is still", "DS-104 is in progress", "shipped on Monday"):
+        assert unsettled not in call.prompt
+    assert "never state" in call.system.lower() and "contradicted" in call.system.lower()
+    assert report == (await report_for())[0]  # the same grounding either way
+
+
+async def test_without_a_contradiction_the_prompt_is_unchanged():
+    _, without = await report_for()
+    llm = MockLLM(structured={ReportExtraction: EXTRACTION})
+
+    await build_report(
+        llm, standup(), fact_checks=[fact_check("fc-2", "It merged.", verdict="supported")]
+    )
+
+    assert llm.calls[0].prompt == without.calls[0].prompt
+
+
 def test_the_fixture_meeting_is_a_friday():
     assert standup().started_at == datetime(2026, 10, 2, 9, 30)
     assert standup().started_at.strftime("%A") == "Friday"
+
+
+settings = Settings()
+
+RELEASE_SYNC = TranscriptInput(
+    meeting_id="mtg-billing",
+    title="Billing sync",
+    started_at=datetime(2026, 10, 4, 10, 0),
+    members=[
+        {"id": "p-danial", "name": "Danial", "short": "Danial", "initials": "D"},
+        {"id": "p-sam", "name": "Sam Lee", "short": "Sam", "initials": "SL"},
+    ],
+    segments=[
+        TranscriptSegment(
+            seg_id=f"billing-{n}",
+            meeting_id="mtg-billing",
+            speaker_id=speaker_id,
+            speaker_name=name,
+            text=text,
+            is_final=True,
+            t_start=n * 8.0,
+            t_end=n * 8.0 + 7,
+        )
+        for n, (speaker_id, name, text) in enumerate(
+            [
+                (
+                    "p-danial",
+                    "Danial",
+                    "Quick sync on billing. The double charge fix from PR50 is already in the "
+                    "latest release, so we are covered there.",
+                ),
+                ("p-sam", "Sam Lee", "Okay. I'll refund the 14 affected users this week."),
+                ("p-danial", "Danial", "Great, thanks Sam. That's it for today."),
+            ]
+        )
+    ],
+)
+RELEASE_CLAIM = FactCheck(
+    id="fc-pr50",
+    claim=RELEASE_SYNC.segments[0].text,
+    speaker_name="Danial",
+    verdict="contradicted",
+    confidence=0.92,
+    severity="high",
+    sources=[
+        Source(kind="github_pr", label="dropsubs/app#50 (merged 2026-10-02)"),
+        Source(kind="github_release", label="dropsubs/app@v0.9.3 (published 2026-09-30)"),
+    ],
+    t=0,
+)
+
+
+@pytest.mark.live
+@pytest.mark.skipif(
+    not (settings.gemini_api_key and settings.gemini_model),
+    reason="set GEMINI_API_KEY and GEMINI_MODEL to run against Gemini",
+)
+async def test_gemini_never_states_a_contradicted_claim_as_fact():
+    llm = make_llm(settings)
+
+    report = await build_report(llm, RELEASE_SYNC, fact_checks=[RELEASE_CLAIM])
+    print(f"answered by {llm.last_model}: {report.summary}")
+
+    summary = report.summary.casefold()
+    for stated_as_fact in ("confirmed", "is live", "are covered", "is covered", "was released"):
+        assert stated_as_fact not in summary
+    assert any(
+        flag in summary
+        for flag in ("contradict", "after v0.9.3", "not in", "isn't in", "not yet", "github")
+    )

@@ -26,9 +26,11 @@ from contracts import (
     AGENT_PARTICIPANT_ID,
     Decision,
     DecisionRelation,
+    FactCheck,
     Person,
     Report,
     ReportProgress,
+    Source,
     get_identity,
 )
 
@@ -305,6 +307,43 @@ async def test_a_meeting_without_an_agenda_has_none_in_the_prompt(api, llm):
 
     (call,) = calls_for(llm, ReportExtraction)
     assert "Agenda" not in call.prompt
+
+
+async def test_the_meetings_confident_contradictions_are_given_to_the_report(api, store, llm):
+    meeting = await api.create()
+    await api.ingest(meeting["id"])
+    claim = "The double charge fix from PR50 is already in the latest release."
+    records = Source(kind="github_pr", label="dropsubs/app#50 merged after v0.9.3")
+    checks = [
+        FactCheck(
+            id="fc-1",
+            claim=claim,
+            speaker_name=SARAH.name,
+            verdict="contradicted",
+            confidence=0.9,
+            severity="high",
+            sources=[records],
+        ),
+        FactCheck(
+            id="fc-2",
+            claim="The waitlist email went out on Monday.",
+            speaker_name=ALEX.name,
+            verdict="supported",
+            confidence=0.9,
+            severity="low",
+        ),
+    ]
+    for check in checks:
+        await store.add_fact_check(meeting["id"], check)
+
+    await api.end(meeting["id"])
+    await api.drain()
+
+    (call,) = calls_for(llm, ReportExtraction)
+    assert claim in call.prompt and records.label in call.prompt
+    assert checks[1].claim not in call.prompt
+    report = (await api.report(meeting["id"])).json()
+    assert [c["id"] for c in report["fact_checks"]] == ["fc-1", "fc-2"]
 
 
 # past decisions
