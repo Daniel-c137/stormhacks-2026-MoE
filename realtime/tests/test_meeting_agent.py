@@ -83,6 +83,9 @@ class FakeBrain:
         self.fact_calls = 0
         self.joined: list[str] = []
         self.join_error: Exception | None = None
+        self.allowed: set[str] | None = None  # who may act on a card; None is everyone
+        self.permission_error: Exception | None = None
+        self.permission_checks: list[tuple[str, str]] = []
 
     async def meeting(self, meeting_id: str) -> WorkerMeetingResponse:
         if self.meeting_error:
@@ -99,6 +102,12 @@ class FakeBrain:
             ),
             voice_id=self.voice_id,
         )
+
+    async def card_permission(self, meeting_id: str, participant_id: str) -> bool:
+        self.permission_checks.append((meeting_id, participant_id))
+        if self.permission_error:
+            raise self.permission_error
+        return self.allowed is None or participant_id in self.allowed
 
     async def agent_joined(self, meeting_id: str) -> None:
         self.joined.append(meeting_id)
@@ -546,6 +555,96 @@ async def test_an_action_for_someone_else_or_an_unknown_card_is_refused(agent, b
 
     assert tts.calls == [] and chat.sent == []
     assert [c.status for c in bus.cards()] == ["pending"]
+
+
+# who may act on the card (TeamSettings.who_can_allow, decided by the brain)
+
+
+async def test_an_allowed_speak_is_spoken_after_asking_the_brain_about_the_sender(
+    agent, bus, brain, tts, speaker
+):
+    brain.allowed = {"u-sarah"}
+    card = await card_for(agent, bus)
+
+    await bus.deliver(Topic.RESPONSE_ACTION, act(card, "speak"), "u-sarah")
+
+    assert brain.permission_checks == [(MEETING, "u-sarah")]
+    assert tts.calls and speaker.played
+    assert bus.cards()[-1].status == "spoken"
+
+
+@pytest.mark.parametrize("action", ["speak", "send_to_chat", "dismiss"])
+async def test_a_refused_action_changes_nothing_and_is_logged_without_the_answer(
+    agent, bus, brain, tts, speaker, chat, caplog, action
+):
+    brain.allowed = {"u-alex"}  # the host
+    card = await card_for(agent, bus)
+    states = bus.states()
+
+    with caplog.at_level(logging.INFO, logger="realtime_worker"):
+        await bus.deliver(Topic.RESPONSE_ACTION, act(card, action), "u-sarah")
+
+    assert tts.calls == [] and speaker.played == [] and chat.sent == []
+    assert [c.status for c in bus.cards()] == ["pending"]
+    assert bus.states() == states
+    refusals = [r for r in caplog.records if "refused" in r.getMessage().lower()]
+    assert refusals and all(r.levelno == logging.INFO for r in refusals)
+    assert "refund window" not in caplog.text.lower()
+
+
+@pytest.mark.parametrize("action", ["speak", "send_to_chat"])
+async def test_a_refused_sender_is_told_privately(agent, bus, brain, action):
+    brain.allowed = {"u-alex"}
+    card = await card_for(agent, bus)
+
+    await bus.deliver(Topic.RESPONSE_ACTION, act(card, action), "u-sarah")
+
+    [(message, to)] = bus.on(Topic.PRIVATE_CHAT)
+    assert to == ["u-sarah"]
+    assert message.recipient_id == "u-sarah" and message.visibility == "private"
+    assert "host" in message.text.lower()
+    assert "refund window" not in message.text.lower()
+
+
+async def test_permission_is_decided_per_action_not_once(agent, bus, brain, tts):
+    brain.allowed = {"u-alex"}
+    card = await card_for(agent, bus)
+    await bus.deliver(Topic.RESPONSE_ACTION, act(card, "speak"), "u-sarah")
+    assert tts.calls == []
+
+    brain.allowed = None  # the admin switched to everyone
+    await bus.deliver(Topic.RESPONSE_ACTION, act(card, "speak"), "u-sarah")
+
+    assert len(tts.calls) == 1
+    assert brain.permission_checks == [(MEETING, "u-sarah"), (MEETING, "u-sarah")]
+
+
+@pytest.mark.parametrize(
+    "failure", [BrainUnavailable("down"), BrainRejected(404, "Meeting not found")]
+)
+async def test_speak_is_refused_when_the_brain_cannot_say_who_may_act(
+    agent, bus, brain, tts, speaker, caplog, failure
+):
+    card = await card_for(agent, bus)
+    brain.permission_error = failure
+
+    with caplog.at_level(logging.WARNING, logger="realtime_worker"):
+        await bus.deliver(Topic.RESPONSE_ACTION, act(card, "speak"), "u-sarah")
+
+    assert tts.calls == [] and speaker.played == []
+    assert [c.status for c in bus.cards()] == ["pending"]
+    assert "u-sarah" in caplog.text
+    assert "refund window" not in caplog.text.lower()
+
+
+async def test_the_sender_checked_is_the_livekit_identity_not_the_payload(agent, bus, brain, tts):
+    brain.allowed = {"u-alex"}
+    card = await card_for(agent, bus)
+
+    await bus.deliver(Topic.RESPONSE_ACTION, act(card, "speak", by="u-alex"), "u-sarah")
+
+    assert tts.calls == []
+    assert brain.permission_checks == []  # refused before asking: the payload names someone else
 
 
 async def test_show_on_stage_is_left_to_the_board(agent, bus):

@@ -10,7 +10,7 @@ The product and agent names live in [`contracts/identity.json`](contracts/identi
 | --- | --- |
 | `board/` | The web app (Next.js). Calls the brain over HTTP at `NEXT_PUBLIC_API_URL` (`/api` in production) and joins LiveKit rooms with tokens the brain issues. Every screen calls the brain's real routes with the session from `POST /auth/login`. |
 | `brain/` | The API (FastAPI): meetings, asking Polaris, the after-meeting write-up, meeting memory. Stores everything in Postgres with pgvector; reasons with Gemini (OpenRouter as a fallback); reads GitHub and Jira through MCP servers; uses ElevenLabs for voices and the report read aloud. CLI: `brain`. |
-| `realtime/` | The LiveKit agent worker: transcribes each speaker with ElevenLabs, sends final transcript segments and invocations to the brain's `/internal` routes (authenticated with `BRAIN_INTERNAL_TOKEN`), and speaks an answer when a participant chooses Speak. |
+| `realtime/` | The LiveKit agent worker: transcribes each speaker with ElevenLabs, sends final transcript segments and invocations to the brain's `/internal` routes (authenticated with `BRAIN_INTERNAL_TOKEN`), and speaks an answer when a participant chooses Speak. Before acting on an answer card (Speak, Post in chat, Dismiss) it asks the brain whether the team's "who may allow" setting lets that participant; if the brain can't say, it refuses. |
 | `world/` | The demo world: mock GitHub and Jira MCP servers over `mock-data/`, with a write journal (overlay) that `world-reset` clears. |
 | `contracts/` | Shared request, event and data shapes, in Python and TypeScript. |
 | `db/migrations` | SQL migrations for Postgres, applied by `brain migrate`. |

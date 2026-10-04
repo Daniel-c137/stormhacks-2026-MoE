@@ -7,6 +7,7 @@ import httpx
 from contracts import (
     AgendaTrackResponse,
     Answer,
+    CardPermissionResponse,
     CatchUpRequest,
     CatchUpResponse,
     ChatMessage,
@@ -66,6 +67,8 @@ class BrainClient(Protocol):
     async def invoke(self, invocation: Invocation, recent: list[TranscriptSegment]) -> Answer: ...
 
     async def meeting(self, meeting_id: str) -> WorkerMeetingResponse: ...
+
+    async def card_permission(self, meeting_id: str, participant_id: str) -> bool: ...
 
     async def agent_joined(self, meeting_id: str) -> None: ...
 
@@ -139,6 +142,17 @@ class HttpBrainClient:
     async def meeting(self, meeting_id: str) -> WorkerMeetingResponse:
         response = await self._request("GET", f"/internal/meetings/{meeting_id}", idempotent=True)
         return WorkerMeetingResponse.model_validate_json(response.content)
+
+    async def card_permission(self, meeting_id: str, participant_id: str) -> bool:
+        """Whether the participant may act on the meeting's shared answer card, by the team's
+        who_can_allow. A read, so retried; any failure raises, and the caller refuses."""
+        response = await self._request(
+            "GET",
+            f"/internal/meetings/{meeting_id}/card-permission",
+            params={"participant_id": participant_id},
+            idempotent=True,
+        )
+        return CardPermissionResponse.model_validate_json(response.content).allowed
 
     async def agent_joined(self, meeting_id: str) -> None:
         """Retried: the brain keeps the first join time, so a resend changes nothing."""
@@ -223,6 +237,7 @@ class HttpBrainClient:
         path: str,
         *,
         body: dict | None = None,
+        params: dict[str, str] | None = None,
         idempotent: bool,
         timeout: float | None = None,
         keep: frozenset[int] | set[int] = frozenset(),
@@ -236,7 +251,11 @@ class HttpBrainClient:
                 await asyncio.sleep(self._backoff * 2 ** (attempt - 1))
             try:
                 response = await self._http.request(
-                    method, path, json=body, timeout=timeout or httpx.USE_CLIENT_DEFAULT
+                    method,
+                    path,
+                    json=body,
+                    params=params,
+                    timeout=timeout or httpx.USE_CLIENT_DEFAULT,
                 )
             except httpx.TransportError as e:
                 last, status = type(e).__name__, None

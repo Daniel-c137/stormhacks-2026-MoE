@@ -181,6 +181,13 @@ export interface KeytermsResponse {
   terms: string[];
 }
 
+/** realtime -> brain before the worker acts on a shared answer card (Speak, Post in chat,
+ * Dismiss) for a participant: whether TeamSettings.who_can_allow lets them. With "host", only the
+ * meeting's host or an admin; with "everyone", any participant. Never the agent itself. */
+export interface CardPermissionResponse {
+  allowed: boolean;
+}
+
 /** realtime -> brain when the worker joins a meeting's room (named by the meeting id) and before
  * it speaks. Segment times are seconds from meeting.started_at. voice_id is the team's chosen
  * agent voice; null means the worker's default (ELEVENLABS_VOICE_ID). */
