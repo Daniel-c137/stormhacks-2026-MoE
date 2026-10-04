@@ -1,14 +1,14 @@
 """Keeping time against the agenda during a live meeting.
 
-The realtime worker calls this on a timer, never per utterance. Each tick classifies the final
-segments since the last tracked point in one model call, gives their talk time to the item being
-discussed and marks items the team finished. Nudges are decided by fixed rules, not the model,
-and are only shown: the agent never speaks on its own.
+The realtime worker calls this on a timer, never per utterance. Each tick labels the final
+segments since the last tracked point with the items they are about in one model call, gives each
+item the talk time of its own segments and marks items the team finished. Nudges are decided by
+fixed rules, not the model, and are only shown: the agent never speaks on its own.
 """
 
 import math
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
@@ -25,6 +25,8 @@ from contracts import (
     get_identity,
 )
 
+from .ask import DATA_RULE, clip, fenced
+
 SETTLE_S = 5.0  # segments ending this close to `now` wait a tick, so late finals are not skipped
 PAUSE_S = 15.0  # a pause up to this long between utterances still counts as discussion
 MIN_TALK_S = 20.0  # the model is asked once the new stretch holds this much talk,
@@ -35,11 +37,23 @@ MAX_BATCH = 200  # segments per classification; a longer backlog keeps the lates
 SAVE_ATTEMPTS = 3  # saves of one tick's result before giving up on an agenda that keeps changing
 
 
+NO_ITEM = "none"  # the label for talk about no agenda item
+
+
+class TopicRun(BaseModel):
+    first: int = Field(description="Number of the first segment of the run, e.g. 1.")
+    last: int = Field(description="Number of the last segment of the run; first for one segment.")
+    item: str = Field(
+        description="Label of the agenda item these segments are about, e.g. 'a2', or 'none' for "
+        "small talk, setup or a topic that is not on the agenda."
+    )
+
+
 class AgendaTrackDraft(BaseModel):
-    current: str | None = Field(
-        default=None,
-        description="Label of the agenda item this stretch is mostly about, e.g. 'a2', or null "
-        "when it is small talk, setup or a topic that is not on the agenda.",
+    topics: list[TopicRun] = Field(
+        default=[],
+        description="Every segment of the stretch, in order, as runs of consecutive segments "
+        "about the same item.",
     )
     covered: list[str] = Field(
         default=[],
@@ -51,14 +65,18 @@ class AgendaTrackDraft(BaseModel):
 def track_system() -> str:
     agent = get_identity().agent_name
     return f"""You are {agent}. You keep time against a software team's meeting agenda. You read
-the latest stretch of the live transcript and say which agenda item it is about.
+the latest stretch of the live transcript and label each numbered segment with the agenda item it
+is about.
 
 Rules:
-- "current" is the label of the item this stretch is mostly about, or null when it is not about
-  any item on the agenda. Prefer the item the end of the stretch is about.
+- "topics" labels every segment once, as runs of consecutive segments about the same thing: the
+  first and last segment number and the item's label, or "{NO_ITEM}" for small talk, setup or a
+  topic that is not on the agenda. A stretch often moves between items: label each segment by
+  what it is about, not by the stretch as a whole. An item nobody discusses gets no segments.
 - "covered" lists items the team clearly finished in this stretch: they reached a decision or an
   answer, or said it is done and moved on. Mentioning an item does not cover it.
-- Use only labels from the agenda. Judge only from the transcript."""
+- Use only labels from the agenda, or "{NO_ITEM}". Judge only from the transcript.
+{DATA_RULE}"""
 
 
 def clock(t: float) -> str:
@@ -73,37 +91,57 @@ def render_track_prompt(
         timebox = f", {item.minutes} min" if item.minutes else ""
         return f"[{label}] {item.title} ({item.status}{timebox})"
 
-    current = next(
-        (describe(lb, i) for lb, i in labels.items() if i.id == agenda.current_item_id), "none"
-    )
+    current = next((lb for lb, i in labels.items() if i.id == agenda.current_item_id), NO_ITEM)
     return "\n".join(
         [
             "Agenda ([label] title (status, timebox)):",
-            *(describe(label, item) for label, item in labels.items()),
+            *fenced(describe(label, item) for label, item in labels.items()),
             "",
             f"Being discussed before this stretch: {current}",
             "",
-            "Transcript stretch ([mm:ss] speaker: text):",
-            *(f"[{clock(s.t_start)}] {s.speaker_name}: {s.text}" for s in segments),
+            "Transcript stretch ([n] [mm:ss] speaker: text):",
+            *fenced(
+                f"[{n}] [{clock(s.t_start)}] {s.speaker_name}: {clip(s.text)}"
+                for n, s in enumerate(segments, 1)
+            ),
         ]
     )
 
 
-async def classify(
-    llm: LLM, agenda: Agenda, segments: Sequence[TranscriptSegment]
-) -> tuple[str | None, set[str]]:
-    """(current item id or None, ids of covered items). Labels not on the agenda are dropped."""
+@dataclass(frozen=True)
+class Labelled:
+    """What the model said about a stretch, checked against the agenda."""
+
+    about: tuple[str | None, ...]  # per segment: its item's id, or None (no item, or no label)
+    current: str | None  # the item of the last labelled segment
+    covered: frozenset[str]
+
+
+async def classify(llm: LLM, agenda: Agenda, segments: Sequence[TranscriptSegment]) -> Labelled:
+    """Labels each segment (numbered from 1 in the order given) with an item. Labels not on the
+    agenda and segment numbers outside the stretch are ignored; where runs overlap, the later
+    one wins."""
     labels = {f"a{n}": item for n, item in enumerate(agenda.items, 1)}
     draft = await llm.generate_structured(
         render_track_prompt(agenda, labels, segments), AgendaTrackDraft, system=track_system()
     )
 
-    def item_id(label: str | None) -> str | None:
-        item = labels.get((label or "").strip())
+    def item_id(label: str) -> str | None:
+        item = labels.get(label.strip())
         return item.id if item else None
 
-    covered = {i for i in map(item_id, draft.covered) if i}
-    return item_id(draft.current), covered
+    marks: dict[int, str | None] = {}
+    for run in draft.topics:
+        about = item_id(run.item)
+        if about is None and run.item.strip().lower() != NO_ITEM:
+            continue
+        for n in range(max(run.first, 1), min(run.last, len(segments)) + 1):
+            marks[n] = about
+    return Labelled(
+        about=tuple(marks.get(n) for n in range(1, len(segments) + 1)),
+        current=marks[max(marks)] if marks else None,
+        covered=frozenset(i for i in map(item_id, draft.covered) if i),
+    )
 
 
 def runs(segments: Sequence[TranscriptSegment], until: float) -> list[tuple[float, float]]:
@@ -119,8 +157,11 @@ def runs(segments: Sequence[TranscriptSegment], until: float) -> list[tuple[floa
     return merged
 
 
-def talk_time(segments: Sequence[TranscriptSegment], after: float | None, until: float) -> float:
-    """Seconds of discussion up to `until` that the tick which tracked up to `after` did not count.
+def uncounted(
+    segments: Sequence[TranscriptSegment], after: float | None, until: float
+) -> list[tuple[float, float]]:
+    """The stretches of discussion up to `until` that the tick which tracked up to `after` did
+    not count.
 
     That tick counted up to where the speech it knew of ended, so a pause from there into this
     stretch counts now, like any other pause, and an utterance across `after` counts on both
@@ -130,7 +171,27 @@ def talk_time(segments: Sequence[TranscriptSegment], after: float | None, until:
     else:
         known = [min(s.t_end, after) for s in segments if s.t_start < after]
         counted_to = min(after, max(known, default=after))
-    return sum(max(0.0, b - max(a, counted_to)) for a, b in runs(segments, until))
+    return [(max(a, counted_to), b) for a, b in runs(segments, until) if b > counted_to]
+
+
+def split_talk(
+    spans: Sequence[tuple[float, float]],
+    batch: Sequence[TranscriptSegment],
+    about: Sequence[str | None],
+) -> dict[str, float]:
+    """Each item's seconds of `spans`. A segment's item holds from its start until the next
+    segment of the batch (ordered by start) starts, so a pause goes with what was said before it
+    and talk over it with the later speaker. The first segment's item also holds before it, and
+    the last one's after it (an utterance still going at the tracked point). Time held by a
+    segment about no item counts for none."""
+    shares: dict[str, float] = {}
+    for k, item in enumerate(about):
+        lo = batch[k].t_start if k > 0 else -math.inf
+        hi = batch[k + 1].t_start if k + 1 < len(batch) else math.inf
+        held = sum(max(0.0, min(b, hi) - max(a, lo)) for a, b in spans)
+        if item is not None and held > 0:
+            shares[item] = shares.get(item, 0.0) + held
+    return shares
 
 
 def scheduled_end_t(meeting: Meeting) -> float | None:
@@ -189,26 +250,26 @@ def nudge(agenda: Agenda, meeting: Meeting, now: float) -> tuple[Agenda, list[Ag
 
 @dataclass(frozen=True)
 class Stretch:
-    """What a tick learned: the point it tracked up to and, if the model was asked, which item
-    the stretch was about (with its talk time) and which items it finished."""
+    """What a tick learned: the point it tracked up to and, if the model was asked, the item
+    being discussed at its end, each item's talk time in it and which items it finished."""
 
     until: float
     asked: bool = False
     current: str | None = None
     covered: frozenset[str] = frozenset()
-    seconds: float = 0.0
+    seconds: Mapping[str, float] = field(default_factory=dict)
 
 
 def advance(agenda: Agenda, stretch: Stretch) -> Agenda:
-    """The agenda after a stretch: its time to the current item, covered items marked. Ids no
+    """The agenda after a stretch: each item's talk time added, covered items marked. Ids no
     longer on the agenda (a person removed the item meanwhile) are ignored."""
     ids = {i.id for i in agenda.items}
     current = stretch.current if stretch.current in ids else None
     items = []
     for item in agenda.items:
         update: dict = {}
-        if item.id == current and stretch.seconds:
-            update["discussed_s"] = item.discussed_s + stretch.seconds
+        if seconds := stretch.seconds.get(item.id, 0.0):
+            update["discussed_s"] = item.discussed_s + seconds
         if item.id in stretch.covered and item.status == "pending":
             update["status"] = "covered"
         items.append(item.model_copy(update=update) if update else item)
@@ -249,19 +310,24 @@ async def track_agenda(
     since = agenda.tracked_until
     until = max(now - SETTLE_S, since or 0.0)
     transcript = await store.transcript(meeting.id)
-    talk = talk_time(transcript, since, until)
-    batch = [s for s in transcript if (since is None or s.t_end > since) and s.t_end <= until]
+    spans = uncounted(transcript, since, until)
+    talk = sum(b - a for a, b in spans)
+    batch = sorted(
+        (s for s in transcript if (since is None or s.t_end > since) and s.t_end <= until),
+        key=lambda s: s.t_start,
+    )[-MAX_BATCH:]
     stretch: Stretch | None = None
     failure: LLMError | None = None
     if talk == 0:
         stretch = Stretch(until)  # nothing said since: move on without the model
     elif batch and (talk >= MIN_TALK_S or until - (since or 0.0) >= MAX_WAIT_S):
         try:
-            current, covered = await classify(make_llm(), agenda, batch[-MAX_BATCH:])
+            said = await classify(make_llm(), agenda, batch)
         except LLMError as e:
             failure = e
         else:
-            stretch = Stretch(until, True, current, frozenset(covered), talk)
+            seconds = split_talk(spans, batch, said.about)
+            stretch = Stretch(until, True, said.current, said.covered, seconds)
 
     response = await save(store, meeting, now, since, stretch)
     if failure is not None:
