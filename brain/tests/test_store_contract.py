@@ -3,18 +3,18 @@
 Every test here talks to the store only through the `Store` protocol and seeds its own data
 through it, so the same tests run unchanged against any implementation.
 
-Adding an implementation (the Postgres store, for example):
+Adding an implementation:
 
-1. Write an async context manager that yields a fresh, empty store and cleans up after it:
+1. Write an async context manager that takes the test's fixture request, yields a fresh, empty
+   store and cleans up after it. It can ask for fixtures it needs, as `postgres_store` does:
 
        @asynccontextmanager
-       async def postgres_store() -> AsyncIterator[Store]:
-           async with fresh_database() as dsn:
-               yield PostgresStore(dsn)
+       async def postgres_store(request) -> AsyncIterator[Store]:
+           dsn = request.getfixturevalue("pg_dsn")
+           ...
+           yield PostgresStore(pool)
 
-2. Add it to STORE_FACTORIES, with a skip mark if it needs something that may be missing:
-
-       pytest.param(postgres_store, id="postgres", marks=needs_pgserver)
+2. Add it to STORE_FACTORIES. A factory whose fixture skips (pgserver missing) skips its runs.
 
 Every test then runs once per implementation (`-k memory`, `-k postgres` to pick one). Ids for
 teams and people are UUID strings so a store with uuid columns accepts them.
@@ -50,21 +50,37 @@ pytestmark = pytest.mark.anyio
 
 
 @asynccontextmanager
-async def in_memory_store() -> AsyncIterator[Store]:
+async def in_memory_store(request: pytest.FixtureRequest) -> AsyncIterator[Store]:
     yield InMemoryStore()
 
 
-StoreFactory = Callable[[], AbstractAsyncContextManager[Store]]
+@asynccontextmanager
+async def postgres_store(request: pytest.FixtureRequest) -> AsyncIterator[Store]:
+    """A real Postgres (pgserver) with the migrations applied, through a connection pool."""
+    from brain.db import migrate, open_pool
+    from brain.pg_store import PostgresStore
+
+    dsn = request.getfixturevalue("pg_dsn")
+    await migrate(dsn)
+    pool = await open_pool(dsn, max_size=4)
+    try:
+        yield PostgresStore(pool)
+    finally:
+        await pool.close()
+
+
+StoreFactory = Callable[[pytest.FixtureRequest], AbstractAsyncContextManager[Store]]
 
 STORE_FACTORIES = [
     pytest.param(in_memory_store, id="memory"),
+    pytest.param(postgres_store, id="postgres"),
 ]
 
 
 @pytest.fixture(params=STORE_FACTORIES)
 async def store(request, anyio_backend) -> AsyncIterator[Store]:
     factory: StoreFactory = request.param
-    async with factory() as store:
+    async with factory(request) as store:
         yield store
 
 
