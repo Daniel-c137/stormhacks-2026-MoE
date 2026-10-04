@@ -154,7 +154,9 @@ async def test_a_step_lists_its_segments_in_the_order_they_were_said():
         evidence=["s4"],
         chain=[ExtractedStep(text="The fix is merged but not released", evidence=["s3", "s2"])],
     )
-    llm = MockLLM(structured={ReportExtraction: ReportExtraction(summary="S", decisions=[decision])})
+    llm = MockLLM(
+        structured={ReportExtraction: ReportExtraction(summary="S", decisions=[decision])}
+    )
 
     report = await build_report(llm, standup())
 
@@ -165,7 +167,9 @@ async def test_a_step_lists_its_segments_in_the_order_they_were_said():
 async def test_a_long_chain_keeps_only_its_last_few_steps():
     steps = [ExtractedStep(text=f"Step {n}", evidence=[f"s{n}"]) for n in range(1, 7)]
     decision = ExtractedDecision(text="Hold the waitlist email", evidence=["s4"], chain=steps)
-    llm = MockLLM(structured={ReportExtraction: ReportExtraction(summary="S", decisions=[decision])})
+    llm = MockLLM(
+        structured={ReportExtraction: ReportExtraction(summary="S", decisions=[decision])}
+    )
 
     report = await build_report(llm, standup())
 

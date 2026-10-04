@@ -40,10 +40,23 @@ class ExtractedTask(BaseModel):
     evidence: list[str] = Field(description=EVIDENCE)
 
 
+class ExtractedStep(BaseModel):
+    text: str = Field(
+        description="What was said at this point, in at most twelve words, e.g. "
+        "'Carol: production is still on the old release'."
+    )
+    evidence: list[str] = Field(description="Ids of the transcript segments this step describes.")
+
+
 class ExtractedDecision(BaseModel):
     text: str
     made_by_id: str | None = Field(default=None, description="Participant id, if clear.")
     evidence: list[str] = Field(description=EVIDENCE)
+    chain: list[ExtractedStep] = Field(
+        default=[],
+        description="The two to four things said, in order, that led to this decision; a single "
+        "step when the transcript only shows it being decided.",
+    )
 
 
 class ExtractedRisk(BaseModel):
@@ -84,6 +97,10 @@ Rules:
 - A due date only when a deadline is stated, as YYYY-MM-DD. Resolve relative days such as
   "by Wednesday" against the meeting date. Otherwise null.
 - Decisions are what the team agreed on, not proposals that are still open.
+- Every decision has a chain: the few things said, in the order they were said, that led the
+  team to it, such as the problem raised, an option or objection, and the agreement. Two to four
+  steps, each at most twelve words and each listing the segments it describes. Give a single step
+  when the transcript only shows the decision being made. Never invent a step to make a chain.
 - Open questions are unresolved; blockers are things stopping work.
 - Links are issue keys, pull request numbers or URLs mentioned in the transcript, as said.
 - Leave a list empty when nothing applies. Never fill a section just to have something.

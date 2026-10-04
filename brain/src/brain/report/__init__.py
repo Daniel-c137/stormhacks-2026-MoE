@@ -6,6 +6,7 @@ from .extraction import (
     ExtractedDecision,
     ExtractedLink,
     ExtractedRisk,
+    ExtractedStep,
     ExtractedTask,
     ReportExtraction,
 )
@@ -17,6 +18,7 @@ __all__ = [
     "ExtractedDecision",
     "ExtractedLink",
     "ExtractedRisk",
+    "ExtractedStep",
     "ExtractedTask",
     "ProcessedMeeting",
     "ReportExtraction",
