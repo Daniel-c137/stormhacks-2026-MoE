@@ -54,6 +54,7 @@ def test_a_meeting_can_be_scheduled_and_old_payloads_still_parse():
 
     assert (old.invitee_ids, old.scheduled_start, old.ended_at) == ([], None, None)
     assert old.transcript_deleted_at is None
+    assert old.agent_joined_at is None  # the agent never joined
     assert Meeting.model_validate(scheduled.model_dump()) == scheduled
 
 

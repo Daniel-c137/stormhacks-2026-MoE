@@ -153,6 +153,24 @@ async def test_the_prompt_gives_date_participants_and_labelled_segments():
     assert agent in call.system
 
 
+def without_the_agent(**changes) -> TranscriptInput:
+    meeting = standup(**changes)
+    said = [s for s in meeting.segments if s.speaker_id != AGENT_PARTICIPANT_ID]
+    return meeting.model_copy(update={"segments": said})
+
+
+async def test_the_agent_is_a_participant_only_when_it_was_in_the_meeting():
+    agent_line = f"- {AGENT_PARTICIPANT_ID}: {get_identity().agent_name}"
+
+    _, absent = await report_for(without_the_agent())
+    _, joined = await report_for(without_the_agent(agent_joined=True))
+    _, spoke = await report_for(standup(agent_joined=False))
+
+    assert agent_line not in absent.calls[0].prompt
+    assert agent_line in joined.calls[0].prompt
+    assert agent_line in spoke.calls[0].prompt  # it spoke, so it was there
+
+
 async def test_only_final_segments_are_sent_once_each():
     meeting = standup()
     partial = segment(6).model_copy(

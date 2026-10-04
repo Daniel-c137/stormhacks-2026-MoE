@@ -2,6 +2,7 @@
 and the team's voice when it joins, and the meeting's public chat. Private chat never arrives."""
 
 import asyncio
+from datetime import UTC, datetime
 
 from api_support import ALEX, OUTSIDER, SARAH, create
 from fastapi.testclient import TestClient
@@ -70,6 +71,68 @@ def test_reading_a_meeting_needs_the_worker_token(app, client_as):
     assert TestClient(app).get(f"/internal/meetings/{meeting['id']}").status_code == 401
     impostor = TestClient(app, headers={"X-Internal-Token": "guess"})
     assert impostor.get(f"/internal/meetings/{meeting['id']}").status_code == 401
+
+
+# the agent joining
+
+
+def joined_at(store, meeting_id: str):
+    return asyncio.run(store.meeting(meeting_id)).agent_joined_at
+
+
+def test_the_worker_records_that_polaris_joined_and_the_board_sees_it(store, worker, client_as):
+    meeting = started(client_as)
+    before = datetime.now(UTC)
+
+    response = worker.post(f"/internal/meetings/{meeting['id']}/agent-joined")
+
+    assert response.status_code == 204
+    assert before <= joined_at(store, meeting["id"]) <= datetime.now(UTC)
+    seen = client_as(ALEX).get(f"/meetings/{meeting['id']}").json()
+    assert datetime.fromisoformat(seen["agent_joined_at"]) == joined_at(store, meeting["id"])
+
+
+def test_a_meeting_polaris_never_joined_says_so(client_as):
+    meeting = started(client_as)
+
+    assert client_as(ALEX).get(f"/meetings/{meeting['id']}").json()["agent_joined_at"] is None
+
+
+def test_joining_again_keeps_the_first_time(store, worker, client_as):
+    meeting = started(client_as)
+    worker.post(f"/internal/meetings/{meeting['id']}/agent-joined")
+    first = joined_at(store, meeting["id"])
+
+    again = worker.post(f"/internal/meetings/{meeting['id']}/agent-joined")
+
+    assert again.status_code == 204
+    assert joined_at(store, meeting["id"]) == first
+
+
+def test_polaris_cannot_join_a_meeting_that_is_not_live(store, worker, client_as):
+    meeting = started(client_as)
+    client_as(ALEX).post(f"/meetings/{meeting['id']}/end")
+    scheduled = asyncio.run(
+        store.create_meeting(
+            meeting["team_id"], "Later", ALEX.id, scheduled_start=datetime(2030, 1, 1, tzinfo=UTC)
+        )
+    )
+
+    for meeting_id in (meeting["id"], scheduled.id):
+        response = worker.post(f"/internal/meetings/{meeting_id}/agent-joined")
+        assert response.status_code == 409
+        assert joined_at(store, meeting_id) is None
+    assert worker.post("/internal/meetings/not-a-meeting/agent-joined").status_code == 404
+
+
+def test_recording_the_join_needs_the_worker_token(app, store, client_as):
+    meeting = started(client_as)
+    path = f"/internal/meetings/{meeting['id']}/agent-joined"
+
+    assert TestClient(app).post(path).status_code == 401
+    assert TestClient(app, headers={"X-Internal-Token": "guess"}).post(path).status_code == 401
+    assert client_as(ALEX).post(path).status_code == 401
+    assert joined_at(store, meeting["id"]) is None
 
 
 # public chat

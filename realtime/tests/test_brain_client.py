@@ -264,6 +264,23 @@ async def test_an_unknown_meeting_is_a_rejection():
     assert caught.value.status == 404
 
 
+async def test_says_the_agent_joined_and_retries_since_the_brain_keeps_the_first_time():
+    recorder = Recorder(503, 204)
+
+    await client(recorder).agent_joined("m-1")
+
+    assert [r.method for r in recorder.requests] == ["POST", "POST"]
+    assert str(recorder.requests[0].url) == "http://brain.test/internal/meetings/m-1/agent-joined"
+    assert recorder.requests[0].headers["X-Internal-Token"] == TOKEN
+
+
+async def test_a_meeting_that_is_not_live_refuses_the_join():
+    with pytest.raises(BrainRejected) as caught:
+        await client(Recorder(409)).agent_joined("m-1")
+
+    assert caught.value.status == 409
+
+
 async def test_reads_the_keyterms_for_the_meetings_scribe_streams():
     recorder = Recorder(httpx.Response(200, json={"terms": ["Polaris", "DS-104"]}))
 

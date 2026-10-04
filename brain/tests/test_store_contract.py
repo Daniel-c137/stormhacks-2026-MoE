@@ -709,6 +709,44 @@ async def test_meeting_updates_are_saved(store):
         await store.update_meeting(updated.model_copy(update={"id": new_id()}))
 
 
+async def test_the_agents_first_join_of_a_live_meeting_is_kept(store):
+    team, alex, *_ = await two_teams(store)
+    meeting = await store.create_meeting(team.id, "Standup", alex.id)
+    assert meeting.agent_joined_at is None
+
+    joined = await store.mark_agent_joined(meeting.id, at(1))
+    again = await store.mark_agent_joined(meeting.id, at(5))  # a reconnect, or a resend
+
+    assert joined.agent_joined_at == at(1)
+    assert again == joined
+    assert await store.meeting(meeting.id) == joined
+    with pytest.raises(NotFound):
+        await store.mark_agent_joined(new_id(), at(1))
+
+
+async def test_the_agent_joins_only_a_live_meeting(store):
+    team, alex, *_ = await two_teams(store)
+    scheduled = await store.create_meeting(team.id, "Planning", alex.id, scheduled_start=at(60))
+    ended = await ended_meeting(store, team, alex, "Retro", at(0))
+
+    for meeting in (scheduled, ended):
+        with pytest.raises(Conflict):
+            await store.mark_agent_joined(meeting.id, at(61))
+        assert (await store.meeting(meeting.id)).agent_joined_at is None
+
+
+async def test_the_agents_join_time_is_saved_with_the_whole_meeting(store):
+    team, alex, *_ = await two_teams(store)
+    meeting = await store.mark_agent_joined(
+        (await store.create_meeting(team.id, "Standup", alex.id)).id, at(1)
+    )
+
+    updated = await store.update_meeting(meeting.model_copy(update={"title": "Daily"}))
+
+    assert updated.agent_joined_at == at(1)
+    assert await store.meeting(meeting.id) == updated
+
+
 # transcript
 
 
