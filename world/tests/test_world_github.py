@@ -132,6 +132,17 @@ async def test_issue_search_needs_every_word_as_a_whole_word_ignoring_case():
     assert await search("search_issues", "gma") == []
 
 
+async def test_words_joined_by_or_need_only_one_of_them():
+    either = await search("search_issues", "Gmail OR Outlook")
+
+    assert set(either) == set(await search("search_issues", "Gmail")) | set(
+        await search("search_issues", "Outlook")
+    )
+    assert await search("search_issues", "gmail OR nonexistentword") == await search(
+        "search_issues", "gmail"
+    )
+
+
 async def test_comments_count_as_text():
     # issue 37 says "fee" only in a comment
     (issue,) = [i for i in raw("issues") if i["number"] == 37]
@@ -204,7 +215,8 @@ async def test_search_qualifiers(tool, query, found):
         "Gmail language:python",
         "Gmail created:>2026-01-01",
         "Gmail in:title",
-        "Gmail OR Outlook",
+        "Gmail Outlook OR Sync",
+        "OR Gmail",
         "NOT Gmail",
         "Gmail -label:bug",
         "Gmail is:locked",

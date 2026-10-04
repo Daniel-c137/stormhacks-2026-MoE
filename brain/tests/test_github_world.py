@@ -60,6 +60,21 @@ async def test_search_finds_the_worlds_issues_and_pull_requests(reader):
     assert prs[0].url == f"{WEB}/pull/50"
 
 
+async def test_a_search_no_item_has_every_word_of_finds_the_closest_first(reader):
+    # PR 50 says "Approve check" but neither "approved" nor "fix"; the issue's test name is one
+    # word (test_inbox_sync_pagination), so "inbox" and "sync" are not whole words in it
+    prs = await reader.search("approved check fix", "pr")
+    issues = await reader.search("flaky inbox sync test", "issue")
+
+    assert prs[0].number == 50
+    assert issues[0].number == 41
+
+
+async def test_a_search_that_matches_nothing_by_any_word_finds_nothing(reader):
+    assert await reader.search("nonexistentword", "issue") == []
+    assert await reader.search("nonexistentword anotherone", "pr") == []
+
+
 async def test_the_latest_issues_and_pull_requests_come_most_recently_updated_first(reader):
     issues = await reader.latest("issue", 3)
     prs = await reader.latest("pr", 3)
