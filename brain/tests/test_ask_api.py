@@ -340,6 +340,28 @@ def test_a_home_follow_up_answered_from_the_conversation_is_labelled(app, client
     assert answer.sources == []
 
 
+def test_home_ask_never_gets_the_agents_past_words_as_evidence(app, client_as, store, memory):
+    meeting = create(client_as(ALEX), "Friday standup")
+    (agents_line,) = [s for s in STANDUP.segments if s.speaker_id == AGENT_PARTICIPANT_ID]
+    asyncio.run(
+        memory.index_meeting(
+            TEAM.id, meeting["id"], [agents_line.model_copy(update={"meeting_id": meeting["id"]})]
+        )
+    )
+    llm = scripted(PlannedCall(tool="search_meetings", query="DS-104 In Progress in Jira"))
+    app.dependency_overrides[get_llm] = lambda: llm
+
+    response = client_as(ALEX).post(
+        "/ask", json={"question": "Is DS-104 still In Progress?", "visibility": "private"}
+    )
+
+    assert response.status_code == 200, response.text
+    answer = Answer.model_validate(response.json())
+    assert answer.sources == []
+    assert len(llm.calls) == 1  # only the plan; no evidence, so nothing to answer from
+    assert all("though the fix is merged" not in call.prompt for call in llm.calls)
+
+
 def test_home_ask_never_reaches_another_teams_memory(client_as, store, memory, llm):
     indexed_standup(client_as(ALEX), memory)
 

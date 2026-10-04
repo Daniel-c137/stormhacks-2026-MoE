@@ -22,7 +22,15 @@ from brain.llm import LLMError, MockEmbedder, MockLLM
 from brain.memory import InMemoryMemoryStore, MeetingMemory, UnusableMemory
 from brain.report import ExtractedDecision, ExtractedTask, ReportExtraction
 from brain.report.decisions import DecisionVerdict, DecisionVerdicts
-from contracts import Decision, DecisionRelation, Person, Report, ReportProgress
+from contracts import (
+    AGENT_PARTICIPANT_ID,
+    Decision,
+    DecisionRelation,
+    Person,
+    Report,
+    ReportProgress,
+    get_identity,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -379,6 +387,24 @@ async def test_the_transcript_and_report_are_indexed_into_memory(api, memory):
     assert {c.kind for c in mine} == {"transcript", "summary", "decision", "task"}
     turns = [c for c in mine if c.kind == "transcript"]
     assert turns[0].speaker_id == SARAH.id
+
+
+async def test_the_agents_own_words_are_left_out_of_memory(api, memory):
+    agent = get_identity().agent_name
+    said_by_agent = "Jira still shows the refund ticket as In Progress."
+    agent_person = Person(id=AGENT_PARTICIPANT_ID, name=agent, short=agent, initials=agent[:1])
+    meeting = await api.create()
+    await api.ingest(meeting["id"])
+    await api.ingest(meeting["id"], [(agent_person, said_by_agent)], first=len(LINES) + 1)
+    await api.end(meeting["id"])
+    await api.drain()
+
+    hits = await memory.search(TEAM.id, said_by_agent, k=50)
+
+    mine = [h.chunk for h in hits if h.chunk.meeting_id == meeting["id"]]
+    assert any(c.kind == "transcript" for c in mine)
+    assert all(c.speaker_id != AGENT_PARTICIPANT_ID for c in mine)
+    assert not any(said_by_agent in c.text for c in mine)
 
 
 async def test_without_embeddings_the_write_up_finishes_and_says_indexing_was_skipped(api):
