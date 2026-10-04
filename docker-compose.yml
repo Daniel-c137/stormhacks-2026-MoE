@@ -3,7 +3,7 @@
 # and Caddy in front. Run it with the production env file:
 #   docker compose --env-file deploy/.env up -d --build
 # --env-file fills the ${...} below; the services that read settings also load the same file.
-# Only Caddy publishes ports. See README.md.
+# Only Caddy publishes ports. See docs/deploy.md.
 
 # A fixed project name keeps container and volume names the same whatever the checkout is called.
 name: moe
