@@ -65,10 +65,10 @@ SEGMENT = (
     " language, original_text"
 )
 FACT_CHECK = (
-    "id, claim, speaker_name, verdict, confidence, severity, snippet_ids, sources, raised_hand,"
-    " visibility, recipient_id, t, created_at"
+    "id, claim, speaker_name, verdict, confidence, severity, finding, snippet_ids, sources, t,"
+    " created_at"
 )
-FACT_CHECK_STATE = "meeting_id, checked_until, checked_at, hand_raised_at"
+FACT_CHECK_STATE = "meeting_id, checked_until, checked_at"
 LOGIN = "person_id, email, password_hash, created_at, updated_at"
 # Newest first by started_at, or scheduled_start before it starts; ties in creation order.
 NEWEST_MEETING_FIRST = "coalesce(m.started_at, m.scheduled_start) desc nulls last, m.seq"
@@ -553,7 +553,8 @@ class PostgresStore:
             items = await self._all(
                 cur,
                 "select id, title, why, owner_id, sources, status, minutes, added_by,"
-                " discussed_s, nudged_t from agenda_items where meeting_id = %s order by ord",
+                " discussed_s, nudged_t, covered_by, covered_t from agenda_items"
+                " where meeting_id = %s order by ord",
                 [meeting_id],
             )
         return Agenda.model_validate(_utc(row) | {"items": items})
@@ -604,10 +605,11 @@ class PostgresStore:
         if agenda.items:
             await cur.executemany(
                 "insert into agenda_items (meeting_id, ord, id, title, why, owner_id,"
-                " sources, status, minutes, added_by, discussed_s, nudged_t)"
+                " sources, status, minutes, added_by, discussed_s, nudged_t, covered_by,"
+                " covered_t)"
                 " values (%(meeting_id)s, %(ord)s, %(id)s, %(title)s, %(why)s, %(owner_id)s,"
                 " %(sources)s, %(status)s, %(minutes)s, %(added_by)s, %(discussed_s)s,"
-                " %(nudged_t)s)",
+                " %(nudged_t)s, %(covered_by)s, %(covered_t)s)",
                 [
                     self._agenda_item(agenda.meeting_id, i, item)
                     for i, item in enumerate(agenda.items)
@@ -617,8 +619,8 @@ class PostgresStore:
     # fact-checks
 
     async def add_fact_check(self, meeting_id: str, check: FactCheck) -> None:
-        if check.visibility != "public" or check.recipient_id is not None:
-            raise ValueError("Private fact-checks are never stored")
+        if check.recipient_id is not None:
+            raise ValueError("Whom a fact-check was sent to is never stored")
         values = check.model_dump(mode="json") | {
             "meeting_id": meeting_id,
             "created_at": check.created_at,
@@ -629,8 +631,8 @@ class PostgresStore:
             await cur.execute(
                 f"insert into fact_checks (meeting_id, {FACT_CHECK})"
                 " values (%(meeting_id)s, %(id)s, %(claim)s, %(speaker_name)s, %(verdict)s,"
-                " %(confidence)s, %(severity)s, %(snippet_ids)s, %(sources)s, %(raised_hand)s,"
-                " %(visibility)s, %(recipient_id)s, %(t)s, %(created_at)s)"
+                " %(confidence)s, %(severity)s, %(finding)s, %(snippet_ids)s, %(sources)s, %(t)s,"
+                " %(created_at)s)"
                 " on conflict (meeting_id, id) do nothing",
                 values,
             )
@@ -661,9 +663,9 @@ class PostgresStore:
             # A first save inserts; of overlapping first saves the later ones find the row.
             sql = (
                 f"insert into fact_check_state ({FACT_CHECK_STATE})"
-                " values (%(meeting_id)s, %(checked_until)s, %(checked_at)s, %(hand_raised_at)s)"
+                " values (%(meeting_id)s, %(checked_until)s, %(checked_at)s)"
                 " on conflict (meeting_id) do update set checked_until = excluded.checked_until,"
-                " checked_at = excluded.checked_at, hand_raised_at = excluded.hand_raised_at"
+                " checked_at = excluded.checked_at"
                 " where fact_check_state.checked_until is null"
                 " returning meeting_id"
             )
@@ -671,7 +673,7 @@ class PostgresStore:
             # The row lock makes an overlapping save wait, then find checked_until moved.
             sql = (
                 "update fact_check_state set checked_until = %(checked_until)s,"
-                " checked_at = %(checked_at)s, hand_raised_at = %(hand_raised_at)s"
+                " checked_at = %(checked_at)s"
                 " where meeting_id = %(meeting_id)s and checked_until = %(expected)s"
                 " returning meeting_id"
             )

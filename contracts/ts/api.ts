@@ -1,6 +1,6 @@
 // HTTP request and response bodies. Board -> brain, and realtime -> brain (internal).
 import type { Agenda, AgendaItemStatus, AgendaNudge } from "./agenda";
-import type { AgentState, Answer, CodeSnippet, FactCheck, Invocation, Visibility } from "./agent";
+import type { Answer, CodeSnippet, FactCheck, Invocation, Visibility } from "./agent";
 import type { Meeting, Person } from "./meeting";
 import type { TranscriptSegment } from "./transcript";
 
@@ -96,14 +96,30 @@ export interface FactCheckRequest {
   now?: number | null;
 }
 
-/** The worker publishes each check on Topic.FACT_CHECK: a public one to the room, a private one
- * only to its recipient_id. `agent_state`, set only when a check raises the hand, goes on
- * Topic.AGENT_STATE; the hand is a visual cue and nothing is spoken. `snippets` are the code the
- * checks' snippet_ids name, for whoever sees those checks. */
+/** The worker sends each check to its recipient_id only, as a private chat message from the agent
+ * (Topic.PRIVATE_CHAT), never stored, spoken or shown to the room. `snippets` are the code the
+ * checks' snippet_ids name. */
 export interface FactCheckResponse {
   checks?: FactCheck[];
-  agent_state?: AgentState | null;
   snippets?: CodeSnippet[];
+}
+
+/** realtime -> brain when someone joins a live meeting 5 minutes or more after it started, or
+ * comes back after 5 minutes or more away. `since` and `until` are seconds from the meeting start:
+ * the span they missed. */
+export interface CatchUpRequest {
+  participant_id: string;
+  since: number;
+  until: number;
+}
+
+/** What the worker sends only to the participant, as a private chat message from the agent
+ * (Topic.PRIVATE_CHAT, recipient_id set). `text` is null when there is nothing to send.
+ * `source_times` are the meeting seconds of the transcript lines it rests on. Never stored,
+ * broadcast or spoken. */
+export interface CatchUpResponse {
+  text?: string | null;
+  source_times?: number[];
 }
 
 /** Only the fields that are set change. */

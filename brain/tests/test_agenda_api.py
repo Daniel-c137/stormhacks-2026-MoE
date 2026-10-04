@@ -201,6 +201,19 @@ def test_a_scheduled_meeting_can_have_its_agenda_set_in_the_lobby(client_as, sto
     assert response.status_code == 200, response.text
 
 
+def test_an_item_checked_before_the_meeting_starts_has_a_person_but_no_time(client_as, store):
+    start = datetime.now(UTC) + timedelta(days=1)
+    meeting = anyio.run(
+        lambda: store.create_meeting(TEAM.id, "Planning", ALEX.id, scheduled_start=start)
+    )
+
+    response = put(client_as(SARAH), meeting.id, {"title": "Roadmap", "status": "covered"})
+
+    assert response.status_code == 200, response.text
+    (item,) = response.json()["items"]
+    assert (item["covered_by"], item["covered_t"]) == (SARAH.id, None)
+
+
 def test_the_agenda_is_read_only_once_the_meeting_has_ended(client_as):
     alex = client_as(ALEX)
     meeting = create(alex)
@@ -425,7 +438,7 @@ def test_suggestions_come_from_earlier_reports_and_tasks_and_cite_them(app, clie
     ]
     refund, queue = items
     assert refund["why"] == "Left open last time" and refund["minutes"] == 10
-    assert queue["minutes"] is None
+    assert queue["minutes"] == 30  # an out-of-range timebox is brought into range
     for item in items:
         assert item["id"] and item["added_by"] is None and item["status"] == "pending"
         assert item["sources"]
@@ -644,3 +657,157 @@ def test_suggestions_are_asked_for_on_the_teams_today(
 
     [call] = llm.calls
     assert f"Today: {today}" in call.prompt
+
+
+# drafting the agenda: suggestions that are ready to add as ordinary items
+
+
+def create_timed(client: TestClient, title: str, duration_min: int) -> dict:
+    response = client.post("/meetings", json={"title": title, "duration_min": duration_min})
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def staging_items(*titles_and_minutes: tuple[str, int | None]):
+    """A model answer: one suggestion per title, all citing the staging blocker."""
+
+    def answer(prompt: str) -> AgendaSuggestionDraft:
+        source = label_of(prompt, "Staging database is down")
+        return AgendaSuggestionDraft(
+            items=[
+                SuggestedItem(title=title, why="w", minutes=minutes, source_ids=[source])
+                for title, minutes in titles_and_minutes
+            ]
+        )
+
+    return answer
+
+
+def test_suggestions_skip_what_is_already_on_the_agenda(app, client_as, store):
+    alex = client_as(ALEX)
+    earlier_meeting(alex, store)
+    meeting = create(alex, "Next sync")
+    put(alex, meeting["id"], {"title": "Who owns the refund script?"}, {"title": "Hiring"})
+    llm = MockLLM(
+        structured={
+            AgendaSuggestionDraft: staging_items(
+                ("who owns the refund script", 10),
+                ("Who owns the refund-script!", 10),
+                ("HIRING.", 5),
+                ("Fix the staging database", 10),
+                ("Fix the staging database?", 10),
+            )
+        }
+    )
+    use_llm(app, llm)
+
+    items = suggest(alex, meeting["id"]).json()["items"]
+
+    assert [i["title"] for i in items] == ["Fix the staging database"]
+    (call,) = llm.calls
+    assert "Already on the agenda" in call.prompt
+    assert "- Who owns the refund script?" in call.prompt and "- Hiring" in call.prompt
+    assert [i["title"] for i in saved(alex, meeting["id"])] == [
+        "Who owns the refund script?",
+        "Hiring",
+    ]
+
+
+def test_every_suggestion_gets_a_timebox_in_range(app, client_as, store):
+    alex = client_as(ALEX)
+    earlier_meeting(alex, store)
+    meeting = create(alex)
+    answer = staging_items(("Long", 90), ("None given", None), ("Tiny", 2), ("Fine", 15))
+    use_llm(app, MockLLM(structured={AgendaSuggestionDraft: answer}))
+
+    items = suggest(alex, meeting["id"]).json()["items"]
+
+    assert [(i["title"], i["minutes"]) for i in items] == [
+        ("Long", 30),
+        ("None given", 10),
+        ("Tiny", 5),
+        ("Fine", 15),
+    ]
+
+
+def test_timeboxes_fit_the_time_the_meeting_has_left(app, client_as, store):
+    alex = client_as(ALEX)
+    earlier_meeting(alex, store)
+    meeting = create_timed(alex, "Next sync", 30)
+    put(alex, meeting["id"], {"title": "Release notes", "minutes": 10}, {"title": "Hiring"})
+    llm = MockLLM(
+        structured={AgendaSuggestionDraft: staging_items(("A", 15), ("B", 15), ("C", 10))}
+    )
+    use_llm(app, llm)
+
+    items = suggest(alex, meeting["id"]).json()["items"]
+
+    minutes = [i["minutes"] for i in items]
+    assert [i["title"] for i in items] == ["A", "B", "C"]
+    assert all(m is not None and m >= 5 for m in minutes)
+    assert sum(minutes) <= 20
+    assert minutes[0] >= minutes[2]
+    (call,) = llm.calls
+    assert "Meeting length: 30 min" in call.prompt
+    assert "Time left for new items: 20 min" in call.prompt
+
+
+def test_when_the_meeting_is_full_the_items_that_do_not_fit_get_no_timebox(app, client_as, store):
+    alex = client_as(ALEX)
+    earlier_meeting(alex, store)
+    meeting = create_timed(alex, "Next sync", 30)
+    put(alex, meeting["id"], {"title": "Release notes", "minutes": 25})
+    use_llm(app, MockLLM(structured={AgendaSuggestionDraft: staging_items(("A", 10), ("B", 10))}))
+
+    items = suggest(alex, meeting["id"]).json()["items"]
+
+    assert [(i["title"], i["minutes"]) for i in items] == [("A", 5), ("B", None)]
+
+
+def test_titles_leave_their_source_to_the_sources(app, client_as, store, jira_settings):
+    jira_settings.issues = [jira_issue("DS-117", "Refund the double-charged users")]
+    alex = client_as(ALEX)
+    earlier_meeting(alex, store)
+    meeting = create(alex, "Next sync")
+
+    def answer(prompt: str) -> AgendaSuggestionDraft:
+        jira, staging = label_of(prompt, "DS-117"), label_of(prompt, "Staging database is down")
+        return AgendaSuggestionDraft(
+            items=[
+                SuggestedItem(
+                    title="Refunds for double charges (DS-117)", why="w", source_ids=[jira]
+                ),
+                SuggestedItem(
+                    title="Staging is down [Checkout sync]", why="w", source_ids=[staging]
+                ),
+                SuggestedItem(title="Decide the DS-117 rollout", why="w", source_ids=[jira]),
+            ]
+        )
+
+    use_llm(app, MockLLM(structured={AgendaSuggestionDraft: answer}))
+
+    items = suggest(alex, meeting["id"]).json()["items"]
+
+    assert [i["title"] for i in items] == [
+        "Refunds for double charges",
+        "Staging is down",
+        "Decide the DS-117 rollout",
+    ]
+    assert [s["label"] for s in items[0]["sources"]] == ["DS-117"]
+    assert "Checkout sync" in items[1]["sources"][0]["label"]
+
+
+def test_the_prompt_asks_for_short_titles_without_sources_and_a_timebox_each(app, client_as, store):
+    alex = client_as(ALEX)
+    earlier_meeting(alex, store)
+    meeting = create(alex)
+    llm = MockLLM(structured={AgendaSuggestionDraft: AgendaSuggestionDraft(items=[])})
+    use_llm(app, llm)
+
+    suggest(alex, meeting["id"])
+
+    (call,) = llm.calls
+    system = call.system or ""
+    assert "already on the agenda" in system.lower()
+    assert "issue key" in system.lower() and "title" in system.lower()
+    assert "timebox" in system.lower()

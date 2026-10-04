@@ -67,7 +67,7 @@ def live_meeting(store, **team):
     return anyio.run(lambda: live(store, **team))
 
 
-def test_a_tick_returns_checks_and_the_raised_hand(worker, store, use_llm):
+def test_a_tick_returns_checks_addressed_to_whoever_made_the_claim(worker, store, use_llm):
     meeting = live_meeting(store)
     anyio.run(say, store, meeting, (SARAH, RELEASED, 10))
     use_llm(contradicting())
@@ -75,10 +75,11 @@ def test_a_tick_returns_checks_and_the_raised_hand(worker, store, use_llm):
     response = tick(worker, meeting.id)
 
     assert response.status_code == 200, response.text
+    assert set(response.json()) == {"checks", "snippets"}  # no agent state: no raised hand
     body = FactCheckResponse.model_validate(response.json())
     [fact] = body.checks
-    assert (fact.verdict, fact.raised_hand, fact.visibility) == ("contradicted", True, "public")
-    assert (body.agent_state.state, body.agent_state.hand_urgency) == ("hand_raised", "critical")
+    assert (fact.verdict, fact.recipient_id) == ("contradicted", SARAH.id)
+    assert fact.finding
 
 
 def test_the_tick_needs_the_internal_token(app, store, use_llm):

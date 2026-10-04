@@ -25,7 +25,7 @@ from brain.api.deps import current_user, get_llm_factory, get_settings, get_stor
 from brain.llm import LLMError, MockLLM
 from brain.main import create_app
 from brain.store import Conflict
-from contracts import Agenda, AgendaItem, TranscriptSegment
+from contracts import AGENT_PARTICIPANT_ID, Agenda, AgendaItem, TranscriptSegment
 
 HOUR = 3600.0
 
@@ -563,6 +563,21 @@ def test_items_the_team_finished_are_marked_covered_and_stay_covered(
     assert statuses == {waitlist: "covered", refunds: "pending", launch: "pending"}
 
 
+def covered_by(item: dict) -> tuple[str | None, float | None]:
+    return item["covered_by"], item["covered_t"]
+
+
+def test_an_item_the_agent_covers_says_so_and_when(worker, client_as, store, model):
+    meeting, (waitlist, refunds, _) = standup(store, client_as)
+    ingest(worker, meeting, said(meeting, 1, "Waitlist email is done, next topic", 0, 25))
+    model.says("a1", covered=("a1",))
+
+    items = by_id(tracked(worker, meeting, now=30)["agenda"])
+
+    assert covered_by(items[waitlist]) == (AGENT_PARTICIPANT_ID, 30 - SETTLE_S)
+    assert covered_by(items[refunds]) == (None, None)
+
+
 def test_ids_that_are_not_on_the_agenda_are_ignored(worker, client_as, store, model):
     meeting, _ = standup(store, client_as)
     ingest(worker, meeting, said(meeting, 1, "Something", 0, 25))
@@ -974,6 +989,54 @@ def test_a_person_can_undo_a_wrong_covered_and_skip_an_item(worker, client_as, s
         json={"items": [{"id": waitlist, "title": "Waitlist email", "status": "done"}]},
     )
     assert bad.status_code == 422
+
+
+def test_checking_an_item_records_who_and_when_and_unchecking_clears_it(
+    worker, client_as, store, model
+):
+    meeting, (waitlist, refunds, launch) = standup(store, client_as)  # started an hour ago
+    ingest(worker, meeting, said(meeting, 1, "Waitlist email is done, next topic", 0, 25))
+    model.says("a1", covered=("a1",))
+    tracked(worker, meeting, now=30)
+
+    response = client_as(SARAH).put(
+        f"/meetings/{meeting}/agenda",
+        json={
+            "items": [
+                {"id": waitlist, "title": "Waitlist email", "status": "pending"},
+                {"id": refunds, "title": "Refund policy", "status": "covered"},
+                {"id": launch, "title": "Launch date", "status": "skipped"},
+            ]
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    items = by_id(response.json())
+    assert covered_by(items[waitlist]) == (None, None)  # the agent's wrong call, undone
+    assert items[refunds]["covered_by"] == SARAH.id
+    assert items[refunds]["covered_t"] == pytest.approx(HOUR, abs=30)
+    assert covered_by(items[launch]) == (None, None)
+
+
+def test_an_edit_that_leaves_an_item_covered_keeps_who_covered_it(worker, client_as, store, model):
+    meeting, (waitlist, refunds, launch) = standup(store, client_as)
+    ingest(worker, meeting, said(meeting, 1, "Waitlist email is done, next topic", 0, 25))
+    model.says("a1", covered=("a1",))
+    tracked(worker, meeting, now=30)
+
+    response = client_as(SARAH).put(
+        f"/meetings/{meeting}/agenda",
+        json={
+            "items": [
+                {"id": waitlist, "title": "Waitlist email, sent", "status": "covered"},
+                {"id": refunds, "title": "Refund policy"},
+                {"id": launch, "title": "Launch date"},
+            ]
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert covered_by(by_id(response.json())[waitlist]) == (AGENT_PARTICIPANT_ID, 30 - SETTLE_S)
 
 
 class Interfering:

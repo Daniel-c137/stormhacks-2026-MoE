@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from .agenda import Agenda, AgendaItemStatus, AgendaNudge
-from .agent import AgentState, Answer, CodeSnippet, FactCheck, Invocation, Visibility
+from .agent import Answer, CodeSnippet, FactCheck, Invocation, Visibility
 from .meeting import Meeting, Person
 from .transcript import TranscriptSegment
 
@@ -115,14 +115,32 @@ class FactCheckRequest(BaseModel):
 
 
 class FactCheckResponse(BaseModel):
-    """The worker publishes each check on Topic.FACT_CHECK: a public one to the room, a private
-    one only to its recipient_id. `agent_state`, set only when a check raises the hand, goes on
-    Topic.AGENT_STATE; the hand is a visual cue and nothing is spoken. `snippets` are the code
-    the checks' snippet_ids name, for whoever sees those checks."""
+    """The worker sends each check to its recipient_id only, as a private chat message from the
+    agent (Topic.PRIVATE_CHAT), never stored, spoken or shown to the room. `snippets` are the code
+    the checks' snippet_ids name."""
 
     checks: list[FactCheck] = []
-    agent_state: AgentState | None = None
     snippets: list[CodeSnippet] = []
+
+
+class CatchUpRequest(BaseModel):
+    """realtime -> brain when someone joins a live meeting 5 minutes or more after it started,
+    or comes back after 5 minutes or more away. `since` and `until` are seconds from the meeting
+    start: the span they missed."""
+
+    participant_id: str
+    since: float = Field(ge=0, allow_inf_nan=False)
+    until: float = Field(ge=0, allow_inf_nan=False)
+
+
+class CatchUpResponse(BaseModel):
+    """What the worker sends only to the participant, as a private chat message from the agent
+    (Topic.PRIVATE_CHAT, recipient_id set). `text` is None when there is nothing to send.
+    `source_times` are the meeting seconds of the transcript lines it rests on. Never stored,
+    broadcast or spoken."""
+
+    text: str | None = None
+    source_times: list[float] = []
 
 
 class ProfileUpdate(BaseModel):

@@ -16,7 +16,6 @@ from contracts import (
     AgendaTrackRequest,
     AgendaTrackResponse,
     AgendaUpdate,
-    AgentState,
     AskRequest,
     ConnectorStatus,
     CreateMeetingRequest,
@@ -29,6 +28,7 @@ from contracts import (
     PasswordChange,
     Person,
     ReportProgress,
+    Topic,
     TranscriptSegment,
     TranslateRequest,
     TranslateResponse,
@@ -146,8 +146,8 @@ def test_a_fact_check_tick_may_omit_now_and_returns_nothing_by_default():
     with pytest.raises(ValidationError):
         FactCheckRequest(now=-1)
     empty = FactCheckResponse()
-    assert (empty.checks, empty.agent_state, empty.snippets) == ([], None, [])
-    raised = FactCheckResponse(
+    assert (empty.checks, empty.snippets) == ([], [])
+    checked = FactCheckResponse(
         checks=[
             FactCheck(
                 id="f1",
@@ -156,14 +156,19 @@ def test_a_fact_check_tick_may_omit_now_and_returns_nothing_by_default():
                 verdict="contradicted",
                 confidence=0.9,
                 severity="high",
-                raised_hand=True,
+                finding="PR 41 was merged after the latest release.",
+                recipient_id="u-sarah",
             )
         ],
-        agent_state=AgentState(
-            state="hand_raised", detail="Fact-check", hand_urgency="critical", hand_reason="x"
-        ),
     )
-    assert FactCheckResponse.model_validate(raised.model_dump()) == raised
+    assert FactCheckResponse.model_validate(checked.model_dump()) == checked
+    assert FactCheck.model_validate(checked.checks[0].model_dump(exclude={"finding"})).finding == ""
+
+
+def test_fact_checks_travel_only_as_private_chat():
+    """Polaris sends a fact-check as a private chat message; there is no fact-check topic."""
+    assert "FACT_CHECK" not in Topic.__members__
+    assert "FACT_CHECK" not in (TS_DIR / "events.ts").read_text()
 
 
 def test_connector_status_names_only_known_connectors_and_states():

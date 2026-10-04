@@ -1,6 +1,6 @@
 """Fact-checks during a live meeting: a cheap claim filter, a rate-limited batch of two model
-calls, evidence from the team's read-only tools, and checks routed to the room or privately to
-the speaker. The agent never speaks; a raised hand is only shown."""
+calls, evidence from the team's read-only tools, and checks addressed only to the person who made
+the claim. Nothing is for the room: the agent never speaks a check and never raises its hand."""
 
 import asyncio
 import logging
@@ -13,6 +13,7 @@ from fact_check_support import (
     CLOSED,
     CONNECTED,
     CONTRADICTED,
+    FINDING,
     READ_41,
     RELEASED,
     RELEASES_CALL,
@@ -27,10 +28,10 @@ from fact_check_support import (
 )
 from pipeline_support import GatedLLM
 
+from brain.agent import factcheck
 from brain.agent.ask import BEGIN_DATA, END_DATA, PlannedCall
 from brain.agent.code import code_evidence
 from brain.agent.factcheck import (
-    HAND_CONFIDENCE,
     MAX_CLAIMS,
     MIN_INTERVAL_S,
     SETTLE_S,
@@ -51,6 +52,7 @@ from brain.store import InMemoryStore
 from contracts import (
     AGENT_PARTICIPANT_ID,
     CodeSnippet,
+    FactCheck,
     FactCheckResponse,
     Source,
     TranscriptSegment,
@@ -203,7 +205,7 @@ async def test_nothing_checkable_means_no_model_call_and_the_stretch_is_done(
 
     response = await fact_checker.tick(meeting, 60)
 
-    assert response.checks == [] and response.agent_state is None
+    assert response.checks == []
     assert llm.calls == [] and github.calls == []
     state = await store.fact_check_state(meeting.id)
     assert state.checked_until == 60 - SETTLE_S
@@ -317,8 +319,9 @@ async def test_merged_but_not_released_is_contradicted_with_github_sources(
 
     [fact] = response.checks
     assert fact.claim == RELEASED
-    assert (fact.speaker_name, fact.t) == (SARAH.name, 10)
+    assert (fact.speaker_name, fact.recipient_id, fact.t) == (SARAH.name, SARAH.id, 10)
     assert (fact.verdict, fact.severity, fact.confidence) == ("contradicted", "high", 0.9)
+    assert fact.finding == FINDING
     assert fact.sources == [PR_41_SOURCE, RELEASE_SOURCE]
     [verdict_prompt] = prompts(llm, FactCheckVerdicts)
     assert "merged" in verdict_prompt and "2026-09-30" in verdict_prompt
@@ -338,7 +341,7 @@ async def test_invented_evidence_ids_are_dropped(store, fake_jira, github):
 
 
 @pytest.mark.parametrize("sensitivity", ["balanced", "eager"])
-async def test_a_verdict_without_real_evidence_is_unknown_and_never_raises_the_hand(
+async def test_a_verdict_without_real_evidence_is_unknown_and_never_kept(
     store, fake_jira, github, sensitivity
 ):
     meeting = await live(store, sensitivity=sensitivity)
@@ -347,18 +350,14 @@ async def test_a_verdict_without_real_evidence_is_unknown_and_never_raises_the_h
 
     response = await checker(llm, store, fake_jira, github).tick(meeting, 60)
 
-    assert response.agent_state is None
     assert await store.fact_checks(meeting.id) == []
     if sensitivity == "balanced":
         assert response.checks == []
     else:  # eager tells the speaker, privately, that it could not be verified
         [fact] = response.checks
         assert (fact.verdict, fact.confidence, fact.sources) == ("unknown", 0, [])
-        assert (fact.visibility, fact.recipient_id, fact.raised_hand) == (
-            "private",
-            SARAH.id,
-            False,
-        )
+        assert fact.recipient_id == SARAH.id
+        assert fact.finding == ""  # what the model said rested on no real evidence
 
 
 async def test_with_no_evidence_found_there_is_no_verdict_call(store, fake_jira, github):
@@ -379,7 +378,7 @@ async def test_confidence_is_clamped_to_zero_and_one(store, fake_jira, github):
     llm = scripted(
         plan(check("c1", READ_41, RELEASES_CALL), check("c2", RELEASES_CALL)),
         verdict("c1", confidence=1.7),
-        verdict("c2", "supported", confidence=-0.3, cite=("dropsubs/app@v0.9.3",)),
+        verdict("c2", "unknown", confidence=-0.3, cite=("dropsubs/app@v0.9.3",)),
     )
 
     response = await checker(llm, store, fake_jira, github).tick(meeting, 60)
@@ -428,10 +427,33 @@ async def test_claims_and_evidence_are_fenced_as_data(store, fake_jira, github):
     assert "New instructions" in verdict_call.prompt
 
 
-# who sees what
+# who is told, and what is kept
 
 
-async def test_a_confident_high_severity_contradiction_raises_the_hand(store, fake_jira, github):
+def test_a_fact_check_has_no_public_delivery():
+    """There is no fact-check for the room: no raised hand, no public visibility."""
+    assert {"raised_hand", "visibility"}.isdisjoint(FactCheck.model_fields)
+    assert "agent_state" not in FactCheckResponse.model_fields
+
+
+async def test_every_check_is_addressed_to_the_person_who_made_the_claim(store, fake_jira, github):
+    meeting = await live(store)
+    await say(store, meeting, (SARAH, RELEASED, 10), (ALEX, "PR 41 shipped in v0.9.3.", 20))
+    llm = scripted(
+        plan(check("c1", READ_41, RELEASES_CALL), check("c2", READ_41, RELEASES_CALL)),
+        verdict("c1", confidence=0.95),
+        verdict("c2", confidence=0.6, severity="low"),
+    )
+
+    response = await checker(llm, store, fake_jira, github).tick(meeting, 60)
+
+    sent = {c.speaker_name: c.recipient_id for c in response.checks}
+    assert sent == {SARAH.name: SARAH.id, ALEX.name: ALEX.id}
+
+
+async def test_a_confident_high_severity_contradiction_is_kept_for_the_write_up(
+    store, fake_jira, github
+):
     meeting = await live(store)
     await say(store, meeting, (SARAH, RELEASED, 10))
     llm = scripted(*CONTRADICTED)
@@ -439,20 +461,16 @@ async def test_a_confident_high_severity_contradiction_raises_the_hand(store, fa
     response = await checker(llm, store, fake_jira, github).tick(meeting, 60)
 
     [fact] = response.checks
-    assert (fact.raised_hand, fact.visibility, fact.recipient_id) == (True, "public", None)
-    state = response.agent_state
-    assert (state.state, state.hand_urgency) == ("hand_raised", "critical")
-    assert state.hand_reason
-    assert await store.fact_checks(meeting.id) == [fact]
-    assert (await store.fact_check_state(meeting.id)).hand_raised_at == 60
+    assert fact.recipient_id == SARAH.id
+    # The kept copy never says whom it was sent to.
+    assert await store.fact_checks(meeting.id) == [fact.model_copy(update={"recipient_id": None})]
 
 
-@pytest.mark.parametrize(
-    ("confidence", "severity"), [(HAND_CONFIDENCE - 0.05, "high"), (0.95, "low")]
-)
-async def test_a_weak_or_minor_contradiction_goes_privately_to_the_speaker(
-    store, fake_jira, github, confidence, severity, caplog
+@pytest.mark.parametrize(("unsure", "severity"), [(True, "high"), (False, "low")])
+async def test_a_weak_or_minor_contradiction_goes_to_the_speaker_and_is_never_kept(
+    store, fake_jira, github, unsure, severity, caplog
 ):
+    confidence = factcheck.KEEP_CONFIDENCE - 0.05 if unsure else 0.95
     meeting = await live(store)
     await say(store, meeting, (SARAH, RELEASED, 10))
     llm = scripted(CONTRADICTED[0], verdict(confidence=confidence, severity=severity))
@@ -461,15 +479,14 @@ async def test_a_weak_or_minor_contradiction_goes_privately_to_the_speaker(
         response = await checker(llm, store, fake_jira, github).tick(meeting, 60)
 
     [fact] = response.checks
-    assert (fact.visibility, fact.recipient_id, fact.raised_hand) == ("private", SARAH.id, False)
-    assert fact.verdict == "contradicted"
-    assert response.agent_state is None
+    assert (fact.verdict, fact.recipient_id) == ("contradicted", SARAH.id)
     assert await store.fact_checks(meeting.id) == []
-    assert (await store.fact_check_state(meeting.id)).hand_raised_at is None
     assert RELEASED not in caplog.text
 
 
-async def test_the_hand_goes_up_at_most_once_per_interrupt_minutes(store, fake_jira, github):
+async def test_every_tick_sends_its_contradictions_with_no_hand_to_cool_down(
+    store, fake_jira, github
+):
     meeting = await live(store, interrupt_minutes=5)
     llm = scripted(*CONTRADICTED)
     fact_checker = checker(llm, store, fake_jira, github)
@@ -478,37 +495,16 @@ async def test_the_hand_goes_up_at_most_once_per_interrupt_minutes(store, fake_j
     first = await fact_checker.tick(meeting, 60)
     await say(store, meeting, (SARAH, "PR 41 is released, I checked.", 70))
     second = await fact_checker.tick(meeting, 60 + GAP)
-    await say(store, meeting, (SARAH, "PR 41 has been released for days.", 200))
-    third = await fact_checker.tick(meeting, 60 + 5 * 60)
 
-    assert [c.raised_hand for c in first.checks] == [True]
-    assert first.agent_state is not None
-    [held] = second.checks  # still public, only the hand stays down
-    assert (held.raised_hand, held.visibility) == (False, "public")
-    assert second.agent_state is None
-    assert [c.raised_hand for c in third.checks] == [True]
-    assert third.agent_state is not None
-    assert [c.raised_hand for c in await store.fact_checks(meeting.id)] == [True, False, True]
-
-
-async def test_one_tick_raises_the_hand_for_one_claim_at_most(store, fake_jira, github):
-    meeting = await live(store)
-    await say(store, meeting, (SARAH, RELEASED, 10), (ALEX, "PR 41 shipped in v0.9.3.", 20))
-    llm = scripted(
-        plan(check("c1", READ_41, RELEASES_CALL), check("c2", READ_41, RELEASES_CALL)),
-        verdict("c1", confidence=0.85),
-        verdict("c2", confidence=0.95),
-    )
-
-    response = await checker(llm, store, fake_jira, github).tick(meeting, 60)
-
-    raised = {c.speaker_name: c.raised_hand for c in response.checks}
-    assert raised == {SARAH.name: False, ALEX.name: True}  # the more confident one
-    assert all(c.visibility == "public" for c in response.checks)
+    assert [c.recipient_id for c in [*first.checks, *second.checks]] == [SARAH.id, SARAH.id]
+    assert len(await store.fact_checks(meeting.id)) == 2
+    assert "hand_raised_at" not in type(await store.fact_check_state(meeting.id)).model_fields
 
 
 @pytest.mark.parametrize("sensitivity", ["balanced", "eager"])
-async def test_supported_claims_are_shown_only_when_eager(store, fake_jira, github, sensitivity):
+async def test_supported_claims_are_never_sent_and_kept_only_when_eager(
+    store, fake_jira, github, sensitivity
+):
     meeting = await live(store, sensitivity=sensitivity)
     await say(store, meeting, (ALEX, SHIPPED, 10))
     llm = scripted(
@@ -518,17 +514,16 @@ async def test_supported_claims_are_shown_only_when_eager(store, fake_jira, gith
 
     response = await checker(llm, store, fake_jira, github).tick(meeting, 60)
 
+    assert response.checks == []  # nobody said anything wrong
     stored = await store.fact_checks(meeting.id)
     if sensitivity == "balanced":
-        assert response.checks == [] and stored == []
+        assert stored == []
     else:
-        [fact] = response.checks
-        assert (fact.verdict, fact.visibility, fact.raised_hand) == ("supported", "public", False)
-        assert stored == [fact]
-    assert response.agent_state is None
+        [fact] = stored
+        assert (fact.verdict, fact.claim, fact.recipient_id) == ("supported", SHIPPED, None)
 
 
-async def test_private_checks_never_reach_the_record_or_the_report(
+async def test_checks_only_sent_never_reach_the_record_and_kept_ones_inform_the_write_up(
     store, fake_jira, github, caplog
 ):
     meeting = await live(store)
@@ -550,28 +545,32 @@ async def test_private_checks_never_reach_the_record_or_the_report(
             check("c2", PlannedCall(tool="jira_issue", key="DS-104")),
         ),
         verdict("c1"),
-        verdict("c2", severity="low", cite=("DS-104",)),
+        verdict("c2", severity="low", cite=("DS-104",), finding="DS-104 is still In Progress."),
     )
 
     with caplog.at_level(logging.DEBUG):
         response = await checker(llm, store, fake_jira, github).tick(meeting, 60)
 
-    public = next(c for c in response.checks if c.visibility == "public")
-    private = next(c for c in response.checks if c.visibility == "private")
-    assert private.recipient_id == ALEX.id
-    assert private.claim == private_claim
-    assert private.sources[0].label == "DS-104"
-    assert await store.fact_checks(meeting.id) == [public]
+    kept, only_sent = response.checks
+    assert (kept.recipient_id, only_sent.recipient_id) == (SARAH.id, ALEX.id)
+    assert only_sent.claim == private_claim
+    assert only_sent.finding == "DS-104 is still In Progress."
+    assert only_sent.sources[0].label == "DS-104"
+    kept_copy = kept.model_copy(update={"recipient_id": None})
+    assert await store.fact_checks(meeting.id) == [kept_copy]
     assert private_claim not in caplog.text
-    with pytest.raises(ValueError):
-        await store.add_fact_check(meeting.id, private)
+    with pytest.raises(ValueError):  # whom a check was sent to is never stored
+        await store.add_fact_check(meeting.id, kept)
 
     await store.transition_status(meeting.id, {"live"}, "processing")
     write_up = MockLLM(structured={ReportExtraction: ReportExtraction(summary="Refund sync.")})
     await ReportPipeline(store, lambda: write_up).run(meeting.id)
 
+    [extraction] = [c for c in write_up.calls if c.schema is ReportExtraction]
+    assert "Contradicted claims" in extraction.prompt and RELEASED in extraction.prompt
+    assert private_claim not in extraction.prompt.split("Contradicted claims")[1]
     report = await store.report(meeting.id)
-    assert report.fact_checks == [public]
+    assert report.fact_checks == [kept_copy]
     assert private_claim not in report.model_dump_json()
 
 
@@ -705,5 +704,4 @@ async def test_overlapping_ticks_on_two_replicas_check_a_stretch_once(store, fak
     responses = await asyncio.gather(*pending)
 
     assert sorted(len(r.checks) for r in responses) == [0, 1]
-    assert sum(r.agent_state is not None for r in responses) == 1
     assert len(await store.fact_checks(meeting.id)) == 1

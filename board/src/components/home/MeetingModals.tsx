@@ -6,6 +6,7 @@ import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useState
 import { useTeam } from "@/components/AuthProvider";
 import { Avatar } from "@/components/ui/Avatar";
 import { Icon, Spinner } from "@/components/ui/Icon";
+import { draftAgendaInto } from "@/lib/agenda";
 import { createMeeting, describeError } from "@/lib/api";
 import { fmtClock, fmtDate, fmtDuration, isoDay, parseMeetingCode } from "@/lib/format";
 
@@ -53,8 +54,12 @@ export function NewMeetingModal({ onClose, onScheduled }: { onClose: () => void;
   const [invitees, setInvitees] = useState<string[]>([]);
   const [query, setQuery] = useState("");
   const [inviteOpen, setInviteOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [draftAgenda, setDraftAgenda] = useState(false);
+  const [busy, setBusy] = useState<"" | "creating" | "drafting">("");
+  // Created, but the agenda draft failed: the meeting stands and the dialog only says so.
+  const [scheduled, setScheduled] = useState<Meeting | null>(null);
   const [error, setError] = useState("");
+  const agent = identity.agent_name;
 
   const start = new Date(`${date}T${time || "10:00"}`);
   const validStart = !Number.isNaN(start.getTime());
@@ -88,22 +93,43 @@ export function NewMeetingModal({ onClose, onScheduled }: { onClose: () => void;
       setError("Pick a date and start time.");
       return;
     }
-    setBusy(true);
+    if (scheduled) {
+      onScheduled(scheduled);
+      return;
+    }
+    setBusy("creating");
     setError("");
+    let meeting: Meeting;
     try {
       const name = title.trim() || "Untitled meeting";
-      if (when === "later") {
-        onScheduled(
-          await createMeeting({ title: name, scheduled_start: start.toISOString(), duration_min: duration, invitee_ids: invitees }),
-        );
-      } else {
-        const meeting = await createMeeting({ title: name });
+      if (when === "now") {
+        meeting = await createMeeting({ title: name });
         router.push(`/m/${meeting.code}`);
+        return;
       }
+      meeting = await createMeeting({
+        title: name,
+        scheduled_start: start.toISOString(),
+        duration_min: duration,
+        invitee_ids: invitees,
+      });
     } catch (err) {
       setError(`The meeting wasn't created. ${describeError(err)}`);
-      setBusy(false);
+      setBusy("");
+      return;
     }
+    if (draftAgenda) {
+      setBusy("drafting");
+      try {
+        await draftAgendaInto(meeting.id);
+      } catch (err) {
+        setScheduled(meeting);
+        setError(`The meeting is scheduled, but ${agent} couldn't draft its agenda. ${describeError(err)} You can draft it from the lobby.`);
+        setBusy("");
+        return;
+      }
+    }
+    onScheduled(meeting);
   };
 
   return (
@@ -157,6 +183,13 @@ export function NewMeetingModal({ onClose, onScheduled }: { onClose: () => void;
                 {range}
               </span>
             </div>
+            <label className="check-row">
+              <input type="checkbox" checked={draftAgenda} onChange={(e) => setDraftAgenda(e.target.checked)} disabled={Boolean(scheduled)} />
+              <span className="person-text">
+                <span className="person-name">Let {agent} draft the agenda</span>
+                <span className="person-meta">From open work and recent meetings, once the meeting is created. Edit it in the lobby.</span>
+              </span>
+            </label>
             <div className="sched">
               <span id="inv-h" className="label">
                 Invitees
@@ -251,13 +284,21 @@ export function NewMeetingModal({ onClose, onScheduled }: { onClose: () => void;
           {error}
         </span>
         <div className="modal-foot">
-          <button type="button" className="btn btn-outline" onClick={onClose}>
-            Cancel
-          </button>
-          <button type="submit" className="btn btn-primary" disabled={busy}>
-            {when === "later" ? "Create" : "Join"}
-            {busy ? <Spinner /> : <Icon name={when === "later" ? "calendar-check" : "arrow-right"} />}
-          </button>
+          {scheduled ? (
+            <button type="submit" className="btn btn-primary">
+              Done
+            </button>
+          ) : (
+            <>
+              <button type="button" className="btn btn-outline" onClick={onClose}>
+                Cancel
+              </button>
+              <button type="submit" className="btn btn-primary" disabled={Boolean(busy)}>
+                {busy === "drafting" ? "Drafting the agenda…" : when === "later" ? "Create" : "Join"}
+                {busy ? <Spinner /> : <Icon name={when === "later" ? "calendar-check" : "arrow-right"} />}
+              </button>
+            </>
+          )}
         </div>
       </form>
     </Modal>

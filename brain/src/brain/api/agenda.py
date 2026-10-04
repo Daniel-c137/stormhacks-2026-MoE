@@ -27,6 +27,7 @@ from ..agent.agenda import (
     suggest_items,
     valid_minutes,
 )
+from ..agent.timekeeping import seconds_since_start
 from ..config import Settings
 from ..jira import JiraError, JiraReader, JiraUnavailable, jira_config
 from ..llm import LLM, LLMError
@@ -89,10 +90,19 @@ async def update_agenda(
         items: list[AgendaItem] = []
         for n, edit in enumerate(body.items):
             changes: dict = {"title": edit.title.strip(), "minutes": edit.minutes}
+            before = existing.get(edit.id) if edit.id else None
             if edit.status is not None:  # e.g. undoing a wrong "covered"
                 changes["status"] = edit.status
-            if edit.id and edit.id in existing:
-                items.append(existing[edit.id].model_copy(update=changes))
+                if edit.status != "covered":
+                    changes |= {"covered_by": None, "covered_t": None}
+                elif before is None or before.status != "covered":  # this person checked it
+                    started = meeting.started_at is not None
+                    changes |= {
+                        "covered_by": user.id,
+                        "covered_t": seconds_since_start(meeting) if started else None,
+                    }
+            if before is not None:
+                items.append(before.model_copy(update=changes))
             else:
                 item_id = new_ids.setdefault(n, uuid4().hex)
                 items.append(AgendaItem(id=item_id, added_by=user.id, **changes))
@@ -138,8 +148,10 @@ async def suggest_agenda(
     llm: LLM = Depends(get_llm),
 ) -> AgendaSuggestions:
     """Proposed items from the team's earlier reports, open and overdue tasks and unfinished
-    Jira work, each with why and its sources. Nothing is saved."""
+    Jira work, each with why, its sources and a timebox, none repeating an item already on the
+    agenda. Nothing is saved: a person adds them like any other item."""
     meeting = await team_meeting(store, user, meeting_id)
+    saved = await store.agenda(meeting.id)
     zone = await zone_of(store, meeting.team_id)
     today = team_today(zone)
     inputs = await store_inputs(store, meeting.team_id, meeting.id, today, zone)
@@ -153,7 +165,7 @@ async def suggest_agenda(
     else:
         inputs += jira_inputs(issues)
     try:
-        items = await suggest_items(llm, meeting, inputs, today)
+        items = await suggest_items(llm, meeting, inputs, today, saved.items if saved else ())
     except LLMError as e:
         raise HTTPException(status_code=502, detail=f"Could not suggest items: {e}") from e
     return AgendaSuggestions(items=items, unavailable=unavailable)

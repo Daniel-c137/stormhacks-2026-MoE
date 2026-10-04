@@ -84,6 +84,9 @@ export interface QuestionAnswered {
   t?: number | null;
 }
 
+/** A claim checked against the team's records during a live meeting. It is never shown to the
+ * room: the agent sends it as a private chat message to recipient_id, the participant who made the
+ * claim. The copy kept for the write-up has no recipient_id. */
 export interface FactCheck {
   id: string;
   claim: string;
@@ -91,11 +94,10 @@ export interface FactCheck {
   verdict: Verdict;
   confidence: number;
   severity: Severity;
+  finding: string; // what the records show, in one short sentence
   snippet_ids: string[];
   sources: Source[];
-  raised_hand: boolean;
-  visibility: Visibility;
-  recipient_id?: string | null; // set when visibility is private
+  recipient_id?: string | null; // the claimant's participant id
   t?: number | null;
   created_at?: string | null;
 }

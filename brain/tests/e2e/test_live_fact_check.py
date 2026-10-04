@@ -57,6 +57,7 @@ async def test_live_gemini_finds_pr_41_merged_but_not_released(fake_github):
     print(f"GitHub calls: {fake_github.calls}")
     [fact] = response.checks
     assert fact.verdict == "contradicted"
-    assert fact.speaker_name == SARAH.name
+    assert (fact.speaker_name, fact.recipient_id) == (SARAH.name, SARAH.id)
+    assert fact.finding, "the check says what the records show"
     assert any(s.kind in ("github_pr", "github_release") for s in fact.sources)
     assert fake_github.comments == []

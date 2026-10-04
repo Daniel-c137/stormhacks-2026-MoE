@@ -1,18 +1,19 @@
-"""Live: a rough lobby topic rewritten, and standup stretches tracked, by real Gemini. Needs
-GEMINI_API_KEY and GEMINI_MODEL (optionally GEMINI_FALLBACK_MODELS). Deselected unless pytest runs
-with `-m live`."""
+"""Live: a rough lobby topic rewritten, an agenda drafted, and standup stretches tracked, by real
+Gemini. Needs GEMINI_API_KEY and GEMINI_MODEL (optionally GEMINI_FALLBACK_MODELS). Deselected
+unless pytest runs with `-m live`."""
 
-from datetime import UTC, datetime
+import re
+from datetime import UTC, date, datetime
 
 import pytest
 from api_support import ALEX, SARAH, TEAM
 
-from brain.agent.agenda import rewrite_topic
+from brain.agent.agenda import SuggestionInput, rewrite_topic, suggest_items, title_key
 from brain.agent.timekeeping import track_agenda
 from brain.config import Settings
 from brain.llm import GeminiLLM, make_llm
 from brain.store import InMemoryStore
-from contracts import Agenda, AgendaItem, TranscriptSegment
+from contracts import Agenda, AgendaItem, Source, TranscriptSegment
 
 settings = Settings(openrouter_models=None)  # Gemini alone, never the fallback
 
@@ -131,3 +132,46 @@ async def test_live_gemini_splits_a_two_topic_standup_and_gives_an_unmentioned_i
     assert result.agenda.current_item_id != launch.id
     assert waitlist.discussed_s > 0 or refunds.discussed_s > 0
     assert waitlist.discussed_s + refunds.discussed_s <= 55
+
+
+@pytest.mark.anyio
+async def test_live_gemini_drafts_items_that_fit_the_meeting_and_skip_what_is_on_the_agenda():
+    llm = make_llm(settings)
+    store = InMemoryStore(teams=[TEAM], people=[ALEX, SARAH])
+    earlier = await store.create_meeting(TEAM.id, "Checkout sync", ALEX.id)
+    meeting = await store.create_meeting(TEAM.id, "Weekly sync", ALEX.id, duration_min=30)
+    existing = [AgendaItem(id="a1", title="Who owns the refund script?", minutes=10)]
+    met = Source(kind="meeting", label="Checkout sync (2026-09-28)", meeting_id=earlier.id)
+    jira = Source(kind="jira_issue", label="DS-117", url="https://example.test/browse/DS-117")
+    inputs = [
+        SuggestionInput("Open question", "Who owns the refund script?", met),
+        SuggestionInput("Blocker", "Staging database is down since Friday", met),
+        SuggestionInput("Risk (high)", "Queue backlog could delay password-reset emails", met),
+        SuggestionInput("Superseded decision", "Keep background jobs on Postgres", met),
+        SuggestionInput(
+            "Decision contradicting an earlier one", "Move background jobs to Redis", met
+        ),
+        SuggestionInput("Overdue task", "Rotate the API keys (due 2026-09-01; DS-90, todo)", met),
+        SuggestionInput(
+            "Unfinished Jira issue",
+            "DS-117: Refund the double-charged users (In Progress, Sarah Kim)",
+            jira,
+        ),
+    ]
+
+    items = await suggest_items(llm, meeting, inputs, date(2026, 10, 4), existing)
+    for item in items:
+        print(f"{item.minutes} min  {item.title}  <- {[s.label for s in item.sources]}")
+    print(f"(answered by {llm.last_model})")
+
+    assert 1 <= len(items) <= 6
+    assert sum(i.minutes or 0 for i in items) <= 20
+    assert all(i.minutes is None or 5 <= i.minutes <= 30 for i in items)
+    for item in items:
+        title = item.title.lower()
+        assert item.sources and item.why
+        assert len(item.title.split()) <= 12
+        assert title_key(item.title) != title_key(existing[0].title)
+        assert not ("refund" in title and "script" in title), item.title
+        assert "checkout sync" not in title and "2026" not in title
+        assert not re.search(r"\(\s*ds-\d+\s*\)\s*$", title), item.title

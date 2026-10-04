@@ -303,8 +303,8 @@ class TestLiveMeeting:
         show(
             "fact-check",
             "; ".join(
-                f"{k['verdict']}/{k['severity']}/{k['confidence']:.2f}/{k['visibility']}"
-                f"/hand={k['raised_hand']}: {k['claim'][:60]}"
+                f"{k['verdict']}/{k['severity']}/{k['confidence']:.2f}/to={k['recipient_id']}"
+                f": {k['claim'][:60]} -> {k['finding'][:80]}"
                 for k in checks
             ),
         )
@@ -316,10 +316,8 @@ class TestLiveMeeting:
         assert any(s["kind"].startswith("github") for s in check["sources"]), (
             f"the contradiction cites no GitHub source: {labels}"
         )
-        if check["raised_hand"]:
-            assert body.get("agent_state", {}).get("state") == "hand_raised", (
-                f"the hand is raised and nothing is spoken: {body.get('agent_state')}"
-            )
+        assert check["recipient_id"], "the check is not addressed to whoever made the claim"
+        assert "agent_state" not in body, "a fact-check never raises the hand"
 
     def test_09_ask_in_the_meeting_public(self, flow: Flow):
         need(flow.segments, "the ingested transcript")

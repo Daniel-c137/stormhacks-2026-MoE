@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from brain.llm import LLM, LLMError
 from brain.store import Conflict, Store
 from contracts import (
+    AGENT_PARTICIPANT_ID,
     Agenda,
     AgendaItem,
     AgendaNudge,
@@ -271,7 +272,11 @@ def advance(agenda: Agenda, stretch: Stretch) -> Agenda:
         if seconds := stretch.seconds.get(item.id, 0.0):
             update["discussed_s"] = item.discussed_s + seconds
         if item.id in stretch.covered and item.status == "pending":
-            update["status"] = "covered"
+            update |= {
+                "status": "covered",
+                "covered_by": AGENT_PARTICIPANT_ID,
+                "covered_t": stretch.until,
+            }
         items.append(item.model_copy(update=update) if update else item)
     changes: dict = {"tracked_until": stretch.until, "items": items}
     if stretch.asked:
