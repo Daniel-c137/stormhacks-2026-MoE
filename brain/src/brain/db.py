@@ -1,7 +1,7 @@
 """Postgres connections and the migration runner.
 
-On Supabase the migrations are applied with the Supabase CLI; locally, in dev and in tests,
-`migrate` applies the same files (`brain migrate` from the command line).
+`migrate` applies db/migrations to our Postgres 16 + pgvector, in every environment: `brain
+migrate` from the command line, and directly in tests.
 """
 
 from collections.abc import AsyncIterator
@@ -13,12 +13,13 @@ from psycopg_pool import AsyncConnectionPool
 
 from .config import REPO_ROOT
 
-MIGRATIONS = REPO_ROOT / "supabase" / "migrations"
+MIGRATIONS = REPO_ROOT / "db" / "migrations"
 
 # Any constant works; it only has to be the same for every run against one database.
 _MIGRATION_LOCK = 0x6272_6169_6E  # "brain"
 
-# prepare_threshold=None: Supabase's transaction pooler does not support prepared statements.
+# prepare_threshold=None: transaction-mode poolers such as PgBouncer do not support prepared
+# statements, so the brain never relies on them.
 CONNECT_KWARGS = {"prepare_threshold": None}
 
 

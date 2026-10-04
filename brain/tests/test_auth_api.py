@@ -284,3 +284,14 @@ def test_the_limiter_forgets_emails_whose_failures_are_old():
     limiter.fail("fresh@example.com")
 
     assert len(limiter) == 1
+
+
+def test_an_over_long_password_never_matches_even_with_the_right_start(client, store):
+    long_password = "p" * auth.MAX_PASSWORD
+    asyncio.run(store.set_login(ALEX.id, ALEX_EMAIL, hash_password(long_password)))
+
+    assert log_in(client, ALEX_EMAIL, long_password + "extra").status_code == 401
+    assert log_in(client, ALEX_EMAIL, long_password).status_code == 200
+    headers = session(client, ALEX_EMAIL, long_password)
+    response = change(client, headers, long_password + "extra", "a-brand-new-password")
+    assert response.status_code == 401

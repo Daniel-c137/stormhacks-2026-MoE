@@ -1,169 +1,175 @@
-"""Supabase Auth access-token verification.
+"""The brain's own sign-in: argon2 password hashes, HS256 session tokens signed with AUTH_SECRET,
+and a limit on failed logins per email."""
 
-Supabase signs access tokens either with the project's legacy JWT secret (HS256) or with its
-asymmetric signing keys (ES256 or RS256, `kid` in the header), whose public halves are served
-at `<SUPABASE_URL>/auth/v1/.well-known/jwks.json`.
-"""
-
-import asyncio
+import math
+import secrets
 import time
-from collections.abc import Awaitable, Callable
+from collections import deque
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from functools import cache
 from typing import Any
 
-import httpx
 import jwt
+from argon2 import PasswordHasher
+from argon2.exceptions import InvalidHashError, VerificationError
 
 from .config import Settings
 
+ALGORITHM = "HS256"
+ISSUER = "brain"
+AUDIENCE = "board"
 LEEWAY = 10  # seconds of clock skew allowed on exp/nbf/iat
-JWKS_TTL = 600.0  # Supabase's edge caches the JWKS for 10 minutes; don't hold keys longer
-REFETCH_COOLDOWN = 30.0  # unknown kids force at most one refetch per this many seconds
-ASYMMETRIC = ("ES256", "RS256")
+MIN_SECRET = 32  # a shorter AUTH_SECRET is treated as unset
 
-Fetch = Callable[[str], Awaitable[dict[str, Any]]]
+MIN_PASSWORD = 10
+MAX_PASSWORD = 1024  # argon2 hashes any length; this only bounds the work one request can ask for
+MAX_LOGIN_FAILURES = 5
+LOGIN_WINDOW_SECONDS = 15 * 60
+
+_hasher = PasswordHasher()
 
 
 class AuthNotConfigured(Exception):
-    """Neither SUPABASE_JWT_SECRET nor SUPABASE_URL is set."""
+    """AUTH_SECRET is unset or shorter than MIN_SECRET."""
 
 
 class InvalidToken(Exception):
-    """The bearer token is not a valid access token for this project."""
+    """The bearer token is not a valid session token issued by this brain."""
 
 
-class KeysUnavailable(Exception):
-    """The project's JWKS could not be fetched and no keys are cached."""
+NOT_CONFIGURED = f"AUTH_SECRET is not configured (at least {MIN_SECRET} characters)"
 
 
-async def fetch_json(url: str) -> dict[str, Any]:
-    async with httpx.AsyncClient(timeout=5.0) as client:
-        response = await client.get(url)
-        response.raise_for_status()
-        return response.json()
+def signing_secret(settings: Settings) -> str | None:
+    secret = settings.auth_secret
+    return secret if secret and len(secret) >= MIN_SECRET else None
 
 
-class Jwks:
-    """The project's public signing keys, cached for `ttl` seconds.
+def hash_password(password: str) -> str:
+    return _hasher.hash(password)
 
-    An unknown kid refetches once (keys may have rotated), unless the keys were just loaded.
-    """
 
-    def __init__(
-        self,
-        url: str,
-        fetch: Fetch = fetch_json,
-        ttl: float = JWKS_TTL,
-        clock: Callable[[], float] = time.monotonic,
-    ):
-        self.url = url
-        self._fetch = fetch
-        self._ttl = ttl
-        self._clock = clock
-        self._keys: dict[str, jwt.PyJWK] = {}
-        self._loaded_at: float | None = None
-        self._forced_at: float | None = None
-        self._lock = asyncio.Lock()
+def verify_password(hashed: str, password: str) -> bool:
+    try:
+        return _hasher.verify(hashed, password)
+    except (VerificationError, InvalidHashError):
+        return False
 
-    async def key(self, kid: str) -> jwt.PyJWK:
-        loaded = False
-        if self._stale():
-            await self._refresh()
-            loaded = True
-        if kid not in self._keys and not loaded and self._may_force():
-            self._forced_at = self._clock()
-            await self._refresh()
-        try:
-            return self._keys[kid]
-        except KeyError:
-            raise InvalidToken("unknown signing key") from None
 
-    def _stale(self) -> bool:
-        return self._loaded_at is None or self._clock() - self._loaded_at >= self._ttl
+@cache
+def dummy_hash() -> str:
+    """A hash no password matches, checked when the email is unknown so that a login takes as
+    long whether or not the account exists."""
+    return hash_password(secrets.token_urlsafe(32))
 
-    def _may_force(self) -> bool:
-        return self._forced_at is None or self._clock() - self._forced_at >= REFETCH_COOLDOWN
 
-    async def _refresh(self) -> None:
-        async with self._lock:
-            try:
-                body = await self._fetch(self.url)
-                keys = {}
-                for entry in body.get("keys", []):
-                    kid = entry.get("kid")
-                    if not kid:
-                        continue
-                    try:
-                        keys[kid] = jwt.PyJWK(entry)
-                    except jwt.PyJWTError:
-                        continue  # a key type this server can't use; skip it, keep the rest
-            except (httpx.HTTPError, ValueError, AttributeError) as error:
-                if not self._keys:
-                    raise KeysUnavailable(f"could not fetch {self.url}") from error
-                return  # keep serving the keys we have
-            self._keys = keys
-            self._loaded_at = self._clock()
+def issue_token(person_id: str, settings: Settings) -> tuple[str, datetime]:
+    """A session token for the person and when it expires. Raises AuthNotConfigured."""
+    secret = signing_secret(settings)
+    if secret is None:
+        raise AuthNotConfigured
+    now = int(time.time())
+    expires = now + int(timedelta(hours=settings.session_hours).total_seconds())
+    claims = {"iss": ISSUER, "aud": AUDIENCE, "sub": person_id, "iat": now, "exp": expires}
+    return jwt.encode(claims, secret, algorithm=ALGORITHM), datetime.fromtimestamp(expires, UTC)
 
 
 class TokenVerifier:
-    def __init__(
-        self,
-        *,
-        secret: str | None,
-        supabase_url: str | None,
-        audience: str = "authenticated",
-        jwks: Jwks | None = None,
-    ):
-        self.secret = secret or None
-        base = supabase_url.rstrip("/") if supabase_url else None
-        self.issuer = f"{base}/auth/v1" if base else None
-        self.audience = audience
-        self.jwks = jwks or (Jwks(f"{self.issuer}/.well-known/jwks.json") if base else None)
+    """Accepts only the brain's own HS256 tokens, with exp, sub, aud and iss."""
+
+    def __init__(self, secret: str | None):
+        self.secret = secret if secret and len(secret) >= MIN_SECRET else None
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "TokenVerifier":
-        return cls(
-            secret=settings.supabase_jwt_secret,
-            supabase_url=settings.supabase_url,
-            audience=settings.supabase_jwt_audience,
-        )
+        return cls(signing_secret(settings))
 
     @property
     def configured(self) -> bool:
-        return bool(self.secret or self.jwks)
+        return self.secret is not None
 
-    async def verify(self, token: str) -> dict[str, Any]:
-        """The token's claims. Raises AuthNotConfigured, InvalidToken or KeysUnavailable."""
-        if not self.configured:
+    def verify(self, token: str) -> dict[str, Any]:
+        """The token's claims. Raises AuthNotConfigured or InvalidToken."""
+        if self.secret is None:
             raise AuthNotConfigured
-        try:
-            header = jwt.get_unverified_header(token)
-        except jwt.PyJWTError as error:
-            raise InvalidToken("malformed token") from error
-        alg = header.get("alg")
-        if alg == "HS256" and self.secret:
-            key: Any = self.secret
-        elif alg in ASYMMETRIC and self.jwks:
-            kid = header.get("kid")
-            if not isinstance(kid, str) or not kid:
-                raise InvalidToken("token has no key id")
-            jwk = await self.jwks.key(kid)
-            if jwk.algorithm_name != alg:
-                raise InvalidToken("token algorithm does not match its key")
-            key = jwk.key
-        else:
-            raise InvalidToken(f"unsupported token algorithm {alg!r}")
         try:
             claims = jwt.decode(
                 token,
-                key,
-                algorithms=[alg],
-                audience=self.audience,
-                issuer=self.issuer,
+                self.secret,
+                algorithms=[ALGORITHM],
+                audience=AUDIENCE,
+                issuer=ISSUER,
                 leeway=LEEWAY,
-                options={"require": ["exp", "sub", "aud"] + (["iss"] if self.issuer else [])},
+                options={"require": ["exp", "sub", "aud", "iss"]},
             )
         except jwt.PyJWTError as error:
             raise InvalidToken(str(error)) from error
         if not isinstance(claims.get("sub"), str) or not claims["sub"]:
             raise InvalidToken("token has no subject")
         return claims
+
+
+def login_key(email: str) -> str:
+    return email.strip().lower()
+
+
+class LoginLimiter:
+    """Failed logins per email, in process memory: after MAX_LOGIN_FAILURES within the window,
+    the email is refused until the oldest of them is a window old. A success clears the count."""
+
+    def __init__(
+        self,
+        clock: Callable[[], float] = time.monotonic,
+        max_failures: int = MAX_LOGIN_FAILURES,
+        window: float = LOGIN_WINDOW_SECONDS,
+    ):
+        self._clock = clock
+        self._max = max_failures
+        self._window = window
+        self._failures: dict[str, deque[float]] = {}
+        self._pruned_at = clock()
+
+    def __len__(self) -> int:
+        return len(self._failures)
+
+    def retry_after(self, email: str) -> int | None:
+        """Seconds until the email may try again, or None when it may now."""
+        failures = self._recent(login_key(email))
+        if failures is None or len(failures) < self._max:
+            return None
+        return max(1, math.ceil(failures[0] + self._window - self._clock()))
+
+    def fail(self, email: str) -> None:
+        self._prune()
+        key = login_key(email)
+        failures = self._recent(key)
+        if failures is None:
+            failures = self._failures[key] = deque()
+        failures.append(self._clock())
+        while len(failures) > self._max:
+            failures.popleft()
+
+    def clear(self, email: str) -> None:
+        self._failures.pop(login_key(email), None)
+
+    def _recent(self, key: str) -> deque[float] | None:
+        failures = self._failures.get(key)
+        if failures is None:
+            return None
+        since = self._clock() - self._window
+        while failures and failures[0] <= since:
+            failures.popleft()
+        if not failures:
+            del self._failures[key]
+            return None
+        return failures
+
+    def _prune(self) -> None:
+        """Forgets emails whose failures are all old, at most once a window."""
+        now = self._clock()
+        if now - self._pruned_at < self._window:
+            return
+        self._pruned_at = now
+        for key in list(self._failures):
+            self._recent(key)
