@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     openrouter_api_key: str | None = None
     openrouter_models: str | None = None
     openrouter_url: str = "https://openrouter.ai/api/v1"
+    # The embeddings fallback, e.g. google/gemini-embedding-001: the same model as
+    # GEMINI_EMBEDDING_MODEL (its vectors are compared with Gemini's), at GEMINI_EMBEDDING_DIM
+    openrouter_embedding_model: str | None = None
 
     livekit_url: str | None = None
     livekit_api_key: str | None = None

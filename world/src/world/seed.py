@@ -429,7 +429,7 @@ def main(argv: list[str] | None = None) -> int:
     try:  # the real models or nothing: never a mock
         make_llm(settings)
         embedder = make_embedder(settings)
-    except LLMUnavailable as e:
+    except (LLMUnavailable, ValueError) as e:  # ValueError: mismatched embedding models
         sys.exit(f"world-seed: {e}")
     if embedder.dim != DIM:
         sys.exit(

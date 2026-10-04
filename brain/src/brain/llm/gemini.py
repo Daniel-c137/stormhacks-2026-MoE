@@ -178,7 +178,7 @@ class GeminiEmbedder:
                 last_error = e
                 continue
             return Embeddings(model=model, vectors=vectors)
-        raise LLMError(
+        raise LLMOutOfCapacity(
             f"Gemini embeddings are unavailable on every model tried: {'; '.join(tried)}"
         ) from last_error
 

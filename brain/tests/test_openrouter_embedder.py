@@ -170,7 +170,8 @@ async def test_a_missing_vector_is_an_error():
 @pytest.mark.parametrize(
     "outcome",
     [
-        failure(400, f"cannot embed {SECRET}"[:30]),
+        failure(400, f"cannot embed {SECRET}"),
+        failure(400, "invalid input: secret transcript about the"),
         failure(429),
         httpx.ReadTimeout("slow"),
         httpx.Response(200, json={"data": []}),
@@ -181,7 +182,7 @@ async def test_errors_never_carry_the_input_or_the_key(outcome):
         await router_embedder(FakeEmbeddings(outcome)).embed([SECRET])
 
     message = str(info.value)
-    assert "acquisition" not in message
+    assert "transcript about" not in message
     assert "test-key" not in message
 
 
