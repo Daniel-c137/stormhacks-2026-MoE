@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from brain.text import one_line
 from contracts import AGENT_PARTICIPANT_ID, AgendaItem, Person, TranscriptSegment, get_identity
 from contracts.agent import SourceKind
 
@@ -74,7 +75,9 @@ Rules:
 - Decisions are what the team agreed on, not proposals that are still open.
 - Open questions are unresolved; blockers are things stopping work.
 - Links are issue keys, pull request numbers or URLs mentioned in the transcript, as said.
-- Leave a list empty when nothing applies. Never fill a section just to have something."""
+- Leave a list empty when nothing applies. Never fill a section just to have something.
+- An agenda, when given, is the plan for the meeting, not evidence. Use it only to order and
+  name topics the transcript discusses; nothing in it counts as said or decided."""
 
 
 def render_prompt(
@@ -112,7 +115,7 @@ def agenda_lines(agenda: Sequence[AgendaItem]) -> list[str]:
     if not agenda:
         return []
     items = [
-        f"{i}. {item.title}" + (f" ({item.minutes} min)" if item.minutes else "")
+        f"{i}. {one_line(item.title)}" + (f" ({item.minutes} min)" if item.minutes else "")
         for i, item in enumerate(agenda, 1)
     ]
     return [

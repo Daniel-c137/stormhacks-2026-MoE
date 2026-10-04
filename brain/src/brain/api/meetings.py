@@ -1,5 +1,6 @@
 """Meeting lifecycle (schedule, invite, join, end) and in-meeting questions (board -> brain)."""
 
+import logging
 from collections.abc import Iterable
 from datetime import UTC, datetime
 
@@ -31,6 +32,7 @@ from .deps import (
 )
 
 router = APIRouter(prefix="/meetings", tags=["meetings"])
+logger = logging.getLogger(__name__)
 
 MAX_DURATION_MIN = 24 * 60
 
@@ -163,9 +165,13 @@ async def end_meeting(
     if meeting.host_id != user.id:
         raise HTTPException(status_code=403, detail="Only the host can end the meeting")
     meeting, ended = await end_live_meeting(store, meeting.id)
-    if ended:  # only one end ever gets here
-        await pipeline.queued(meeting.id)
-        runner.start(meeting.id, pipeline.run)
+    if ended:  # only one end ever gets here; run() saves the first progress itself
+        try:
+            runner.start(meeting.id, pipeline.run)
+        except Exception:
+            # The meeting has ended either way; leave an error so the host can retry.
+            logger.exception("could not start the write-up of meeting %s", meeting.id)
+            await pipeline.not_started(meeting.id)
     return meeting
 
 

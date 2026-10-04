@@ -118,6 +118,12 @@ class Api:
 
 
 @pytest.fixture
+def settings(settings):
+    """No wait for the transcript to settle; the settle test gates it instead."""
+    return settings.model_copy(update={"pipeline_settle_seconds": 0})
+
+
+@pytest.fixture
 def llm() -> MockLLM:
     return MockLLM(structured={ReportExtraction: EXTRACTION})
 
@@ -688,23 +694,11 @@ async def test_a_failed_save_leaves_no_report_links_or_memory_and_a_retry_links_
     assert decisions["d-send"]["relation"] == {"type": "superseded_by", "decision_id": new_id}
     assert decisions[new_id]["relation"] == {"type": "contradicts", "decision_id": "d-send"}
     assert len((await api.get("/tasks")).json()) == 1
-    mine = [h for h in await memory.search(TEAM.id, "refund", k=100)]
-    assert mine and all(h.chunk.meeting_id == meeting["id"] for h in mine)
-
-
-async def test_a_retry_indexes_memory_once(api, memory):
-    api.use_llm(MockLLM())
-    meeting = await ended(api)
-    api.use_llm(MockLLM(structured={ReportExtraction: EXTRACTION}))
-    await api.retry(meeting["id"])
-    await api.drain()
-    indexed = await memory.search(TEAM.id, "refund", k=100)
-
-    fresh = MeetingMemory(MockEmbedder(), InMemoryMemoryStore(dim=768))
-    api.use_memory(fresh)
-    await ended(api)
-
-    assert len(indexed) == len(await fresh.search(TEAM.id, "refund", k=100))
+    # three turns, the summary, one decision and one task, each once
+    mine = [h.chunk for h in await memory.search(TEAM.id, "refund", k=100)]
+    assert sorted(c.kind for c in mine if c.meeting_id == meeting["id"]) == sorted(
+        ["transcript"] * 3 + ["summary", "decision", "task"]
+    )
 
 
 async def half_saved_by_an_earlier_run(api, store) -> tuple[dict, str]:

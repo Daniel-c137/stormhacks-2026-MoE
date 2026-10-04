@@ -1,27 +1,29 @@
 """The write-up after a meeting ends: settle the transcript, build the report, link past
-decisions, index memory, save, then processing -> needs_review. Private chat is never an input.
+decisions, save (processing -> needs_review), then index memory. Private chat is never an input.
 
-Every model and embedding call comes before the first store write, so a failed step leaves the
-meeting processing with ReportProgress.error and nothing saved; a retry starts over and replaces
-the report and the meeting's memory."""
+What a failure leaves behind:
+- Before the save (settling, writing, linking, or the save itself): ReportProgress with the error
+  at the failed step, the meeting still processing, and nothing else. The save is one atomic
+  Store.complete_report: the report, its decision links and the status change land together or
+  not at all, and it first undoes any links an earlier save of this meeting made, so a retry
+  never leaves a past decision retired by a decision that no longer exists.
+- Indexing runs after the save. A failure there leaves the meeting in review with its report
+  and no memory for it (a meeting's memory is swapped atomically), and the step's label says
+  indexing failed. Memory is never written for a meeting whose report was not saved.
+
+The team sees a message chosen for them; the exception itself goes to the server log."""
 
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
-from contracts import Report, ReportProgress
+from contracts import Decision, Report, ReportProgress
 
-from ..llm import LLM
-from ..memory import MeetingMemory
-from ..report import (
-    DecisionLinks,
-    TranscriptInput,
-    apply_links,
-    build_report,
-    link_decisions,
-    memory_candidates,
-)
+from ..llm import LLM, LLMError, LLMUnavailable
+from ..memory import MeetingMemory, MemoryMisconfigured, UnusableMemory
+from ..report import TranscriptInput, build_report, link_decisions, memory_candidates
 from ..store import Store
 
 logger = logging.getLogger(__name__)
@@ -30,12 +32,16 @@ REPORT_STEPS = [
     "Finalising the transcript",
     "Writing the summary, decisions and tasks",
     "Checking against past decisions",
-    "Indexing for search",
     "Saving the report",
+    "Indexing for search",
 ]
-SETTLE, WRITE, LINK, INDEX, SAVE = range(len(REPORT_STEPS))
+SETTLE, WRITE, LINK, SAVE, INDEX = range(len(REPORT_STEPS))
 INDEX_SKIPPED = "Indexing for search (skipped: search memory is not configured)"
-INTERRUPTED = "The write-up was interrupted before it finished"
+NO_TRANSCRIPT = "No transcript was captured for this meeting, so there is nothing to summarise."
+INTERRUPTED = "The write-up was interrupted before it finished; retry it"
+NOT_STARTED = "The write-up could not be started; retry it"
+
+Memory = MeetingMemory | UnusableMemory
 
 
 class PostMeetingPipeline(Protocol):
@@ -46,8 +52,12 @@ class PostMeetingPipeline(Protocol):
 
     steps: list[str]
 
-    async def queued(self, meeting_id: str) -> ReportProgress:
-        """Saves the first step as under way, so readers see it before the run starts."""
+    def progress(self, meeting_id: str) -> ReportProgress:
+        """The first step, under way. Not saved: run() saves it."""
+        ...
+
+    async def not_started(self, meeting_id: str) -> None:
+        """Records that the write-up could not be started, so it can be retried."""
         ...
 
     async def run(self, meeting_id: str) -> Report: ...
@@ -57,64 +67,104 @@ class WriteUpError(Exception):
     """A step cannot go on; the message is shown to the team."""
 
 
+def can_retry(progress: ReportProgress | None, now: datetime, stale_after: timedelta) -> bool:
+    """For a processing meeting whose write-up is not running in this process: retry when the
+    last run failed, never saved progress, or has not moved for `stale_after` (its process
+    probably died)."""
+    if progress is None or progress.error is not None or progress.updated_at is None:
+        return True
+    return now - progress.updated_at >= stale_after
+
+
+def shown_error(e: BaseException, step: str) -> str:
+    """What the team sees when `step` failed. Only messages written for them pass through."""
+    if isinstance(e, WriteUpError | LLMUnavailable | MemoryMisconfigured):
+        return str(e)
+    if isinstance(e, LLMError):
+        return f'The language model failed during "{step}"; retry the write-up later'
+    return f'"{step}" failed unexpectedly; retry the write-up, or see the server log if it repeats'
+
+
+def index_problem(e: BaseException) -> str:
+    if isinstance(e, MemoryMisconfigured):
+        return str(e)
+    if isinstance(e, LLMError):
+        return "the embedding model failed"
+    return "an unexpected error; see the server log"
+
+
+def reopened(decision: Decision, retired_by: set[str]) -> Decision:
+    """The past decision as it was before one of `retired_by` superseded it."""
+    relation = decision.relation
+    if relation and relation.type == "superseded_by" and relation.decision_id in retired_by:
+        return decision.model_copy(update={"status": "active", "relation": None})
+    return decision
+
+
 class ReportPipeline:
     """`llm` is called when the report step starts, so an unconfigured model fails that step
     with a visible error instead of the end request. Without `memory` the index step is skipped
-    and says so."""
+    and says so. `settle` replaces the wait for the last transcript segments (tests gate it)."""
 
     def __init__(
         self,
         store: Store,
         llm: Callable[[], LLM],
-        memory: MeetingMemory | None = None,
+        memory: Memory | None = None,
         *,
         settle_seconds: float = 0.0,
+        settle: Callable[[], Awaitable[object]] | None = None,
     ):
         self.store = store
         self.llm = llm
         self.memory = memory
         self.settle_seconds = settle_seconds
+        self._settle = settle or (lambda: asyncio.sleep(settle_seconds))
         self.steps = [
             INDEX_SKIPPED if i == INDEX and memory is None else step
             for i, step in enumerate(REPORT_STEPS)
         ]
 
-    async def queued(self, meeting_id: str) -> ReportProgress:
-        return await self.store.save_report_progress(self._progress(meeting_id, SETTLE))
+    def progress(self, meeting_id: str) -> ReportProgress:
+        return self._progress(meeting_id, SETTLE)
+
+    async def not_started(self, meeting_id: str) -> None:
+        await self._failed(self.progress(meeting_id), NOT_STARTED)
 
     async def run(self, meeting_id: str) -> Report:
-        progress = await self.queued(meeting_id)
+        progress = self.progress(meeting_id)
         try:
-            meeting, transcript, agenda = await self._settled(meeting_id)
-            progress = await self._at(meeting_id, WRITE)
-            llm = self.llm()
-            report = await build_report(llm, transcript, agenda=agenda)
-            progress = await self._at(meeting_id, LINK)
-            links = await self._links(llm, meeting.team_id, report)
-            progress = await self._at(meeting_id, INDEX)
-            if self.memory is not None:
-                await self.memory.index_meeting(
-                    meeting.team_id, meeting_id, transcript.segments, report
-                )
-            progress = await self._at(meeting_id, SAVE)
-            await self.store.save_report(report)
-            await apply_links(self.store, links)
-            await self.store.transition_status(meeting_id, {"processing"}, "needs_review")
+            await self.store.save_report_progress(progress)
+            await self._settle()
+            meeting, transcript, agenda = await self._read(meeting_id)
+            superseded: list[Decision] = []
+            if transcript.final_segments():
+                progress = await self._at(progress, WRITE)
+                llm = self.llm()
+                report = await build_report(llm, transcript, agenda=agenda)
+                progress = await self._at(progress, LINK)
+                report, superseded = await self._links(llm, meeting.team_id, report)
+            else:
+                report = Report(meeting_id=meeting_id, summary=NO_TRANSCRIPT)
+            progress = await self._at(progress, SAVE)
+            await self.store.complete_report(report, superseded)
         except asyncio.CancelledError:
             await self._failed(progress, INTERRUPTED)
             raise
         except Exception as e:
-            await self._failed(progress, str(e) or type(e).__name__)
+            await self._failed(progress, shown_error(e, self.steps[progress.current]))
             raise
-        await self.store.save_report_progress(
-            self._progress(meeting_id, len(self.steps), done=True)
-        )
+        steps = await self._index(progress, meeting.team_id, transcript, report)
+        try:
+            await self.store.save_report_progress(
+                self._progress(meeting_id, len(steps), steps=steps, done=True)
+            )
+        except Exception:
+            logger.exception("could not record the finished write-up of %s", meeting_id)
         return report
 
-    async def _settled(self, meeting_id: str):
+    async def _read(self, meeting_id: str):
         """The final transcript once the worker's last segments have had time to land."""
-        if self.settle_seconds > 0:
-            await asyncio.sleep(self.settle_seconds)
         meeting = await self.store.meeting(meeting_id)
         if meeting.status != "processing":
             raise WriteUpError(f"The meeting is {meeting.status}, not processing")
@@ -125,18 +175,18 @@ class ReportPipeline:
             members=await self.store.members(meeting.team_id),
             segments=await self.store.transcript(meeting_id),
         )
-        if not transcript.final_segments():
-            raise WriteUpError("No final transcript was saved for this meeting")
         agenda = await self.store.agenda(meeting_id)
         return meeting, transcript, agenda.items if agenda else []
 
-    async def _links(self, llm: LLM, team_id: str, report: Report) -> DecisionLinks:
-        """Links to the team's decisions from other meetings, dated by those meetings."""
-        if not report.decisions:
-            return DecisionLinks()
-        past = [d for d in await self.store.decisions(team_id) if d.meeting_id != report.meeting_id]
-        if not past:
-            return DecisionLinks()
+    async def _links(self, llm: LLM, team_id: str, report: Report) -> tuple[Report, list[Decision]]:
+        """The report with its decisions' links, and the past decisions they retire. Past
+        decisions are the team's from other meetings, as they were before any earlier save of
+        this meeting retired them, dated by their meetings."""
+        stored = await self.store.decisions(team_id)
+        earlier = {d.id for d in stored if d.meeting_id == report.meeting_id}
+        past = [reopened(d, earlier) for d in stored if d.meeting_id != report.meeting_id]
+        if not report.decisions or not past:
+            return report, []
         dates = {
             m.id: when.date()
             for m in await self.store.meetings(team_id)
@@ -145,19 +195,46 @@ class ReportPipeline:
         candidates = None
         if self.memory is not None:
             candidates = await memory_candidates(self.memory, team_id, report.decisions, past)
-        return await link_decisions(llm, report.decisions, past, dates=dates, candidates=candidates)
+        links = await link_decisions(
+            llm, report.decisions, past, dates=dates, candidates=candidates
+        )
+        linked = {d.id: d for d in links.new}
+        decisions = [linked.get(d.id, d) for d in report.decisions]
+        return report.model_copy(update={"decisions": decisions}), links.past
 
-    def _progress(self, meeting_id: str, current: int, *, done: bool = False) -> ReportProgress:
+    async def _index(
+        self, progress: ReportProgress, team_id: str, transcript: TranscriptInput, report: Report
+    ) -> list[str]:
+        """Runs once the report is saved. A failure is a note on the step, not a failed write-up."""
+        steps = list(self.steps)
+        if self.memory is None or not transcript.final_segments():
+            return steps
+        try:
+            await self._at(progress, INDEX)
+            await self.memory.index_meeting(team_id, report.meeting_id, transcript.segments, report)
+        except Exception as e:
+            logger.exception("indexing meeting %s failed", report.meeting_id)
+            steps[INDEX] = f"{REPORT_STEPS[INDEX]} (failed: {index_problem(e)})"
+        return steps
+
+    def _progress(
+        self, meeting_id: str, current: int, *, steps: list[str] | None = None, done=False
+    ) -> ReportProgress:
         return ReportProgress(
-            meeting_id=meeting_id, steps=list(self.steps), current=current, done=done
+            meeting_id=meeting_id,
+            steps=list(steps or self.steps),
+            current=current,
+            done=done,
+            updated_at=datetime.now(UTC),
         )
 
-    async def _at(self, meeting_id: str, step: int) -> ReportProgress:
-        return await self.store.save_report_progress(self._progress(meeting_id, step))
+    async def _at(self, progress: ReportProgress, step: int) -> ReportProgress:
+        return await self.store.save_report_progress(self._progress(progress.meeting_id, step))
 
     async def _failed(self, progress: ReportProgress, error: str) -> None:
+        failed = progress.model_copy(update={"error": error, "updated_at": datetime.now(UTC)})
         try:
-            await self.store.save_report_progress(progress.model_copy(update={"error": error}))
+            await self.store.save_report_progress(failed)
         except Exception:
             logger.exception("could not record the failed write-up of %s", progress.meeting_id)
 
@@ -197,8 +274,8 @@ class PipelineRunner:
     async def _run(self, meeting_id: str, run: Callable[[str], Awaitable[object]]) -> None:
         try:
             await run(meeting_id)
-        except Exception as e:
-            logger.warning("the write-up of meeting %s failed: %s", meeting_id, e)
+        except Exception:
+            logger.exception("the write-up of meeting %s failed", meeting_id)
 
     def _forget(self, meeting_id: str, task: asyncio.Task[None]) -> None:
         if self._tasks.get(meeting_id) is task:

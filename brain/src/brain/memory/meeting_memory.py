@@ -48,3 +48,34 @@ class MeetingMemory:
 
     async def delete_meeting_transcript(self, meeting_id: str) -> None:
         await self.store.delete_meeting_transcript(meeting_id)
+
+
+class MemoryMisconfigured(RuntimeError):
+    """Memory is configured but cannot work; the message is safe to show the team."""
+
+
+class UnusableMemory:
+    """Stands in for meeting memory that is configured but cannot work, such as embeddings of a
+    size the store cannot hold. Every call fails with the reason, so the write-up reports the
+    misconfiguration instead of silently skipping memory."""
+
+    def __init__(self, reason: str):
+        self.reason = reason
+
+    def _fail(self) -> MemoryMisconfigured:
+        return MemoryMisconfigured(f"search memory is misconfigured: {self.reason}")
+
+    async def index_meeting(
+        self,
+        team_id: str,
+        meeting_id: str,
+        segments: Iterable[TranscriptSegment],
+        report: Report | None = None,
+    ) -> list[Chunk]:
+        raise self._fail()
+
+    async def search(self, team_id: str, query: str, k: int = 8) -> list[MemoryHit]:
+        raise self._fail()
+
+    async def delete_meeting_transcript(self, meeting_id: str) -> None:
+        raise self._fail()
