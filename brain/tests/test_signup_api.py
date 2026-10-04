@@ -1,10 +1,11 @@
-"""Creating an account (#128): only an email the admin invited, that is, a member of the sign-up
-team (SIGNUP_TEAM_ID) with no login yet. Sign-up gives them a password login and signs them in."""
+"""Creating an account (#128): only an email an admin invited, that is, a person on a team with
+that email and no login yet (#143). Sign-up gives them a password login on their own team and
+signs them in. test_invites_api.py covers inviting."""
 
 import asyncio
 
 import pytest
-from api_support import ALEX, AUTH_SECRET, OUTSIDER, TEAM
+from api_support import ALEX, AUTH_SECRET, OTHER_TEAM, OUTSIDER, TEAM
 from fastapi.testclient import TestClient
 from test_auth import base_settings, bearer
 
@@ -21,7 +22,7 @@ PASSWORD = "priya-password-1"
 
 @pytest.fixture
 def settings():
-    return base_settings(auth_secret=AUTH_SECRET, signup_team_id=TEAM.id)
+    return base_settings(auth_secret=AUTH_SECRET)
 
 
 @pytest.fixture
@@ -96,8 +97,18 @@ def test_an_email_nobody_invited_cannot_create_an_account(client):
     assert "invite" in response.json()["detail"].lower()
 
 
-def test_someone_on_another_team_cannot_sign_up_to_this_one(client):
-    assert sign_up(client, email="olga@elsewhere.com").status_code == 403
+def test_someone_invited_by_another_team_signs_up_to_that_team(client):
+    response = sign_up(client, email="olga@elsewhere.com")
+
+    assert response.status_code == 201, response.text
+    token = response.json()["token"]
+    assert response.json()["person"]["id"] == OUTSIDER.id
+    assert client.get("/team", headers=bearer(token)).json()["id"] == OTHER_TEAM.id
+
+
+def test_a_person_without_an_email_cannot_be_signed_up_for(client):
+    """Alex and Sarah have no email on the team; only Alex has a login."""
+    assert sign_up(client, email="sarah@example.com").status_code == 403
 
 
 def test_an_email_that_already_has_an_account_is_told_to_sign_in(client):
@@ -140,17 +151,6 @@ def test_a_bad_sign_up_is_422_and_creates_nothing(client, store, fields, why):
 # not set up
 
 
-def test_sign_up_without_a_sign_up_team_is_unavailable(app, client, settings):
-    app.dependency_overrides[get_settings] = lambda: settings.model_copy(
-        update={"signup_team_id": None}
-    )
-
-    response = sign_up(client)
-
-    assert response.status_code == 503
-    assert "SIGNUP_TEAM_ID" in response.json()["detail"]
-
-
 def test_sign_up_without_an_auth_secret_is_unavailable(app, client, settings):
     app.dependency_overrides[get_settings] = lambda: settings.model_copy(
         update={"auth_secret": None}
@@ -164,6 +164,18 @@ def test_sign_up_without_an_auth_secret_is_unavailable(app, client, settings):
 
 def test_the_page_is_told_sign_up_is_open_and_google_is_not_set_up(client):
     assert client.get("/auth/options").json() == {"signup": True, "google": False}
+
+
+def test_sign_up_is_offered_whenever_sessions_can_be_signed(app, client, settings):
+    app.dependency_overrides[get_settings] = lambda: settings.model_copy(
+        update={"auth_secret": None}
+    )
+
+    assert client.get("/auth/options").json() == {"signup": False, "google": False}
+
+
+def test_there_is_no_sign_up_team_setting_any_more():
+    assert not hasattr(base_settings(), "signup_team_id")
 
 
 def test_google_is_offered_once_its_client_and_public_callback_are_configured(

@@ -542,6 +542,46 @@ async def test_a_login_needs_an_existing_person(store):
         await store.login_by_email("ghost@example.com")
 
 
+# invitations: a person an admin added with an email and no login yet (#143)
+
+
+async def test_an_invited_person_is_found_by_email_ignoring_case_until_they_have_a_login(store):
+    _, alex, sarah, other, _ = await two_teams(store)
+    priya = person("Priya Shah", email="Priya.Shah@Example.com")
+    await store.upsert_person(priya, other.id)
+    await store.set_login(alex.id, "alex@example.com", "hash-1")
+
+    assert [p.id for p in await store.invited_people("priya.shah@example.com")] == [priya.id]
+    assert [p.id for p in await store.invited_people("PRIYA.SHAH@EXAMPLE.COM")] == [priya.id]
+    assert [p.id for p in await store.invited_people("sarah@example.com")] == [sarah.id]
+    assert await store.invited_people("alex@example.com") == []  # signs in already
+    assert await store.invited_people("nobody@example.com") == []
+
+    await store.set_login(priya.id, "priya.shah@example.com", "hash-2")
+    assert await store.invited_people("priya.shah@example.com") == []
+
+
+async def test_the_same_email_invited_by_two_teams_finds_both(store):
+    team, *_, other, _ = await two_teams(store)
+    first = person("Sam Lee", email="sam@example.com")
+    second = person("Sam Lee", email="SAM@example.com")
+    await store.upsert_person(first, team.id)
+    await store.upsert_person(second, other.id)
+
+    found = await store.invited_people("sam@example.com")
+
+    assert sorted(p.id for p in found) == sorted([first.id, second.id])
+    assert all(isinstance(p, Person) and not p.invited for p in found)
+
+
+async def test_someone_on_no_team_is_not_invited(store):
+    team = await team_with(store, person("Sam Lee", email="sam@example.com"))
+
+    await store.delete_team(team.id)  # people stay, their membership goes
+
+    assert await store.invited_people("sam@example.com") == []
+
+
 # meetings
 
 

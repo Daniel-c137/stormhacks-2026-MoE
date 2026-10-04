@@ -88,7 +88,6 @@ class FakeGoogle:
 def settings():
     return base_settings(
         auth_secret=AUTH_SECRET,
-        signup_team_id=TEAM.id,
         google_client_id=CLIENT_ID,
         google_client_secret=CLIENT_SECRET,
         google_redirect_url=REDIRECT_URL,
