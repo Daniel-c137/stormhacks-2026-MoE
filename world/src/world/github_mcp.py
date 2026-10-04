@@ -782,9 +782,10 @@ def cursor(offset: int) -> str:
 
 
 def offset_of(after: str) -> int:
+    """The index after the item a cursor names; cursors number items from 1."""
     try:
         kind, _, offset = base64.b64decode(after, validate=True).decode().partition(":")
-        if kind != "cursor":
+        if kind != "cursor" or int(offset) < 0:
             raise ValueError(after)
         return int(offset)
     except ValueError:
