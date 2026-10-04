@@ -1,0 +1,1979 @@
+[
+  {
+    "number": 2,
+    "title": "Gmail inbox sync v1",
+    "body": "Pages through `users.messages.list` with `pageToken` and stores message ids.\n\nCloses #1",
+    "state": "closed",
+    "user": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "backend"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "mohammadreza-dropsubs",
+        "id": 109862773,
+        "type": "User",
+        "html_url": "https://github.com/mohammadreza-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-07-20T18:00:00Z",
+    "updated_at": "2026-07-22T22:10:00Z",
+    "closed_at": "2026-07-22T22:10:00Z",
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/dropsubs/pull/2",
+    "url": "https://api.github.com/repos/dropsubs/dropsubs/pulls/2",
+    "draft": false,
+    "merged": true,
+    "merged_at": "2026-07-22T22:10:00Z",
+    "merge_commit_sha": "1b17227d90a95f446849ec230ef699f25898ddab",
+    "merged_by": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "head": {
+      "ref": "be/gmail-sync",
+      "sha": "5732ce571095ea7db4288121d70a7221f4a76489",
+      "label": "dropsubs:be/gmail-sync"
+    },
+    "base": {
+      "ref": "main",
+      "label": "dropsubs:main"
+    },
+    "additions": 300,
+    "deletions": 0,
+    "changed_files": 2,
+    "_files": [
+      {
+        "filename": "api/sync/gmail.py",
+        "status": "added",
+        "additions": 212,
+        "deletions": 0,
+        "changes": 212
+      },
+      {
+        "filename": "api/sync/test_gmail.py",
+        "status": "added",
+        "additions": 88,
+        "deletions": 0,
+        "changes": 88
+      }
+    ],
+    "_closes": [
+      1
+    ],
+    "mergeable_state": null,
+    "_status": {
+      "state": "success",
+      "total_count": 2,
+      "statuses": [
+        {
+          "context": "ci/tests",
+          "state": "success"
+        },
+        {
+          "context": "ci/lint",
+          "state": "success"
+        }
+      ]
+    }
+  },
+  {
+    "number": 4,
+    "title": "LLM receipt classifier + 50-email eval set",
+    "body": "First classifier prompt and a 50-email anonymized eval set. 84% on the set.\n\nCloses #3",
+    "state": "closed",
+    "user": {
+      "login": "hossein-dropsubs",
+      "id": 99392202,
+      "type": "User",
+      "html_url": "https://github.com/hossein-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "ai"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "hossein-dropsubs",
+        "id": 99392202,
+        "type": "User",
+        "html_url": "https://github.com/hossein-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-07-27T20:00:00Z",
+    "updated_at": "2026-07-30T00:00:00Z",
+    "closed_at": "2026-07-30T00:00:00Z",
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/dropsubs/pull/4",
+    "url": "https://api.github.com/repos/dropsubs/dropsubs/pulls/4",
+    "draft": false,
+    "merged": true,
+    "merged_at": "2026-07-30T00:00:00Z",
+    "merge_commit_sha": "db9995985e5c79622f5d60a0be0560bd915c7049",
+    "merged_by": {
+      "login": "hossein-dropsubs",
+      "id": 99392202,
+      "type": "User",
+      "html_url": "https://github.com/hossein-dropsubs"
+    },
+    "head": {
+      "ref": "ai/classifier",
+      "sha": "b96699f0b8942fb3305a11676e8458b7b04c0e9e",
+      "label": "dropsubs:ai/classifier"
+    },
+    "base": {
+      "ref": "main",
+      "label": "dropsubs:main"
+    },
+    "additions": 190,
+    "deletions": 0,
+    "changed_files": 2,
+    "_files": [
+      {
+        "filename": "ai/classifier.py",
+        "status": "added",
+        "additions": 140,
+        "deletions": 0,
+        "changes": 140
+      },
+      {
+        "filename": "ai/evals/emails_v1.jsonl",
+        "status": "added",
+        "additions": 50,
+        "deletions": 0,
+        "changes": 50
+      }
+    ],
+    "_closes": [
+      3
+    ],
+    "mergeable_state": null,
+    "_status": {
+      "state": "success",
+      "total_count": 2,
+      "statuses": [
+        {
+          "context": "ci/tests",
+          "state": "success"
+        },
+        {
+          "context": "ci/lint",
+          "state": "success"
+        }
+      ]
+    }
+  },
+  {
+    "number": 6,
+    "title": "Dashboard subscription list",
+    "body": "Subscription list page.\n\nCloses #5",
+    "state": "closed",
+    "user": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "frontend"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "reyhaneh-dropsubs",
+        "id": 41731418,
+        "type": "User",
+        "html_url": "https://github.com/reyhaneh-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-08-01T19:00:00Z",
+    "updated_at": "2026-08-03T23:20:00Z",
+    "closed_at": "2026-08-03T23:20:00Z",
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/dropsubs/pull/6",
+    "url": "https://api.github.com/repos/dropsubs/dropsubs/pulls/6",
+    "draft": false,
+    "merged": true,
+    "merged_at": "2026-08-03T23:20:00Z",
+    "merge_commit_sha": "72ea383247d3a83af7caf2da662062dd7ffa5879",
+    "merged_by": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "head": {
+      "ref": "fe/dashboard-list",
+      "sha": "c6b829f25412549a811f906838df86f8b727d935",
+      "label": "dropsubs:fe/dashboard-list"
+    },
+    "base": {
+      "ref": "main",
+      "label": "dropsubs:main"
+    },
+    "additions": 160,
+    "deletions": 4,
+    "changed_files": 1,
+    "_files": [
+      {
+        "filename": "web/app/dashboard/page.tsx",
+        "status": "modified",
+        "additions": 160,
+        "deletions": 4,
+        "changes": 164
+      }
+    ],
+    "_closes": [
+      5
+    ],
+    "mergeable_state": null,
+    "_status": {
+      "state": "success",
+      "total_count": 2,
+      "statuses": [
+        {
+          "context": "ci/tests",
+          "state": "success"
+        },
+        {
+          "context": "ci/lint",
+          "state": "success"
+        }
+      ]
+    }
+  },
+  {
+    "number": 8,
+    "title": "Set up Sentry for api and web",
+    "body": "Adds Sentry SDK to api and web.\n\nCloses #7",
+    "state": "closed",
+    "user": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "infra"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "mohammadreza-dropsubs",
+        "id": 109862773,
+        "type": "User",
+        "html_url": "https://github.com/mohammadreza-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-08-05T21:00:00Z",
+    "updated_at": "2026-08-06T18:00:00Z",
+    "closed_at": "2026-08-06T18:00:00Z",
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/dropsubs/pull/8",
+    "url": "https://api.github.com/repos/dropsubs/dropsubs/pulls/8",
+    "draft": false,
+    "merged": true,
+    "merged_at": "2026-08-06T18:00:00Z",
+    "merge_commit_sha": "67ee8730d16384603b1f843999df6fc8ba12d387",
+    "merged_by": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "head": {
+      "ref": "be/sentry",
+      "sha": "7d41bfb05548afacda307821a83a9a30621b86d5",
+      "label": "dropsubs:be/sentry"
+    },
+    "base": {
+      "ref": "main",
+      "label": "dropsubs:main"
+    },
+    "additions": 12,
+    "deletions": 1,
+    "changed_files": 1,
+    "_files": [
+      {
+        "filename": "api/main.py",
+        "status": "modified",
+        "additions": 12,
+        "deletions": 1,
+        "changes": 13
+      }
+    ],
+    "_closes": [
+      7
+    ],
+    "mergeable_state": null,
+    "_status": {
+      "state": "success",
+      "total_count": 2,
+      "statuses": [
+        {
+          "context": "ci/tests",
+          "state": "success"
+        },
+        {
+          "context": "ci/lint",
+          "state": "success"
+        }
+      ]
+    }
+  },
+  {
+    "number": 15,
+    "title": "Handle Spotify's new receipt format",
+    "body": "Adds the template to the few-shot examples and eval set.\n\nCloses #13",
+    "state": "closed",
+    "user": {
+      "login": "hossein-dropsubs",
+      "id": 99392202,
+      "type": "User",
+      "html_url": "https://github.com/hossein-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "ai"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "hossein-dropsubs",
+        "id": 99392202,
+        "type": "User",
+        "html_url": "https://github.com/hossein-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-08-19T17:00:00Z",
+    "updated_at": "2026-08-19T23:00:00Z",
+    "closed_at": "2026-08-19T23:00:00Z",
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/dropsubs/pull/15",
+    "url": "https://api.github.com/repos/dropsubs/dropsubs/pulls/15",
+    "draft": false,
+    "merged": true,
+    "merged_at": "2026-08-19T23:00:00Z",
+    "merge_commit_sha": "2a69d2b8f2443d9f703997a2d07800c3d8e531af",
+    "merged_by": {
+      "login": "hossein-dropsubs",
+      "id": 99392202,
+      "type": "User",
+      "html_url": "https://github.com/hossein-dropsubs"
+    },
+    "head": {
+      "ref": "ai/spotify",
+      "sha": "50d7755d50cef1a17d881bb6563fd1b658120046",
+      "label": "dropsubs:ai/spotify"
+    },
+    "base": {
+      "ref": "main",
+      "label": "dropsubs:main"
+    },
+    "additions": 18,
+    "deletions": 3,
+    "changed_files": 1,
+    "_files": [
+      {
+        "filename": "ai/classifier.py",
+        "status": "modified",
+        "additions": 18,
+        "deletions": 3,
+        "changes": 21
+      }
+    ],
+    "_closes": [
+      13
+    ],
+    "mergeable_state": null,
+    "_status": {
+      "state": "success",
+      "total_count": 2,
+      "statuses": [
+        {
+          "context": "ci/tests",
+          "state": "success"
+        },
+        {
+          "context": "ci/lint",
+          "state": "success"
+        }
+      ]
+    }
+  },
+  {
+    "number": 17,
+    "title": "Beta invite flow",
+    "body": "Invite codes, waitlist import, welcome screen.",
+    "state": "closed",
+    "user": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "frontend"
+      },
+      {
+        "name": "launch"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "reyhaneh-dropsubs",
+        "id": 41731418,
+        "type": "User",
+        "html_url": "https://github.com/reyhaneh-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-08-20T22:00:00Z",
+    "updated_at": "2026-08-24T01:00:00Z",
+    "closed_at": "2026-08-24T01:00:00Z",
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/dropsubs/pull/17",
+    "url": "https://api.github.com/repos/dropsubs/dropsubs/pulls/17",
+    "draft": false,
+    "merged": true,
+    "merged_at": "2026-08-24T01:00:00Z",
+    "merge_commit_sha": "989e61e4a0ea3fd9f7bf9994e05fd21382783d65",
+    "merged_by": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "head": {
+      "ref": "fe/beta-invite",
+      "sha": "860e065a3daedb66def83eb82b22bc148dceebf0",
+      "label": "dropsubs:fe/beta-invite"
+    },
+    "base": {
+      "ref": "main",
+      "label": "dropsubs:main"
+    },
+    "additions": 210,
+    "deletions": 0,
+    "changed_files": 1,
+    "_files": [
+      {
+        "filename": "web/app/invite/page.tsx",
+        "status": "added",
+        "additions": 210,
+        "deletions": 0,
+        "changes": 210
+      }
+    ],
+    "_closes": [],
+    "mergeable_state": null,
+    "_status": {
+      "state": "success",
+      "total_count": 2,
+      "statuses": [
+        {
+          "context": "ci/tests",
+          "state": "success"
+        },
+        {
+          "context": "ci/lint",
+          "state": "success"
+        }
+      ]
+    }
+  },
+  {
+    "number": 18,
+    "title": "PDF savings report export",
+    "body": "Picked this up since I was in the report page anyway. Closes #12.",
+    "state": "closed",
+    "user": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "feature"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "reyhaneh-dropsubs",
+        "id": 41731418,
+        "type": "User",
+        "html_url": "https://github.com/reyhaneh-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-08-24T17:00:00Z",
+    "updated_at": "2026-08-25T23:00:00Z",
+    "closed_at": "2026-08-25T23:00:00Z",
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/dropsubs/pull/18",
+    "url": "https://api.github.com/repos/dropsubs/dropsubs/pulls/18",
+    "draft": false,
+    "merged": true,
+    "merged_at": "2026-08-25T23:00:00Z",
+    "merge_commit_sha": "04bac41927574aea6dc10b4c8b7c6ba058453c21",
+    "merged_by": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "head": {
+      "ref": "fe/pdf-report",
+      "sha": "eba6892b3844c2c1df5a356b2f3ae734e210929b",
+      "label": "dropsubs:fe/pdf-report"
+    },
+    "base": {
+      "ref": "main",
+      "label": "dropsubs:main"
+    },
+    "additions": 130,
+    "deletions": 0,
+    "changed_files": 1,
+    "_files": [
+      {
+        "filename": "web/app/report/pdf.tsx",
+        "status": "added",
+        "additions": 130,
+        "deletions": 0,
+        "changes": 130
+      }
+    ],
+    "_closes": [
+      12
+    ],
+    "mergeable_state": null,
+    "_status": {
+      "state": "success",
+      "total_count": 2,
+      "statuses": [
+        {
+          "context": "ci/tests",
+          "state": "success"
+        },
+        {
+          "context": "ci/lint",
+          "state": "success"
+        }
+      ]
+    }
+  },
+  {
+    "number": 19,
+    "title": "Fix Outlook OAuth redirect loop",
+    "body": "Registers the exact redirect URI Microsoft returns after consent.\n\nCloses #10",
+    "state": "closed",
+    "user": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "bug"
+      },
+      {
+        "name": "frontend"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "reyhaneh-dropsubs",
+        "id": 41731418,
+        "type": "User",
+        "html_url": "https://github.com/reyhaneh-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-08-24T21:00:00Z",
+    "updated_at": "2026-08-26T21:05:00Z",
+    "closed_at": "2026-08-26T21:05:00Z",
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/dropsubs/pull/19",
+    "url": "https://api.github.com/repos/dropsubs/dropsubs/pulls/19",
+    "draft": false,
+    "merged": true,
+    "merged_at": "2026-08-26T21:05:00Z",
+    "merge_commit_sha": "fb66193a2d61399d0135e79a72b26df995d7d7e3",
+    "merged_by": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "head": {
+      "ref": "fe/outlook-redirect",
+      "sha": "b47e46f089bea98004a82a1597c697267dbcb2f9",
+      "label": "dropsubs:fe/outlook-redirect"
+    },
+    "base": {
+      "ref": "main",
+      "label": "dropsubs:main"
+    },
+    "additions": 6,
+    "deletions": 2,
+    "changed_files": 1,
+    "_files": [
+      {
+        "filename": "web/lib/auth/outlook.ts",
+        "status": "modified",
+        "additions": 6,
+        "deletions": 2,
+        "changes": 8
+      }
+    ],
+    "_closes": [
+      10
+    ],
+    "mergeable_state": null,
+    "_status": {
+      "state": "success",
+      "total_count": 2,
+      "statuses": [
+        {
+          "context": "ci/tests",
+          "state": "success"
+        },
+        {
+          "context": "ci/lint",
+          "state": "success"
+        }
+      ]
+    }
+  },
+  {
+    "number": 21,
+    "title": "Show CAD for Canadian receipts",
+    "body": "Uses the receipt's currency instead of assuming USD.\n\nCloses #16",
+    "state": "closed",
+    "user": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "bug"
+      },
+      {
+        "name": "frontend"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "reyhaneh-dropsubs",
+        "id": 41731418,
+        "type": "User",
+        "html_url": "https://github.com/reyhaneh-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-08-26T23:00:00Z",
+    "updated_at": "2026-08-27T20:30:00Z",
+    "closed_at": "2026-08-27T20:30:00Z",
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/dropsubs/pull/21",
+    "url": "https://api.github.com/repos/dropsubs/dropsubs/pulls/21",
+    "draft": false,
+    "merged": true,
+    "merged_at": "2026-08-27T20:30:00Z",
+    "merge_commit_sha": "778ad4100f1146ba77c70f044a632909ad802359",
+    "merged_by": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "head": {
+      "ref": "fe/currency",
+      "sha": "b79c346ee838997bef48d8352fcae97a56e055a8",
+      "label": "dropsubs:fe/currency"
+    },
+    "base": {
+      "ref": "main",
+      "label": "dropsubs:main"
+    },
+    "additions": 22,
+    "deletions": 5,
+    "changed_files": 1,
+    "_files": [
+      {
+        "filename": "web/lib/money.ts",
+        "status": "modified",
+        "additions": 22,
+        "deletions": 5,
+        "changes": 27
+      }
+    ],
+    "_closes": [
+      16
+    ],
+    "mergeable_state": null,
+    "_status": {
+      "state": "success",
+      "total_count": 2,
+      "statuses": [
+        {
+          "context": "ci/tests",
+          "state": "success"
+        },
+        {
+          "context": "ci/lint",
+          "state": "success"
+        }
+      ]
+    }
+  },
+  {
+    "number": 22,
+    "title": "Billing: 30% success fee",
+    "body": "`FEE_RATE = 0.30`, charged after a confirmed cancellation.\n\nCloses #20",
+    "state": "closed",
+    "user": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "billing"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "mohammadreza-dropsubs",
+        "id": 109862773,
+        "type": "User",
+        "html_url": "https://github.com/mohammadreza-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-08-27T17:00:00Z",
+    "updated_at": "2026-08-28T22:00:00Z",
+    "closed_at": "2026-08-28T22:00:00Z",
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/dropsubs/pull/22",
+    "url": "https://api.github.com/repos/dropsubs/dropsubs/pulls/22",
+    "draft": false,
+    "merged": true,
+    "merged_at": "2026-08-28T22:00:00Z",
+    "merge_commit_sha": "613ce6ff38f65779ec646994b7a5238fc4facc15",
+    "merged_by": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "head": {
+      "ref": "be/fee-30",
+      "sha": "8c592ed97b4659ac11692ab542c83df735d8b832",
+      "label": "dropsubs:be/fee-30"
+    },
+    "base": {
+      "ref": "main",
+      "label": "dropsubs:main"
+    },
+    "additions": 40,
+    "deletions": 2,
+    "changed_files": 1,
+    "_files": [
+      {
+        "filename": "api/billing/fees.py",
+        "status": "modified",
+        "additions": 40,
+        "deletions": 2,
+        "changes": 42
+      }
+    ],
+    "_closes": [
+      20
+    ],
+    "mergeable_state": null,
+    "_status": {
+      "state": "success",
+      "total_count": 2,
+      "statuses": [
+        {
+          "context": "ci/tests",
+          "state": "success"
+        },
+        {
+          "context": "ci/lint",
+          "state": "success"
+        }
+      ]
+    }
+  },
+  {
+    "number": 24,
+    "title": "Eval set: expand to 120 emails",
+    "body": "Adds 70 anonymized receipts. Score: 88%.",
+    "state": "closed",
+    "user": {
+      "login": "hossein-dropsubs",
+      "id": 99392202,
+      "type": "User",
+      "html_url": "https://github.com/hossein-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "ai"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "hossein-dropsubs",
+        "id": 99392202,
+        "type": "User",
+        "html_url": "https://github.com/hossein-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-08-28T16:00:00Z",
+    "updated_at": "2026-08-29T00:30:00Z",
+    "closed_at": "2026-08-29T00:30:00Z",
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/dropsubs/pull/24",
+    "url": "https://api.github.com/repos/dropsubs/dropsubs/pulls/24",
+    "draft": false,
+    "merged": true,
+    "merged_at": "2026-08-29T00:30:00Z",
+    "merge_commit_sha": "0abe6e5bc556dbacb9736a4031ad60af3871e33c",
+    "merged_by": {
+      "login": "hossein-dropsubs",
+      "id": 99392202,
+      "type": "User",
+      "html_url": "https://github.com/hossein-dropsubs"
+    },
+    "head": {
+      "ref": "ai/eval-120",
+      "sha": "6f15ceac21c14293381f74d2a0fc9a3291a00504",
+      "label": "dropsubs:ai/eval-120"
+    },
+    "base": {
+      "ref": "main",
+      "label": "dropsubs:main"
+    },
+    "additions": 120,
+    "deletions": 50,
+    "changed_files": 1,
+    "_files": [
+      {
+        "filename": "ai/evals/emails_v2.jsonl",
+        "status": "modified",
+        "additions": 120,
+        "deletions": 50,
+        "changes": 170
+      }
+    ],
+    "_closes": [],
+    "mergeable_state": null,
+    "_status": {
+      "state": "success",
+      "total_count": 2,
+      "statuses": [
+        {
+          "context": "ci/tests",
+          "state": "success"
+        },
+        {
+          "context": "ci/lint",
+          "state": "success"
+        }
+      ]
+    }
+  },
+  {
+    "number": 26,
+    "title": "Billing: migrate to payment provider API v2",
+    "body": "Made it with one day to spare.\n\nCloses #11",
+    "state": "closed",
+    "user": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "backend"
+      },
+      {
+        "name": "billing"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "mohammadreza-dropsubs",
+        "id": 109862773,
+        "type": "User",
+        "html_url": "https://github.com/mohammadreza-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-08-30T18:00:00Z",
+    "updated_at": "2026-08-31T19:30:00Z",
+    "closed_at": "2026-08-31T19:30:00Z",
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/dropsubs/pull/26",
+    "url": "https://api.github.com/repos/dropsubs/dropsubs/pulls/26",
+    "draft": false,
+    "merged": true,
+    "merged_at": "2026-08-31T19:30:00Z",
+    "merge_commit_sha": "3cae0ce42339bb8fa18f089ab4bf0a1b7dfa79ee",
+    "merged_by": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "head": {
+      "ref": "be/payments-v2",
+      "sha": "db6461899a224808b5a7ad2173042cd58934f3a6",
+      "label": "dropsubs:be/payments-v2"
+    },
+    "base": {
+      "ref": "main",
+      "label": "dropsubs:main"
+    },
+    "additions": 96,
+    "deletions": 71,
+    "changed_files": 1,
+    "_files": [
+      {
+        "filename": "api/billing/provider.py",
+        "status": "modified",
+        "additions": 96,
+        "deletions": 71,
+        "changes": 167
+      }
+    ],
+    "_closes": [
+      11
+    ],
+    "mergeable_state": null,
+    "_status": {
+      "state": "success",
+      "total_count": 2,
+      "statuses": [
+        {
+          "context": "ci/tests",
+          "state": "success"
+        },
+        {
+          "context": "ci/lint",
+          "state": "success"
+        }
+      ]
+    }
+  },
+  {
+    "number": 27,
+    "title": "AI: ask the user to Approve before any cancellation",
+    "body": "Adds to the assistant instructions: *never cancel anything until the user taps Approve.* (Instruction-level rule; the cancel service itself does not check.)",
+    "state": "closed",
+    "user": {
+      "login": "hossein-dropsubs",
+      "id": 99392202,
+      "type": "User",
+      "html_url": "https://github.com/hossein-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "ai"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "hossein-dropsubs",
+        "id": 99392202,
+        "type": "User",
+        "html_url": "https://github.com/hossein-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-09-01T17:00:00Z",
+    "updated_at": "2026-09-02T21:00:00Z",
+    "closed_at": "2026-09-02T21:00:00Z",
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/dropsubs/pull/27",
+    "url": "https://api.github.com/repos/dropsubs/dropsubs/pulls/27",
+    "draft": false,
+    "merged": true,
+    "merged_at": "2026-09-02T21:00:00Z",
+    "merge_commit_sha": "befd7fec477d9b2a5dd5eb169cf55bbdb84133d6",
+    "merged_by": {
+      "login": "hossein-dropsubs",
+      "id": 99392202,
+      "type": "User",
+      "html_url": "https://github.com/hossein-dropsubs"
+    },
+    "head": {
+      "ref": "ai/approve-rule",
+      "sha": "a45cc50f9212cc5ae180a26db53286c4035cae20",
+      "label": "dropsubs:ai/approve-rule"
+    },
+    "base": {
+      "ref": "main",
+      "label": "dropsubs:main"
+    },
+    "additions": 6,
+    "deletions": 0,
+    "changed_files": 1,
+    "_files": [
+      {
+        "filename": "ai/prompts/assistant.md",
+        "status": "added",
+        "additions": 6,
+        "deletions": 0,
+        "changes": 6
+      }
+    ],
+    "_closes": [],
+    "mergeable_state": null,
+    "_status": {
+      "state": "success",
+      "total_count": 2,
+      "statuses": [
+        {
+          "context": "ci/tests",
+          "state": "success"
+        },
+        {
+          "context": "ci/lint",
+          "state": "success"
+        }
+      ]
+    }
+  },
+  {
+    "number": 28,
+    "title": "Fix iPhone login crash (keychain race)",
+    "body": "Serializes keychain reads on launch.\n\nCloses #14",
+    "state": "closed",
+    "user": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "bug"
+      },
+      {
+        "name": "ios"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "reyhaneh-dropsubs",
+        "id": 41731418,
+        "type": "User",
+        "html_url": "https://github.com/reyhaneh-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-09-03T22:00:00Z",
+    "updated_at": "2026-09-04T18:00:00Z",
+    "closed_at": "2026-09-04T18:00:00Z",
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/dropsubs/pull/28",
+    "url": "https://api.github.com/repos/dropsubs/dropsubs/pulls/28",
+    "draft": false,
+    "merged": true,
+    "merged_at": "2026-09-04T18:00:00Z",
+    "merge_commit_sha": "a1dbc24d0f417d5dd64bd137ac409f9c1ac780ff",
+    "merged_by": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "head": {
+      "ref": "fe/keychain-race",
+      "sha": "5b62de79c715cf666793c4bfb5311b1e19cacd6e",
+      "label": "dropsubs:fe/keychain-race"
+    },
+    "base": {
+      "ref": "main",
+      "label": "dropsubs:main"
+    },
+    "additions": 30,
+    "deletions": 12,
+    "changed_files": 1,
+    "_files": [
+      {
+        "filename": "ios/Auth/Keychain.swift",
+        "status": "modified",
+        "additions": 30,
+        "deletions": 12,
+        "changes": 42
+      }
+    ],
+    "_closes": [
+      14
+    ],
+    "mergeable_state": null,
+    "_status": {
+      "state": "success",
+      "total_count": 2,
+      "statuses": [
+        {
+          "context": "ci/tests",
+          "state": "success"
+        },
+        {
+          "context": "ci/lint",
+          "state": "success"
+        }
+      ]
+    }
+  },
+  {
+    "number": 30,
+    "title": "Dashboard: Cancel button with Approve modal",
+    "body": "The Approve tap is sent to the assistant as a chat message.",
+    "state": "closed",
+    "user": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "frontend"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "reyhaneh-dropsubs",
+        "id": 41731418,
+        "type": "User",
+        "html_url": "https://github.com/reyhaneh-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-09-09T18:00:00Z",
+    "updated_at": "2026-09-11T00:00:00Z",
+    "closed_at": "2026-09-11T00:00:00Z",
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/dropsubs/pull/30",
+    "url": "https://api.github.com/repos/dropsubs/dropsubs/pulls/30",
+    "draft": false,
+    "merged": true,
+    "merged_at": "2026-09-11T00:00:00Z",
+    "merge_commit_sha": "2f2ead7676187e58af951d2a6dcc832d1ea2c4ae",
+    "merged_by": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "head": {
+      "ref": "fe/approve-modal",
+      "sha": "c8e0bdee969a0bec710ca65d5297274e1bac1675",
+      "label": "dropsubs:fe/approve-modal"
+    },
+    "base": {
+      "ref": "main",
+      "label": "dropsubs:main"
+    },
+    "additions": 120,
+    "deletions": 0,
+    "changed_files": 1,
+    "_files": [
+      {
+        "filename": "web/app/dashboard/CancelModal.tsx",
+        "status": "added",
+        "additions": 120,
+        "deletions": 0,
+        "changes": 120
+      }
+    ],
+    "_closes": [],
+    "mergeable_state": null,
+    "_status": {
+      "state": "success",
+      "total_count": 2,
+      "statuses": [
+        {
+          "context": "ci/tests",
+          "state": "success"
+        },
+        {
+          "context": "ci/lint",
+          "state": "success"
+        }
+      ]
+    }
+  },
+  {
+    "number": 33,
+    "title": "Weekly email: compute totals at send time",
+    "body": "Totals were cached from the previous run.\n\nCloses #32",
+    "state": "closed",
+    "user": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "bug"
+      },
+      {
+        "name": "backend"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "mohammadreza-dropsubs",
+        "id": 109862773,
+        "type": "User",
+        "html_url": "https://github.com/mohammadreza-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-09-16T17:00:00Z",
+    "updated_at": "2026-09-17T19:00:00Z",
+    "closed_at": "2026-09-17T19:00:00Z",
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/dropsubs/pull/33",
+    "url": "https://api.github.com/repos/dropsubs/dropsubs/pulls/33",
+    "draft": false,
+    "merged": true,
+    "merged_at": "2026-09-17T19:00:00Z",
+    "merge_commit_sha": "51e882cd5a7578bb0776f33a934f42d6b2bccb02",
+    "merged_by": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "head": {
+      "ref": "be/weekly-email",
+      "sha": "8b6d3a70f64ff456b0e0d666ffac1254384440b7",
+      "label": "dropsubs:be/weekly-email"
+    },
+    "base": {
+      "ref": "main",
+      "label": "dropsubs:main"
+    },
+    "additions": 9,
+    "deletions": 14,
+    "changed_files": 1,
+    "_files": [
+      {
+        "filename": "api/jobs/weekly_email.py",
+        "status": "modified",
+        "additions": 9,
+        "deletions": 14,
+        "changes": 23
+      }
+    ],
+    "_closes": [
+      32
+    ],
+    "mergeable_state": null,
+    "_status": {
+      "state": "success",
+      "total_count": 2,
+      "statuses": [
+        {
+          "context": "ci/tests",
+          "state": "success"
+        },
+        {
+          "context": "ci/lint",
+          "state": "success"
+        }
+      ]
+    }
+  },
+  {
+    "number": 34,
+    "title": "Eval set: expand to 200 emails",
+    "body": "200 anonymized receipts and renewal emails. This is the set we re-run for any model change.",
+    "state": "closed",
+    "user": {
+      "login": "hossein-dropsubs",
+      "id": 99392202,
+      "type": "User",
+      "html_url": "https://github.com/hossein-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "ai"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "hossein-dropsubs",
+        "id": 99392202,
+        "type": "User",
+        "html_url": "https://github.com/hossein-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-09-17T17:00:00Z",
+    "updated_at": "2026-09-18T23:00:00Z",
+    "closed_at": "2026-09-18T23:00:00Z",
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/dropsubs/pull/34",
+    "url": "https://api.github.com/repos/dropsubs/dropsubs/pulls/34",
+    "draft": false,
+    "merged": true,
+    "merged_at": "2026-09-18T23:00:00Z",
+    "merge_commit_sha": "e0fb190ea6e811c86fea8c8e3049ea2d391c7d20",
+    "merged_by": {
+      "login": "hossein-dropsubs",
+      "id": 99392202,
+      "type": "User",
+      "html_url": "https://github.com/hossein-dropsubs"
+    },
+    "head": {
+      "ref": "ai/eval-200",
+      "sha": "38e4849ff380fe65b131f64f9942dd194e136234",
+      "label": "dropsubs:ai/eval-200"
+    },
+    "base": {
+      "ref": "main",
+      "label": "dropsubs:main"
+    },
+    "additions": 200,
+    "deletions": 120,
+    "changed_files": 1,
+    "_files": [
+      {
+        "filename": "ai/evals/emails_v3.jsonl",
+        "status": "modified",
+        "additions": 200,
+        "deletions": 120,
+        "changes": 320
+      }
+    ],
+    "_closes": [],
+    "mergeable_state": null,
+    "_status": {
+      "state": "success",
+      "total_count": 2,
+      "statuses": [
+        {
+          "context": "ci/tests",
+          "state": "success"
+        },
+        {
+          "context": "ci/lint",
+          "state": "success"
+        }
+      ]
+    }
+  },
+  {
+    "number": 40,
+    "title": "Move renewal warning job from midnight to 6am",
+    "body": "Runs the daily job at 06:00 instead of 00:00.",
+    "state": "closed",
+    "user": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "backend"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "mohammadreza-dropsubs",
+        "id": 109862773,
+        "type": "User",
+        "html_url": "https://github.com/mohammadreza-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-09-25T17:00:00Z",
+    "updated_at": "2026-09-25T22:30:00Z",
+    "closed_at": "2026-09-25T22:30:00Z",
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/dropsubs/pull/40",
+    "url": "https://api.github.com/repos/dropsubs/dropsubs/pulls/40",
+    "draft": false,
+    "merged": true,
+    "merged_at": "2026-09-25T22:30:00Z",
+    "merge_commit_sha": "85a462628ce2c5f5028f4d6fec52fea8fbf744d3",
+    "merged_by": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "head": {
+      "ref": "be/warning-6am",
+      "sha": "0f24fcf8f98cdb79b6c399fc24314d1862535587",
+      "label": "dropsubs:be/warning-6am"
+    },
+    "base": {
+      "ref": "main",
+      "label": "dropsubs:main"
+    },
+    "additions": 1,
+    "deletions": 1,
+    "changed_files": 1,
+    "_files": [
+      {
+        "filename": "api/jobs/schedule.py",
+        "status": "modified",
+        "additions": 1,
+        "deletions": 1,
+        "changes": 2,
+        "patch": "-    cron('0 0 * * *', renewal_warnings)\n+    cron('0 6 * * *', renewal_warnings)"
+      }
+    ],
+    "_closes": [],
+    "mergeable_state": null,
+    "_status": {
+      "state": "success",
+      "total_count": 2,
+      "statuses": [
+        {
+          "context": "ci/tests",
+          "state": "success"
+        },
+        {
+          "context": "ci/lint",
+          "state": "success"
+        }
+      ]
+    }
+  },
+  {
+    "number": 44,
+    "title": "Read full email bodies, not just subject and snippet",
+    "body": "The assistant now receives the full email body text.\n\nCloses #35",
+    "state": "closed",
+    "user": {
+      "login": "hossein-dropsubs",
+      "id": 99392202,
+      "type": "User",
+      "html_url": "https://github.com/hossein-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "ai"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "hossein-dropsubs",
+        "id": 99392202,
+        "type": "User",
+        "html_url": "https://github.com/hossein-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-09-28T21:00:00Z",
+    "updated_at": "2026-09-29T23:00:00Z",
+    "closed_at": "2026-09-29T23:00:00Z",
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/dropsubs/pull/44",
+    "url": "https://api.github.com/repos/dropsubs/dropsubs/pulls/44",
+    "draft": false,
+    "merged": true,
+    "merged_at": "2026-09-29T23:00:00Z",
+    "merge_commit_sha": "65e249e6d0a9f001b800fe9f60081d473889ea01",
+    "merged_by": {
+      "login": "hossein-dropsubs",
+      "id": 99392202,
+      "type": "User",
+      "html_url": "https://github.com/hossein-dropsubs"
+    },
+    "head": {
+      "ref": "ai/full-body",
+      "sha": "7f5399669c329e9465c30a25a618d13b9bf10eac",
+      "label": "dropsubs:ai/full-body"
+    },
+    "base": {
+      "ref": "main",
+      "label": "dropsubs:main"
+    },
+    "additions": 34,
+    "deletions": 8,
+    "changed_files": 1,
+    "_files": [
+      {
+        "filename": "ai/context.py",
+        "status": "modified",
+        "additions": 34,
+        "deletions": 8,
+        "changes": 42
+      }
+    ],
+    "_closes": [
+      35
+    ],
+    "mergeable_state": null,
+    "_status": {
+      "state": "success",
+      "total_count": 2,
+      "statuses": [
+        {
+          "context": "ci/tests",
+          "state": "success"
+        },
+        {
+          "context": "ci/lint",
+          "state": "success"
+        }
+      ]
+    }
+  },
+  {
+    "number": 46,
+    "title": "Inbox sync: check for a repeated page token before appending",
+    "body": "One-line fix: the repeated-token check now runs before the page is appended. Closes #43.",
+    "state": "closed",
+    "user": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "bug"
+      },
+      {
+        "name": "backend"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "mohammadreza-dropsubs",
+        "id": 109862773,
+        "type": "User",
+        "html_url": "https://github.com/mohammadreza-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-09-30T16:20:00Z",
+    "updated_at": "2026-10-01T18:00:00Z",
+    "closed_at": "2026-10-01T18:00:00Z",
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/dropsubs/pull/46",
+    "url": "https://api.github.com/repos/dropsubs/dropsubs/pulls/46",
+    "draft": false,
+    "merged": true,
+    "merged_at": "2026-10-01T18:00:00Z",
+    "merge_commit_sha": "83f12fb0f7c89bead93ede0c0642be304ff970cf",
+    "merged_by": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "head": {
+      "ref": "be/sync-dup-page",
+      "sha": "c2a1e0655ddc84bc675937994de7ebf34204e2fe",
+      "label": "dropsubs:be/sync-dup-page"
+    },
+    "base": {
+      "ref": "main",
+      "label": "dropsubs:main"
+    },
+    "additions": 2,
+    "deletions": 2,
+    "changed_files": 1,
+    "_files": [
+      {
+        "filename": "api/sync/gmail.py",
+        "status": "modified",
+        "additions": 2,
+        "deletions": 2,
+        "changes": 4,
+        "patch": "-        messages.extend(page.messages)\n-        if page.next_token == last_token: break\n+        if page.next_token == last_token: break\n+        messages.extend(page.messages)"
+      }
+    ],
+    "_closes": [
+      43
+    ],
+    "mergeable_state": null,
+    "_status": {
+      "state": "success",
+      "total_count": 2,
+      "statuses": [
+        {
+          "context": "ci/tests",
+          "state": "success"
+        },
+        {
+          "context": "ci/lint",
+          "state": "success"
+        }
+      ]
+    }
+  },
+  {
+    "number": 48,
+    "title": "AI: state cancellation terms only from provider terms or emails",
+    "body": "If the terms aren't in the provider's own terms page or the user's emails, say we aren't sure.\n\nCloses #42",
+    "state": "closed",
+    "user": {
+      "login": "hossein-dropsubs",
+      "id": 99392202,
+      "type": "User",
+      "html_url": "https://github.com/hossein-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "bug"
+      },
+      {
+        "name": "ai"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "hossein-dropsubs",
+        "id": 99392202,
+        "type": "User",
+        "html_url": "https://github.com/hossein-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-10-01T16:00:00Z",
+    "updated_at": "2026-10-01T22:20:00Z",
+    "closed_at": "2026-10-01T22:20:00Z",
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/dropsubs/pull/48",
+    "url": "https://api.github.com/repos/dropsubs/dropsubs/pulls/48",
+    "draft": false,
+    "merged": true,
+    "merged_at": "2026-10-01T22:20:00Z",
+    "merge_commit_sha": "e20e7e57ed620b2c968659677cc7b8067d6e1462",
+    "merged_by": {
+      "login": "hossein-dropsubs",
+      "id": 99392202,
+      "type": "User",
+      "html_url": "https://github.com/hossein-dropsubs"
+    },
+    "head": {
+      "ref": "ai/no-made-up-terms",
+      "sha": "05d08dc90e37d34345b651d343ddf140827cc7f4",
+      "label": "dropsubs:ai/no-made-up-terms"
+    },
+    "base": {
+      "ref": "main",
+      "label": "dropsubs:main"
+    },
+    "additions": 50,
+    "deletions": 2,
+    "changed_files": 2,
+    "_files": [
+      {
+        "filename": "ai/prompts/assistant.md",
+        "status": "modified",
+        "additions": 9,
+        "deletions": 2,
+        "changes": 11
+      },
+      {
+        "filename": "ai/tools/provider_terms.py",
+        "status": "added",
+        "additions": 41,
+        "deletions": 0,
+        "changes": 41
+      }
+    ],
+    "_closes": [
+      42
+    ],
+    "mergeable_state": null,
+    "_status": {
+      "state": "success",
+      "total_count": 2,
+      "statuses": [
+        {
+          "context": "ci/tests",
+          "state": "success"
+        },
+        {
+          "context": "ci/lint",
+          "state": "success"
+        }
+      ]
+    }
+  },
+  {
+    "number": 50,
+    "title": "Enforce the Approve check inside the cancel service",
+    "body": "`cancel_subscription()` now requires a signed approval token created only by a real Approve tap in the UI. Email text can no longer trigger a cancellation.\n\nCloses #49",
+    "state": "closed",
+    "user": {
+      "login": "hossein-dropsubs",
+      "id": 99392202,
+      "type": "User",
+      "html_url": "https://github.com/hossein-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "security"
+      },
+      {
+        "name": "ai"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "hossein-dropsubs",
+        "id": 99392202,
+        "type": "User",
+        "html_url": "https://github.com/hossein-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-10-02T16:45:00Z",
+    "updated_at": "2026-10-02T23:40:00Z",
+    "closed_at": "2026-10-02T23:40:00Z",
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/dropsubs/pull/50",
+    "url": "https://api.github.com/repos/dropsubs/dropsubs/pulls/50",
+    "draft": false,
+    "merged": true,
+    "merged_at": "2026-10-02T23:40:00Z",
+    "merge_commit_sha": "e6940d25df99e4859b4a18b7549b3beac9b561bc",
+    "merged_by": {
+      "login": "hossein-dropsubs",
+      "id": 99392202,
+      "type": "User",
+      "html_url": "https://github.com/hossein-dropsubs"
+    },
+    "head": {
+      "ref": "ai/approve-in-service",
+      "sha": "af2a2e4dc98973567172ec2d271d297c51ee9f7a",
+      "label": "dropsubs:ai/approve-in-service"
+    },
+    "base": {
+      "ref": "main",
+      "label": "dropsubs:main"
+    },
+    "additions": 90,
+    "deletions": 4,
+    "changed_files": 2,
+    "_files": [
+      {
+        "filename": "api/cancel/service.py",
+        "status": "modified",
+        "additions": 38,
+        "deletions": 4,
+        "changes": 42
+      },
+      {
+        "filename": "api/cancel/test_service.py",
+        "status": "added",
+        "additions": 52,
+        "deletions": 0,
+        "changes": 52
+      }
+    ],
+    "_closes": [
+      49
+    ],
+    "mergeable_state": null,
+    "_status": {
+      "state": "success",
+      "total_count": 2,
+      "statuses": [
+        {
+          "context": "ci/tests",
+          "state": "success"
+        },
+        {
+          "context": "ci/lint",
+          "state": "success"
+        }
+      ]
+    }
+  },
+  {
+    "number": 53,
+    "title": "Waitlist invite email",
+    "body": "Invite email for the 5,000-person waitlist. Ready to send.",
+    "state": "open",
+    "user": {
+      "login": "danial-dropsubs",
+      "id": 164859128,
+      "type": "User",
+      "html_url": "https://github.com/danial-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "launch"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "danial-dropsubs",
+        "id": 164859128,
+        "type": "User",
+        "html_url": "https://github.com/danial-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-10-02T19:00:00Z",
+    "updated_at": "2026-10-02T19:00:00Z",
+    "closed_at": null,
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/dropsubs/pull/53",
+    "url": "https://api.github.com/repos/dropsubs/dropsubs/pulls/53",
+    "draft": false,
+    "merged": false,
+    "merged_at": null,
+    "merge_commit_sha": null,
+    "merged_by": null,
+    "head": {
+      "ref": "ceo/waitlist-email",
+      "sha": "cdb6bc295a908857f94a5074669dd5f456e32b4d",
+      "label": "dropsubs:ceo/waitlist-email"
+    },
+    "base": {
+      "ref": "main",
+      "label": "dropsubs:main"
+    },
+    "additions": 64,
+    "deletions": 0,
+    "changed_files": 1,
+    "_files": [
+      {
+        "filename": "api/emails/waitlist_invite.html",
+        "status": "added",
+        "additions": 64,
+        "deletions": 0,
+        "changes": 64
+      }
+    ],
+    "_closes": [],
+    "mergeable_state": "clean",
+    "_status": {
+      "state": "success",
+      "total_count": 2,
+      "statuses": [
+        {
+          "context": "ci/tests",
+          "state": "success"
+        },
+        {
+          "context": "ci/lint",
+          "state": "success"
+        }
+      ]
+    }
+  },
+  {
+    "number": 54,
+    "title": "WIP: Delete account screen",
+    "body": "Settings > Delete account. Backend endpoint still TODO.\n\nCloses #51",
+    "state": "open",
+    "user": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "ios"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "reyhaneh-dropsubs",
+        "id": 41731418,
+        "type": "User",
+        "html_url": "https://github.com/reyhaneh-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-10-02T22:00:00Z",
+    "updated_at": "2026-10-02T22:00:00Z",
+    "closed_at": null,
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/dropsubs/pull/54",
+    "url": "https://api.github.com/repos/dropsubs/dropsubs/pulls/54",
+    "draft": true,
+    "merged": false,
+    "merged_at": null,
+    "merge_commit_sha": null,
+    "merged_by": null,
+    "head": {
+      "ref": "fe/delete-account",
+      "sha": "4800487374340e4749325e69f5994f0dea8e5994",
+      "label": "dropsubs:fe/delete-account"
+    },
+    "base": {
+      "ref": "main",
+      "label": "dropsubs:main"
+    },
+    "additions": 80,
+    "deletions": 0,
+    "changed_files": 1,
+    "_files": [
+      {
+        "filename": "ios/Settings/DeleteAccount.swift",
+        "status": "added",
+        "additions": 80,
+        "deletions": 0,
+        "changes": 80
+      }
+    ],
+    "_closes": [
+      51
+    ],
+    "mergeable_state": "clean",
+    "_status": {
+      "state": "success",
+      "total_count": 2,
+      "statuses": [
+        {
+          "context": "ci/tests",
+          "state": "success"
+        },
+        {
+          "context": "ci/lint",
+          "state": "success"
+        }
+      ]
+    }
+  }
+]
