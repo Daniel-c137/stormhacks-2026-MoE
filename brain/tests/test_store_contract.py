@@ -200,6 +200,8 @@ def report_for(meeting_id: str, *, owner: Person, decisions: list[str], tasks: l
                 due=date(2026, 10, 8) if i == 1 else None,
                 t=float(i * 60),
                 quote=title,
+                key="DS-7" if i == 2 else None,
+                url="https://acme.atlassian.net/browse/DS-7" if i == 2 else None,
             )
             for i, title in enumerate(tasks, start=1)
         ],
@@ -488,6 +490,7 @@ def jira_account(team_id: str, by: Person, **changes) -> JiraAccount:
     account = JiraAccount(
         team_id=team_id,
         site="acme.atlassian.net",
+        project="DS",
         email="admin@acme.example",
         sealed_token="sealed-1",
         connected_by=by.id,
@@ -504,7 +507,9 @@ async def test_a_teams_jira_account_is_saved_replaced_and_removed(store):
     assert await store.jira_account(team.id) == first
     assert await store.jira_account(other.id) is None
 
-    second = jira_account(team.id, alex, email="ops@acme.example", sealed_token="sealed-2")
+    second = jira_account(
+        team.id, alex, project="OPS", email="ops@acme.example", sealed_token="sealed-2"
+    )
     await store.save_jira_account(second)
     assert await store.jira_account(team.id) == second
 

@@ -1,5 +1,7 @@
 """An admin connects the team's Jira account in Settings; approved task drafts then become real
-issues on that site, pushed by an admin. Alex is the team's admin; Sarah is a member."""
+issues on that site, pushed by an admin. The account's site and project are its own: the Jira
+project the agent reads (Settings, Connectors) is left as it is. Alex is the team's admin; Sarah
+is a member."""
 
 import asyncio
 
@@ -14,6 +16,13 @@ from brain.sealing import unseal
 
 ADMINS_ONLY = "Only an admin can do this"
 CONNECT = {"site": SITE, "email": EMAIL, "api_token": TOKEN, "project": "DS"}
+READ_FROM = {"site": "dropsubs.atlassian.net", "project": "DEMO"}  # the project the agent reads
+NOT_CONNECTED = {
+    "connected": False,
+    "account_email": None,
+    "account_site": None,
+    "account_project": None,
+}
 
 
 @pytest.fixture
@@ -40,13 +49,16 @@ def test_an_admin_connects_the_teams_jira_account(client_as, store, jira):
 
     assert response.status_code == 200, response.text
     assert response.json()["jira"] == {
-        "site": SITE,
-        "project": "DS",
+        "site": None,
+        "project": None,
         "connected": True,
         "account_email": EMAIL,
+        "account_site": SITE,
+        "account_project": "DS",
     }
     saved = account(store)
-    assert (saved.site, saved.email, saved.connected_by) == (SITE, EMAIL, ALEX.id)
+    assert (saved.site, saved.project, saved.email) == (SITE, "DS", EMAIL)
+    assert saved.connected_by == ALEX.id
     assert [r.url.path for r in jira.requests] == ["/rest/api/3/myself", "/rest/api/3/project/DS"]
 
 
@@ -61,11 +73,24 @@ def test_the_token_is_kept_sealed_and_never_sent_back(client_as, store, jira):
     assert seen_by_member.json()["jira"]["account_email"] == EMAIL
 
 
+def test_connecting_leaves_the_project_the_agent_reads_as_it_is(client_as, jira):
+    alex = client_as(ALEX)
+    alex.put("/settings/connectors", json={"jira": READ_FROM})
+
+    response = connect(alex)
+
+    assert response.status_code == 200, response.text
+    saved = response.json()["jira"]
+    assert (saved["site"], saved["project"]) == (READ_FROM["site"], READ_FROM["project"])
+    assert (saved["account_site"], saved["account_project"]) == (SITE, "DS")
+
+
 def test_a_pasted_site_link_and_a_lowercase_key_are_tidied(client_as, jira):
     response = connect(client_as(ALEX), site=f"https://{SITE}/jira/software", project="ds")
 
     assert response.status_code == 200, response.text
-    assert (response.json()["jira"]["site"], response.json()["jira"]["project"]) == (SITE, "DS")
+    saved = response.json()["jira"]
+    assert (saved["account_site"], saved["account_project"]) == (SITE, "DS")
 
 
 def test_a_member_cannot_connect_or_disconnect(client_as, store, jira):
@@ -131,33 +156,24 @@ def test_an_admin_disconnects_the_account(client_as, store, jira):
     response = alex.delete("/settings/jira/account")
 
     assert response.status_code == 200, response.text
-    assert response.json()["jira"] == {
-        "site": SITE,
-        "project": "DS",
-        "connected": False,
-        "account_email": None,
-    }
+    assert response.json()["jira"] == {"site": None, "project": None} | NOT_CONNECTED
     assert account(store) is None
 
 
-def test_another_site_in_the_connectors_disconnects_the_account(client_as, store, jira):
+def test_changing_or_removing_the_project_the_agent_reads_keeps_the_account(client_as, store, jira):
     alex = client_as(ALEX)
     connect(alex)
 
-    same_site = alex.put("/settings/connectors", json={"jira": {"site": SITE, "project": "OPS"}})
-    assert same_site.json()["jira"]["connected"] is True
-    assert account(store) is not None
+    changed = alex.put("/settings/connectors", json={"jira": READ_FROM})
+    removed = alex.put("/settings/connectors", json={"jira": {"site": None, "project": None}})
 
-    moved = alex.put(
-        "/settings/connectors", json={"jira": {"site": "other.atlassian.net", "project": "OPS"}}
-    )
-    assert moved.json()["jira"] == {
-        "site": "other.atlassian.net",
-        "project": "OPS",
-        "connected": False,
-        "account_email": None,
-    }
-    assert account(store) is None
+    for response in (changed, removed):
+        saved = response.json()["jira"]
+        assert saved["connected"] is True
+        assert (saved["account_site"], saved["account_project"]) == (SITE, "DS")
+    assert changed.json()["jira"]["project"] == "DEMO"
+    assert removed.json()["jira"]["project"] is None
+    assert account(store) is not None
 
 
 def test_saving_other_settings_keeps_the_connection(client_as, store, jira):
@@ -202,23 +218,25 @@ def test_an_admins_push_creates_real_issues_with_the_connected_account(client_as
     (created,) = jira.created
     assert created["summary"] == "Task 1"
     assert text_of(created["description"]).endswith(f"Approved for Jira by {ALEX.name}.")
-    report = alex.get(f"/meetings/{meeting['id']}/report").json()
-    assert (report["tasks"][0]["key"], report["tasks"][0]["jira_status"]) == ("DS-1", "todo")
+    saved = alex.get(f"/meetings/{meeting['id']}/report").json()["tasks"][0]
+    assert (saved["key"], saved["jira_status"]) == ("DS-1", "todo")
+    assert saved["url"] == f"https://{SITE}/browse/DS-1"  # kept, so the link survives a reload
     assert alex.get(f"/meetings/{meeting['id']}").json()["status"] == "pushed"
 
 
-def test_the_push_goes_to_the_project_chosen_in_settings(client_as, store, jira):
+def test_the_push_goes_to_the_accounts_project_not_the_one_the_agent_reads(client_as, store, jira):
     jira.projects.add("OPS")
     alex = client_as(ALEX)
-    connect(alex)
-    alex.put("/settings/connectors", json={"jira": {"site": SITE, "project": "OPS"}})
+    alex.put("/settings/connectors", json={"jira": READ_FROM})
+    connect(alex, project="OPS")
     meeting = create(alex)
     draft = task(meeting["id"], 1)
     processed(store, meeting, draft)
 
-    response = push(alex, meeting["id"], draft.id)
+    (result,) = push(alex, meeting["id"], draft.id).json()
 
-    assert response.json()[0]["key"] == "OPS-1"
+    assert (result["key"], result["url"]) == ("OPS-1", f"https://{SITE}/browse/OPS-1")
+    assert jira.created[0]["project"] == {"key": "OPS"}
 
 
 def test_only_an_admin_pushes_even_for_their_own_meeting(client_as, store, jira):
@@ -265,18 +283,3 @@ def test_a_token_sealed_with_an_old_server_secret_must_be_connected_again(
     assert response.status_code == 409
     assert "Connect Jira again" in response.json()["detail"]
     assert jira.created == []
-
-
-# the connector status
-
-
-def test_a_connected_account_shows_jira_as_connected_and_says_what_is_missing(client_as, jira):
-    alex = client_as(ALEX)
-    before = {c["name"]: c for c in alex.get("/settings/connectors").json()}
-    connect(alex)
-
-    after = {c["name"]: c for c in alex.get("/settings/connectors").json()}
-
-    assert before["jira"]["state"] == "not_configured"
-    assert after["jira"]["state"] == "connected"
-    assert EMAIL in after["jira"]["detail"] and "JIRA_MCP_URL" in after["jira"]["detail"]
