@@ -449,7 +449,7 @@ async def test_a_failed_index_stops_the_seed_and_the_next_run_indexes_it():
 
     broken = MeetingMemory(FailingEmbedder(), memory.store)
 
-    with pytest.raises(SeedError, match=r"2026-09-23.*index"):
+    with pytest.raises(SeedError, match=r"2026-09-23.*report by mock.*index"):
         await seed_world(store, broken, scripted, DEMO[:1])
     (meeting,) = await store.meetings(TEAM)
     assert meeting.status == "needs_review"
