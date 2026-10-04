@@ -251,7 +251,6 @@ def brain(live_dsn, jira_source, github_source, tmp_path_factory) -> Iterator[Br
         "BRAIN_INTERNAL_TOKEN": internal_token,
         "GITHUB_MCP_URL": github_source.url,
         "GITHUB_REPO": github_source.repo,
-        "GITHUB_TOKEN": "",
         "JIRA_MCP_URL": jira_source.url,
         "JIRA_PROJECT_KEY": JIRA_PROJECT,
         "JIRA_BASE_URL": JIRA_SITE,

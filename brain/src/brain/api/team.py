@@ -4,6 +4,7 @@ import re
 from collections.abc import Callable
 from datetime import UTC, datetime
 
+import anyio
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile
 
@@ -12,6 +13,7 @@ from contracts import (
     CodeRepoChoice,
     ConnectorStatus,
     ConnectorsUpdate,
+    GitHubAccountConnect,
     JiraAccountConnect,
     Person,
     ProfileUpdate,
@@ -21,9 +23,19 @@ from contracts import (
 )
 
 from ..accounts import signs_in
+from ..agent.team_tools import code_repos
 from ..auth import NOT_CONFIGURED, signing_secret
 from ..config import Settings
 from ..connectors import connector_statuses
+from ..github_account import (
+    NOT_FINE_GRAINED,
+    GitHubApi,
+    GitHubRejected,
+    GitHubUnreachable,
+    fine_grained,
+    github_endpoint,
+    unsealed_token,
+)
 from ..gitlab import valid_project
 from ..jira import site_host
 from ..jira_rest import (
@@ -35,7 +47,7 @@ from ..jira_rest import (
     issue_type_for_tasks,
 )
 from ..sealing import seal
-from ..store import JiraAccount, NotFound, Store
+from ..store import GitHubAccount, JiraAccount, NotFound, Store
 from ..voices import VoicesFailed, VoicesUnavailable, fetch_voices, with_default
 from ..zones import is_zone
 from .deps import (
@@ -170,8 +182,9 @@ NO_JIRA_ACCOUNT = {
 
 
 async def shown(store: Store, settings: TeamSettings) -> TeamSettings:
-    """Settings as they are sent: what they say about the Jira account is read from the saved
-    account itself, the one a push uses, so the two can never disagree."""
+    """Settings as they are sent: what they say about the Jira and GitHub accounts is read from
+    the saved accounts themselves, the ones pushes and reads use, so the two can never
+    disagree."""
     account = await store.jira_account(settings.team_id)
     about = NO_JIRA_ACCOUNT
     if account is not None:
@@ -181,7 +194,14 @@ async def shown(store: Store, settings: TeamSettings) -> TeamSettings:
             "account_site": account.site,
             "account_project": account.project,
         }
-    return settings.model_copy(update={"jira": settings.jira.model_copy(update=about)})
+    github = await store.github_account(settings.team_id)
+    login = github.login if github is not None else None
+    return settings.model_copy(
+        update={
+            "jira": settings.jira.model_copy(update=about),
+            "github": settings.github.model_copy(update={"account_login": login}),
+        }
+    )
 
 
 @router.get("/settings")
@@ -229,16 +249,27 @@ async def write_team_settings(
 
 @router.put("/settings/connectors")
 async def write_connectors(
-    body: ConnectorsUpdate, user: Person = Depends(require_admin), store: Store = Depends(get_store)
+    body: ConnectorsUpdate,
+    user: Person = Depends(require_admin),
+    store: Store = Depends(get_store),
+    config: Settings = Depends(get_settings),
+    transport: httpx.AsyncBaseTransport | None = Depends(get_http_transport),
 ) -> TeamSettings:
     """The team's GitHub repositories, GitLab projects and Jira site and project, replacing
     the saved ones; admins only. A repository that stays keeps its connection and index state
-    (a new branch or tag drops its index). Paths are checked and repeats refused. The Jira site
-    and project here are what the agent reads; the account connected for pushing is separate
-    and stays as it is."""
+    (a new branch or tag drops its index). Paths are checked and repeats refused. With a GitHub
+    token connected, a repository added must be readable with it (422 naming it otherwise).
+    The Jira site and project here are what the agent reads; the accounts connected for
+    pushing and reading are separate and stay as they are."""
     team = await user_team(store, user)
     current = await store.settings(team.id)
     github = repos(body.github, current.github.repos, "GitHub repository", github_path)
+    saved_paths = {repo.path.casefold() for repo in current.github.repos}
+    added = [repo.path for repo in github if repo.path.casefold() not in saved_paths]
+    if added and (account := await store.github_account(team.id)) is not None:
+        token = unsealed_token(config, account)
+        if token is not None:  # a token that can't be unsealed shows in the status instead
+            await readable_with_github(GitHubApi(config.github_api_url, token, transport), added)
     gitlab = repos(body.gitlab, current.gitlab.projects, "GitLab project", gitlab_path)
     jira = current.jira.model_copy(
         update={"site": site_host(text(body.jira.site)), "project": jira_key(body.jira.project)}
@@ -247,7 +278,9 @@ async def write_connectors(
     saved = await store.save_settings(
         current.model_copy(
             update={
-                "github": current.github.model_copy(update={"repos": github}),
+                "github": current.github.model_copy(
+                    update={"repos": github, "account_login": None}  # `shown` reads it
+                ),
                 "gitlab": current.gitlab.model_copy(update={"projects": gitlab}),
                 "jira": jira,
             }
@@ -409,15 +442,97 @@ async def disconnect_jira_account(
     return await shown(store, await store.settings(team.id))
 
 
+@router.put("/settings/github/account")
+async def connect_github_account(
+    body: GitHubAccountConnect,
+    user: Person = Depends(require_admin),
+    store: Store = Depends(get_store),
+    config: Settings = Depends(get_settings),
+    transport: httpx.AsyncBaseTransport | None = Depends(get_http_transport),
+) -> TeamSettings:
+    """Connects GitHub for the team with a fine-grained personal access token; admins only.
+    Before anything is saved, GitHub is asked whose token it is and whether it reads each of
+    the team's repositories (their metadata, issues, pull requests and code). The token is
+    stored encrypted and never returned; the team's GitHub reads then go to GitHub's hosted MCP
+    server with it."""
+    token = body.token.strip()
+    if not fine_grained(token):
+        raise HTTPException(status_code=422, detail=NOT_FINE_GRAINED)
+    if (secret := signing_secret(config)) is None:
+        raise HTTPException(status_code=503, detail=NOT_CONFIGURED)
+    team = await user_team(store, user)
+    api = GitHubApi(config.github_api_url, token, transport)
+    try:
+        login = await api.login()
+    except GitHubRejected as e:
+        if e.status in (401, 403):
+            raise HTTPException(
+                status_code=422, detail=f"GitHub did not accept that token ({e.status}: {e})"
+            ) from None
+        raise HTTPException(status_code=502, detail=f"GitHub answered {e.status}") from None
+    except GitHubUnreachable as e:
+        raise HTTPException(status_code=502, detail=str(e)) from None
+    repos_read = [repo.path for repo in code_repos(await store.settings(team.id), config)]
+    await readable_with_github(api, repos_read)
+
+    await store.save_github_account(
+        GitHubAccount(
+            team_id=team.id,
+            login=login,
+            sealed_token=seal(token, secret, team.id),
+            connected_by=user.id,
+            connected_at=datetime.now(UTC),
+        )
+    )
+    return await shown(store, await store.settings(team.id))
+
+
+async def readable_with_github(api: GitHubApi, repos_read: list[str]) -> None:
+    """422 naming the first repository (and the permission) the token can't read; 502 when
+    GitHub can't be asked."""
+    found: dict[str, str | Exception | None] = {}
+
+    async def check(repo: str) -> None:
+        try:
+            found[repo] = await api.unreadable(repo)
+        except (GitHubRejected, GitHubUnreachable) as e:
+            found[repo] = e
+
+    async with anyio.create_task_group() as group:
+        for repo in repos_read:
+            group.start_soon(check, repo)
+    for repo in repos_read:
+        problem = found.get(repo)
+        if isinstance(problem, GitHubRejected):
+            raise HTTPException(status_code=422, detail="GitHub did not accept that token")
+        if isinstance(problem, GitHubUnreachable):
+            raise HTTPException(status_code=502, detail=str(problem))
+        if problem:
+            raise HTTPException(status_code=422, detail=str(problem))
+
+
+@router.delete("/settings/github/account")
+async def disconnect_github_account(
+    user: Person = Depends(require_admin), store: Store = Depends(get_store)
+) -> TeamSettings:
+    """Forgets the team's GitHub token; admins only. Its repositories stay, read through
+    GITHUB_MCP_URL with no credentials from then on."""
+    team = await user_team(store, user)
+    await store.delete_github_account(team.id)
+    return await shown(store, await store.settings(team.id))
+
+
 @router.get("/settings/connectors")
 async def list_connectors(
     user: Person = Depends(current_user),
     store: Store = Depends(get_store),
     config: Settings = Depends(get_settings),
 ) -> list[ConnectorStatus]:
-    """GitHub, GitLab and Jira, each connected, not configured or failing, checked live."""
+    """GitHub, GitLab and Jira, each connected, not configured or failing, checked live. A
+    team's GitHub is checked on GitHub's hosted server with its token when it connected one."""
     team = await user_team(store, user)
-    return await connector_statuses(config, await store.settings(team.id))
+    github = github_endpoint(config, await store.github_account(team.id))
+    return await connector_statuses(config, await store.settings(team.id), github)
 
 
 @router.get("/voices")

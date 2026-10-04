@@ -26,6 +26,10 @@ class CodeRepo(BaseModel):
 
 class GitHubSettings(BaseModel):
     repos: list[CodeRepo] = Field(default=[], max_length=MAX_CODE_REPOS)  # owner/name each
+    # The GitHub account whose token an admin connected (PUT /settings/github/account), by its
+    # login: the team's reads then go to GitHub's hosted MCP server with that token. None: the
+    # server's GITHUB_MCP_URL, with no credentials. The token never leaves the brain.
+    account_login: str | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -104,6 +108,14 @@ class JiraAccountConnect(BaseModel):
     email: str
     api_token: str
     project: str
+
+
+class GitHubAccountConnect(BaseModel):
+    """PUT /settings/github/account (admins only): a fine-grained personal access token with
+    read access to the team's repositories. The brain checks it with GitHub before saving; it is
+    stored encrypted and never returned."""
+
+    token: str
 
 
 class ConnectorsUpdate(BaseModel):
