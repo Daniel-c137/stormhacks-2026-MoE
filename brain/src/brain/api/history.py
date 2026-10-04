@@ -22,9 +22,12 @@ from contracts import (
 
 from ..agent.ask import Question, ToolOrchestrator
 from ..agent.pipeline import PipelineRunner, PostMeetingPipeline, can_retry
+from ..auth import signing_secret
 from ..config import Settings
-from ..jira import ApprovalRequired, JiraPusher, JiraUnavailable, apply_results
+from ..jira import ApprovalRequired, JiraPusher, JiraUnavailable, TaskPusher, apply_results
+from ..jira_rest import JiraAccess, JiraRestPusher
 from ..report import ProcessedMeeting
+from ..sealing import Unsealable, unseal
 from ..speech import (
     CONTENT_TYPE,
     MeetingLocks,
@@ -34,14 +37,16 @@ from ..speech import (
     missing,
     synthesize,
 )
-from ..store import Conflict, NotFound, Store
+from ..store import Conflict, JiraAccount, NotFound, Store
 from .deps import (
+    ADMIN_ONLY,
     ask_agent,
     current_user,
     get_http_transport,
     get_jira_pusher,
     get_orchestrator,
     get_pipeline,
+    get_push_locks,
     get_runner,
     get_settings,
     get_speech_locks,
@@ -211,61 +216,114 @@ async def update_task(
     return await store.update_task(edited)
 
 
+NOT_CONNECTED = (
+    "Jira is not connected: an admin connects the team's Jira account in Settings, under Connectors"
+)
+CONNECT_AGAIN = (
+    "The saved Jira connection can no longer be read. Connect Jira again in Settings, "
+    "under Connectors"
+)
+
+
+def connected_pusher(
+    account: JiraAccount, config: Settings, transport: httpx.AsyncBaseTransport | None
+) -> JiraRestPusher:
+    """The pusher for a team's connected account and its project. 409 when its token was sealed
+    under an AUTH_SECRET the server no longer has."""
+    try:
+        token = unseal(account.sealed_token, signing_secret(config) or "", account.team_id)
+        access = JiraAccess(
+            site=account.site,
+            email=account.email,
+            api_token=token,
+            project_key=account.project,
+            issue_type_id=account.issue_type_id,
+        )
+    except (Unsealable, ValueError):
+        raise HTTPException(status_code=409, detail=CONNECT_AGAIN) from None
+    return JiraRestPusher(access, transport=transport)
+
+
 @router.post("/meetings/{meeting_id}/tasks/push")
 async def push_tasks(
     meeting_id: str,
     body: TaskPushRequest,
     user: Person = Depends(current_user),
     store: Store = Depends(get_store),
+    config: Settings = Depends(get_settings),
+    transport: httpx.AsyncBaseTransport | None = Depends(get_http_transport),
     make_pusher: Callable[[], JiraPusher] = Depends(get_jira_pusher),
+    locks: MeetingLocks = Depends(get_push_locks),
 ) -> list[TaskPushResult]:
     """The only path to external writes. Runs once a human approved these drafts and destination:
-    the meeting's host or an admin, always recorded as the approver. The meeting leaves review
-    once every included draft has a key; a draft Jira rejected keeps it in review so it can be
-    fixed and pushed again."""
+    an admin, always recorded as the approver. With the team's Jira account connected, the drafts
+    become issues in its project on its Jira site; otherwise they go to the Jira MCP server, when
+    one is configured. The meeting leaves review once every included draft has a key; a draft Jira
+    rejected keeps it in review so it can be fixed and pushed again.
+
+    One push of a meeting runs at a time and each issue's key is saved as soon as it exists, so
+    a second push (another admin, a retry) finds it and creates nothing twice."""
     meeting = await team_meeting(store, user, meeting_id)
-    host_or_admin(meeting, user)
-    if meeting.status not in REVIEWABLE:
-        raise HTTPException(
-            status_code=409, detail=f"The meeting is {meeting.status}, not in review"
-        )
-    try:
-        pusher = make_pusher()
-    except JiraUnavailable as e:
-        raise HTTPException(status_code=503, detail=str(e)) from None
-    try:
-        report = await store.report(meeting.id)
-    except NotFound:
-        raise HTTPException(status_code=404, detail="No report yet") from None
-
-    review = ProcessedMeeting(
-        meeting_id=meeting.id,
-        title=meeting.title,
-        started_at=meeting.started_at,
-        timezone=(await store.settings(meeting.team_id)).timezone,
-        members=await store.members(meeting.team_id),
-        report=report,
-    )
-    request = body.model_copy(update={"approved_by": user.name})
-    try:
-        results = await pusher.push(review, request)
-    except ApprovalRequired as e:
-        raise HTTPException(status_code=422, detail=str(e)) from None
-
-    tasks = apply_results(report.tasks, results)
-    for before, after in zip(report.tasks, tasks, strict=True):
-        if after != before:
-            await store.update_task(after)
-    new_keys = [r.key for r in results if r.key and r.key not in meeting.jira_keys]
-    if new_keys:
-        keys = list(dict.fromkeys([*meeting.jira_keys, *new_keys]))
-        meeting = await store.update_meeting(meeting.model_copy(update={"jira_keys": keys}))
-    if all(task.key for task in tasks if task.include):
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail=ADMIN_ONLY)
+    async with locks.hold(meeting.id):
+        meeting = await store.meeting(meeting.id)  # as an earlier push may have left it
+        if meeting.status not in REVIEWABLE:
+            raise HTTPException(
+                status_code=409, detail=f"The meeting is {meeting.status}, not in review"
+            )
+        team_settings = await store.settings(meeting.team_id)
+        account = await store.jira_account(meeting.team_id)
+        pusher: TaskPusher
+        if account is not None:
+            pusher = connected_pusher(account, config, transport)
+        else:
+            try:
+                pusher = make_pusher()
+            except JiraUnavailable:
+                raise HTTPException(status_code=503, detail=NOT_CONNECTED) from None
         try:
-            await store.transition_status(meeting.id, {"needs_review"}, "pushed")
-        except Conflict:
-            pass  # already pushed
-    return results
+            report = await store.report(meeting.id)
+        except NotFound:
+            raise HTTPException(status_code=404, detail="No report yet") from None
+
+        review = ProcessedMeeting(
+            meeting_id=meeting.id,
+            title=meeting.title,
+            started_at=meeting.started_at,
+            timezone=team_settings.timezone,
+            members=await store.members(meeting.team_id),
+            report=report,
+        )
+        request = body.model_copy(update={"approved_by": user.name})
+        saved: set[str] = set()
+
+        async def save(result: TaskPushResult) -> None:
+            """The new issue's key and link, on its draft, the moment Jira has made it."""
+            (task,) = apply_results([t for t in report.tasks if t.id == result.task_id], [result])
+            await store.update_task(task)
+            saved.add(task.id)
+
+        try:
+            results = await pusher.push(review, request, on_created=save)
+        except ApprovalRequired as e:
+            raise HTTPException(status_code=422, detail=str(e)) from None
+
+        tasks = apply_results(report.tasks, results)
+        for before, after in zip(report.tasks, tasks, strict=True):
+            if after != before and after.id not in saved:
+                await store.update_task(after)
+        if any(r.key for r in results):
+            meeting = await store.meeting(meeting.id)  # only its keys change here
+            keys = list(dict.fromkeys([*meeting.jira_keys, *(r.key for r in results if r.key)]))
+            if keys != meeting.jira_keys:
+                await store.update_meeting(meeting.model_copy(update={"jira_keys": keys}))
+        if all(task.key for task in tasks if task.include):
+            try:
+                await store.transition_status(meeting.id, {"needs_review"}, "pushed")
+            except Conflict:
+                pass  # already pushed
+        return results
 
 
 @router.get("/decisions")

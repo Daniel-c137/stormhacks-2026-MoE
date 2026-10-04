@@ -55,8 +55,6 @@ class Settings(BaseSettings):
     github_repo: str | None = None
     jira_base_url: str | None = None
     jira_cloud_id: str | None = None
-    jira_email: str | None = None
-    jira_api_token: str | None = None
     jira_project_key: str | None = None
     connector_timeout: float = 5.0  # seconds to reach an MCP server and list its tools
 

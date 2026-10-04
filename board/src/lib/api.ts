@@ -12,6 +12,7 @@ import type {
   CreateAccountRequest,
   CreateAccountResponse,
   ConnectorsUpdate,
+  JiraAccountConnect,
   CreateMeetingRequest,
   Decision,
   InviteRequest,
@@ -180,4 +181,8 @@ export const updateSettings = (body: TeamSettings) => request<TeamSettings>("PUT
 export const listConnectors = () => get<ConnectorStatus[]>("/settings/connectors");
 /** Admins only: the whole connector choice, replacing the saved one. */
 export const updateConnectors = (body: ConnectorsUpdate) => request<TeamSettings>("PUT", "/settings/connectors", body);
+/** Admins only: connects the team's Jira account. The brain checks it against Jira first. */
+export const connectJiraAccount = (body: JiraAccountConnect) => request<TeamSettings>("PUT", "/settings/jira/account", body);
+/** Admins only: forgets the team's Jira account and its token. */
+export const disconnectJiraAccount = () => request<TeamSettings>("DELETE", "/settings/jira/account");
 export const listVoices = () => get<Voice[]>("/voices");

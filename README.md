@@ -97,7 +97,7 @@ uv run brain add-team --id <team-id> --name "<team name>"
 uv run brain add-user --team <team-id> --name "<full name>" --email <email> --admin
 ```
 
-Only an admin changes the team's settings (connectors, the agent's voice and fact-checking, who may allow answers, time zone) and creates the other accounts, in Settings → Members, which shows the generated password once (`POST /team/accounts`). What a meeting's host does (ending it, changing its invitees, retrying its write-up, approving its push to Jira) an admin may do too, so a meeting whose host left can still be managed. Everyone keeps their own profile, photo and password. `add-user` without `--admin` adds someone who is not an admin, and leaves an existing admin one. To grant or revoke admin later (the brain checks on every request, so it takes effect at once; a team's last admin can't be revoked):
+Only an admin changes the team's settings (connectors, the agent's voice and fact-checking, who may allow answers, time zone) and creates the other accounts, in Settings → Members, which shows the generated password once (`POST /team/accounts`). What a meeting's host does (ending it, changing its invitees, retrying its write-up) an admin may do too, so a meeting whose host left can still be managed. Approving a meeting's push to Jira is an admin's alone. Everyone keeps their own profile, photo and password. `add-user` without `--admin` adds someone who is not an admin, and leaves an existing admin one. To grant or revoke admin later (the brain checks on every request, so it takes effect at once; a team's last admin can't be revoked):
 
 ```sh
 uv run brain set-admin --email <email>
@@ -118,6 +118,14 @@ On Gemini's free tier, set `WORLD_SEED_EMBEDS_PER_MINUTE=90`. The free tier also
 ## Connectors
 
 A team admin connects GitHub repositories and GitLab projects (up to 10 of each, each at an optional branch or tag) and the Jira site and project in Settings, under Connectors (`PUT /settings/connectors`). Polaris reads every connected repository when it answers, searches code and checks facts, unless a question names one; sources name their repository (`dropsubs/website#7`, `dropsubs/infra!4` for a GitLab merge request). Each connector shows Connected, Not set up or Not reachable, checked live against its MCP server (`GET /settings/connectors`).
+
+### Pushing tasks to Jira
+
+To have approved task drafts created as real Jira issues, an admin connects the team's Jira Cloud account: in Settings, under Connectors, choose Add connector, then "Jira account, to push tasks", and enter the site (`your-team.atlassian.net`), the project key, an Atlassian account's email and an [API token](https://id.atlassian.com/manage-profile/security/api-tokens) for it (a plain token, not one "with scopes") (`PUT /settings/jira/account`). The brain checks the account and the project with Jira before saving, calls only `https://<name>.atlassian.net`, stores the token encrypted with a key derived from `AUTH_SECRET` and never sends it to a browser. Disconnect forgets it.
+
+The account has its own site and project, shown as its own row. Jira is asked about it when it is connected and at every push, not while Settings is open, so a token that has since expired shows there as connected until the next push says otherwise. The Jira project row above it is what Polaris reads (answers, agenda suggestions, fact checks) through `JIRA_MCP_URL`, the mock in the demo; connecting or disconnecting the account does not change it, so the demo's Jira answers and its earlier tasks stay as they are.
+
+On a meeting's report, an admin then presses Push: each included draft becomes a Task in the account's project, as the connected account, with the meeting, the quoted moment and the approver in its description. The owner is assigned when Jira has exactly one assignable account with that person's email (or name); otherwise the issue is created unassigned and the page says so. A due date the project's create screen does not take is left out the same way. Each pushed task keeps the link to its issue. One push of a meeting runs at a time and each key is saved as soon as Jira has made the issue, so a retry after a failure creates only what is still missing. If the account's project has the same key as the project Polaris reads, the same key (say `DS-12`) can name two different issues: the real one a task links to, and the mock's that Polaris answers about. Without a connected account the board does not offer the push; the API then falls back to the Jira MCP server (`JIRA_MCP_URL`), as the `brain push` CLI does.
 
 ## Deploying to a server
 

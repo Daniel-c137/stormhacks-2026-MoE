@@ -139,6 +139,15 @@ def get_speech_locks(request: Request) -> MeetingLocks:
     return state.speech_locks
 
 
+def get_push_locks(request: Request) -> MeetingLocks:
+    """The app's per-meeting locks around pushing tasks, so two pushes of one meeting never
+    create the same issue twice."""
+    state = request.app.state
+    if not hasattr(state, "push_locks"):
+        state.push_locks = MeetingLocks()
+    return state.push_locks
+
+
 def get_rooms(settings: Settings = Depends(get_settings)) -> Rooms:
     """LiveKit's room service, to close a meeting's room when it ends."""
     return rooms_from_settings(settings)
@@ -208,13 +217,14 @@ def is_host_or_admin(meeting: Meeting, person: Person) -> bool:
 
 def host_or_admin(meeting: Meeting, user: Person) -> None:
     """403 unless the user hosts the meeting or is an admin, so a meeting whose host left can
-    still be ended, have its invitees changed, its write-up retried and its tasks pushed."""
+    still be ended, have its invitees changed and its write-up retried."""
     if not is_host_or_admin(meeting, user):
         raise HTTPException(status_code=403, detail=HOST_OR_ADMIN)
 
 
 def get_jira_pusher(settings: Settings = Depends(get_settings)) -> Callable[[], JiraPusher]:
-    """Makes the pusher for an approved push; JiraUnavailable when Jira is not configured.
+    """Makes the pusher for a team with no Jira account connected: the Jira MCP server
+    (JIRA_MCP_URL, the world's mock in the demo); JiraUnavailable when that is not configured.
     A factory, so the route checks the team and the meeting before Jira's configuration.
     Tests override it with an in-process Jira."""
     return lambda: JiraPusher(jira_config(settings))

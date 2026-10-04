@@ -1,4 +1,5 @@
 import type { Person, TaskDestination, TaskDraft } from "@moe/contracts";
+import type { ReactNode } from "react";
 import { Icon, Spinner } from "@/components/ui/Icon";
 import { fmtT } from "@/lib/format";
 
@@ -23,14 +24,17 @@ export interface TaskReviewProps {
   onPush: () => void;
   /** Show the moment a task came from in the transcript; null when there is no transcript. */
   onJump: ((t: number) => void) | null;
-  /** Only the meeting's host or an admin approves a push; everyone may edit the drafts. */
+  /** Only an admin approves a push; everyone may edit the drafts. */
   canPush: boolean;
+  /** Why the push can't be made as things stand (no Jira account connected), shown instead of
+   * the count of selected tasks; null when it can. */
+  blocked: ReactNode | null;
 }
 
 /** Edit title, owner, due and description; include or exclude; then push. */
 export function TaskReview(props: TaskReviewProps) {
   const { tasks, members, locked, pushing, pushed, destination, destinationLabel } = props;
-  const included = tasks.filter((t) => t.include).length;
+  const included = tasks.filter((t) => t.include && !t.key).length; // what a push would create
 
   return (
     <>
@@ -45,13 +49,14 @@ export function TaskReview(props: TaskReviewProps) {
             props.onCommit(next);
           };
           const url = task.key ? props.keyUrl(task) : null;
+          const fixed = locked || Boolean(task.key); // an issue already: the draft is final
           return (
             <div key={task.id} className="task" data-inc={task.include}>
               <input
                 type="checkbox"
                 checked={task.include}
                 onChange={(e) => editNow({ include: e.target.checked })}
-                disabled={locked}
+                disabled={fixed}
                 aria-label={`Include “${task.title}”`}
               />
               <div className="task-fields">
@@ -61,7 +66,7 @@ export function TaskReview(props: TaskReviewProps) {
                     value={task.title}
                     onChange={(e) => edit({ title: e.target.value })}
                     onBlur={() => props.onCommit(task)}
-                    disabled={locked}
+                    disabled={fixed}
                     aria-label="Task title"
                   />
                   {task.t != null && (
@@ -84,7 +89,7 @@ export function TaskReview(props: TaskReviewProps) {
                     value={task.description ?? ""}
                     onChange={(e) => edit({ description: e.target.value || null })}
                     onBlur={() => props.onCommit(task)}
-                    disabled={locked}
+                    disabled={fixed}
                     rows={1}
                   />
                 </label>
@@ -95,7 +100,7 @@ export function TaskReview(props: TaskReviewProps) {
                     className="field"
                     value={task.owner_id ?? ""}
                     onChange={(e) => editNow({ owner_id: e.target.value || null })}
-                    disabled={locked}
+                    disabled={fixed}
                   >
                     <option value="">No owner</option>
                     {task.owner_id && !members.some((m) => m.id === task.owner_id) && (
@@ -115,7 +120,7 @@ export function TaskReview(props: TaskReviewProps) {
                     type="date"
                     value={task.due ?? ""}
                     onChange={(e) => editNow({ due: e.target.value || null })}
-                    disabled={locked}
+                    disabled={fixed}
                   />
                 </label>
                 <div className="task-src">
@@ -143,7 +148,7 @@ export function TaskReview(props: TaskReviewProps) {
             type="button"
             className={pushed ? "btn btn-primary pushed" : "btn btn-primary"}
             onClick={props.onPush}
-            disabled={pushed || pushing || included === 0}
+            disabled={pushed || pushing || included === 0 || props.blocked !== null}
           >
             {pushing ? <Spinner size={16} /> : <Icon name={pushed ? "circle-check" : "upload"} />}
             {pushing
@@ -164,9 +169,12 @@ export function TaskReview(props: TaskReviewProps) {
             </select>
           )}
           <span className="push-st" role="status">
-            {props.status}
+            {!pushed && props.blocked ? props.blocked : props.status}
           </span>
         </div>
+      )}
+      {tasks.length > 0 && !props.canPush && !pushed && (
+        <p className="push-st push-note">Only an admin can push these tasks to Jira.</p>
       )}
     </>
   );
