@@ -134,7 +134,9 @@ class FakeGitHub:
     Searches scope like the real server's prepareSearchArgs: a repo: qualifier in the query wins,
     otherwise owner/repo scope it; org: and user: narrow to an owner. Then every other word must
     be in the title. `elsewhere` holds items of other repositories the server's token can also
-    read; `ignore_scope` makes searches return them regardless, like a misbehaving server."""
+    read; `ignore_scope` makes searches return them regardless, like a misbehaving server.
+    `releases` are the repository's releases, newest first, for list_releases and
+    get_latest_release."""
 
     def __init__(self):
         self.ignore_scope = False
@@ -168,6 +170,7 @@ class FakeGitHub:
                 "body": "Validates the signup address.",
             }
         }
+        self.releases: list[dict[str, Any]] = []
         self.server = MCPServer("github")
 
         def search(
@@ -224,6 +227,20 @@ class FakeGitHub:
             if pullNumber not in self.pulls:
                 raise ToolError("Not Found")
             return self.pulls[pullNumber]
+
+        @self.server.tool()
+        def list_releases(
+            owner: str, repo: str, page: int | None = None, perPage: int | None = None
+        ) -> list[dict[str, Any]]:
+            self.calls.append(("list_releases", {"owner": owner, "repo": repo}))
+            return self.releases[: perPage or None]
+
+        @self.server.tool()
+        def get_latest_release(owner: str, repo: str) -> dict[str, Any]:
+            self.calls.append(("get_latest_release", {"owner": owner, "repo": repo}))
+            if not self.releases:
+                raise ToolError("Not Found")
+            return self.releases[0]
 
         @self.server.tool()
         def add_issue_comment(owner: str, repo: str, issue_number: int, body: str) -> dict:
