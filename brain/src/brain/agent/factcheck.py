@@ -75,6 +75,9 @@ HAND_CONFIDENCE = 0.8  # a high-severity contradiction at least this sure raises
 MAX_REASON = 160
 
 NO_CODE_SEARCH = "Code search is not available yet"
+# Code is looked up through each claim's code_query, so the toolbox's own code tool stays off
+# the fact-check menu and is never run from a plan.
+OWN_CODE_TOOL = "github_code"
 HAND_DETAIL = "Raised hand: a claim conflicts with the team's records"
 
 
@@ -341,7 +344,9 @@ class FactChecker:
         if not planned:
             return {}
 
-        calls = [call for item in planned.values() for call in item.calls]
+        calls = [
+            call for item in planned.values() for call in item.calls if call.tool != OWN_CODE_TOOL
+        ]
         _, groups, unavailable = await tools.run(toolbox, calls)
         if code_unavailable is None:
             code_groups, code_errors = await self._code(toolbox, planned.values())
@@ -519,7 +524,11 @@ def render_plan_prompt(
     context: list[str], claims: list[str], toolbox: TeamToolbox, code_unavailable: str | None
 ) -> str:
     lines = [*context, "", *claims, "", f"Tools (at most {MAX_LOOKUPS} lookups in all):"]
-    lines += [render_tool(spec, toolbox.unavailable(spec.name)) for spec in toolbox.specs()]
+    lines += [
+        render_tool(spec, toolbox.unavailable(spec.name))
+        for spec in toolbox.specs()
+        if spec.name != OWN_CODE_TOOL
+    ]
     code = "- code search (code_query): search the team's repository's code"
     lines.append(code + (f" [not available: {code_unavailable}]" if code_unavailable else ""))
     return "\n".join(lines)
