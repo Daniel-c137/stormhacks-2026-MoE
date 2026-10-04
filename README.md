@@ -62,7 +62,7 @@ With `NEXT_PUBLIC_API_URL=/api` (as in `.env.example`), `next dev` forwards `/ap
 
 `uv run world-reset` clears the mocks' write journal.
 
-The realtime worker joins every meeting as the agent: `uv run realtime start` (or `dev` to reload on changes). It needs `LIVEKIT_*`, `ELEVENLABS_API_KEY`, `ELEVENLABS_STT_MODEL` (e.g. `scribe_v2_realtime`), `ELEVENLABS_TTS_MODEL`, `ELEVENLABS_VOICE_ID`, `BRAIN_URL` and `BRAIN_INTERNAL_TOKEN`, and exits naming whatever is missing. LiveKit dispatches it automatically to each room created while it is registered, so start it before people join; it leaves any room that is not a live meeting.
+The realtime worker joins every meeting as the agent: `uv run realtime start` (or `dev` to reload on changes). It needs `LIVEKIT_*`, `ELEVENLABS_API_KEY`, `ELEVENLABS_STT_MODEL` (e.g. `scribe_v2_realtime`), `ELEVENLABS_TTS_MODEL`, `ELEVENLABS_VOICE_ID`, `BRAIN_URL` and `BRAIN_INTERNAL_TOKEN`, and exits naming whatever is missing. Speech in another language is shown and saved in English: Scribe detects each utterance's language and the brain translates it with its LLM (`TRANSLATE_SPEECH=false` turns this off; `ELEVENLABS_STT_LANGUAGE` pins one language). LiveKit dispatches it automatically to each room created while it is registered, so start it before people join; it leaves any room that is not a live meeting.
 
 ## Tests
 

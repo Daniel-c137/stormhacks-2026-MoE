@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     # ISO 639-1 to pin one language; unset lets Scribe detect each utterance's, so speech in
     # another language can be translated into English (#106).
     elevenlabs_stt_language: str | None = None
+    # Show and save speech in other languages in English (#106). A sentence still going after
+    # translation_provisional_seconds is translated so far, again each period while it grows.
+    translate_speech: bool = True
+    translation_provisional_seconds: float = Field(default=1.5, gt=0)
     elevenlabs_tts_model: str | None = None
     elevenlabs_voice_id: str | None = None  # the default; a team's chosen voice wins
 

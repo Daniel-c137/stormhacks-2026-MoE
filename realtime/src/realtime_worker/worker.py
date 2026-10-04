@@ -22,7 +22,13 @@ from datetime import UTC, datetime
 from livekit import rtc
 from livekit.agents import AgentServer, AutoSubscribe, JobContext, JobRequest, cli
 
-from contracts import AGENT_PARTICIPANT_ID, Meeting, WorkerMeetingResponse, get_identity
+from contracts import (
+    AGENT_PARTICIPANT_ID,
+    Meeting,
+    TranslateResponse,
+    WorkerMeetingResponse,
+    get_identity,
+)
 
 from .brain_client import BrainRejected, HttpBrainClient, brain_client_from_settings
 from .bus import LiveKitBus
@@ -33,7 +39,7 @@ from .meeting_agent import MeetingAgent
 from .scribe import ScribeSTT
 from .state import RoomAgentState
 from .tracks import TrackRouter
-from .transcription import TranscriptionManager
+from .transcription import TranscriptionManager, Translate
 
 log = logging.getLogger(__name__)
 
@@ -75,6 +81,17 @@ class RoomChat:
     async def send(self, text: str) -> str:
         info = await self._participant.send_text(text, topic=CHAT_TOPIC)
         return info.stream_id
+
+
+def speech_translator(settings: Settings, brain, meeting_id: str) -> Translate | None:
+    """translate(text, language) through the brain for this meeting, or None when off (#106)."""
+    if not settings.translate_speech:
+        return None
+
+    async def translate(text: str, language: str | None) -> TranslateResponse:
+        return await brain.translate(meeting_id, text, language)
+
+    return translate
 
 
 def meeting_clock(meeting: Meeting) -> Callable[[], float]:
@@ -149,6 +166,8 @@ class MeetingSession:
             detector=detector,
             on_invocation=agent.on_invocation,
             clock=meeting_clock(meeting),
+            translate=speech_translator(settings, brain, meeting.id),
+            provisional_seconds=settings.translation_provisional_seconds,
         )
         agent.transcription = transcription
         router = TrackRouter(transcription)

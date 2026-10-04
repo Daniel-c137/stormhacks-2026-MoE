@@ -27,6 +27,7 @@ import {
 } from "@/hooks/useApi";
 import { describeError, pushTasks, retryReport, updateTask } from "@/lib/api";
 import { attendeeNames, fmtClock, fmtDate, fmtLongDate, fmtT, joinNames, meetingStart, shortOf } from "@/lib/format";
+import { translationNote } from "@/lib/translation";
 import { ListenButton } from "./ListenButton";
 import { TaskReview } from "./TaskReview";
 
@@ -461,7 +462,15 @@ function ReportView({ meeting, onPushed }: { meeting: Meeting; onPushed: () => v
                     <li key={g.seg_id} id={`seg-${g.seg_id}`} className="line" data-hl={highlighted === g.seg_id}>
                       <span className="tm">{fmtT(g.t_start)}</span>
                       <span className="who">{speakerName(g.speaker_id, g.speaker_name)}</span>
-                      <span className="tx">{mark(g.text)}</span>
+                      <span className="tx">
+                        {mark(g.text)}
+                        {translationNote(g) && (
+                          <span className="tx-note" title={g.original_text ?? undefined}>
+                            {" "}
+                            · {translationNote(g)}
+                          </span>
+                        )}
+                      </span>
                     </li>
                   ))}
                 </ol>

@@ -37,6 +37,7 @@ import {
 } from "@/hooks/useLive";
 import { askInMeeting, describeError, endMeeting } from "@/lib/api";
 import { initialsOf, shortOf } from "@/lib/format";
+import { translationNote } from "@/lib/translation";
 import { publish } from "@/lib/room";
 import { AgentPresence } from "./AgentPresence";
 import { CodeStage } from "./CodeStage";
@@ -295,6 +296,7 @@ function RoomView({
       : shortOf((members.find((m) => m.id === caption.speaker_id) ?? (caption.speaker_id === me.id ? me : null))?.name ?? caption.speaker_name)
     : "";
   const captionWords = caption ? caption.text.split(" ") : [];
+  const captionNote = caption ? translationNote(caption) : null;
   const captionText = captionWords.length > 20 ? `…${captionWords.slice(-20).join(" ")}` : captionWords.join(" ");
 
   // ---- chat: public room chat, private messages, and the private thread with the agent
@@ -485,6 +487,7 @@ function RoomView({
               {caption && captionFresh ? (
                 <p>
                   <b>{captionWho}:</b> {captionText}
+                  {captionNote && <span className="cap-note"> · {captionNote}</span>}
                 </p>
               ) : (
                 !transcript.length && <p>{agentPresent ? "Captions are on." : `Captions need ${agent} in the meeting.`}</p>
