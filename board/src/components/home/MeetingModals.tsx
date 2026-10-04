@@ -193,7 +193,6 @@ export function NewMeetingModal({ onClose, onScheduled }: { onClose: () => void;
                 <span className="person-meta">From open work and recent meetings, once the meeting is created. Edit it in the lobby.</span>
               </span>
             </label>
-            <TranslationSwitch checked={translate} onChange={setTranslate} disabled={Boolean(scheduled)} />
             <div className="sched">
               <span id="inv-h" className="label">
                 Invitees
@@ -284,6 +283,7 @@ export function NewMeetingModal({ onClose, onScheduled }: { onClose: () => void;
             </div>
           </>
         )}
+        <TranslationSwitch checked={translate} onChange={setTranslate} disabled={Boolean(scheduled)} />
         <span role="alert" className="err">
           {error}
         </span>
