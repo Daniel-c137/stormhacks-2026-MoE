@@ -183,7 +183,13 @@ def listened():
 
 
 @pytest.fixture
-async def make_manager(stt, bus, clock, invocations, unavailable, listened):
+def reached_brain():
+    """Each final segment, as the manager reported it saved by the brain."""
+    return []
+
+
+@pytest.fixture
+async def make_manager(stt, bus, clock, invocations, unavailable, listened, reached_brain):
     managers = []
 
     def make(brain, detector: WakeDetector | None = None) -> TranscriptionManager:
@@ -205,6 +211,7 @@ async def make_manager(stt, bus, clock, invocations, unavailable, listened):
             on_invocation=on_invocation,
             on_unavailable=on_unavailable,
             on_listening=on_listening,
+            on_saved=reached_brain.extend,
             clock=clock,
             restart_backoff=0,
             drain_seconds=0.2,
@@ -654,3 +661,44 @@ async def test_cancelling_tells_the_agent_listening_stopped(manager, stt, listen
 
     assert manager.cancel_listening("u-alex") is True
     await until(lambda: listened[-1:] == [{}])
+
+
+# reporting saved finals: the agenda is checked once the brain has a caption
+
+
+async def test_each_final_is_reported_once_the_brain_has_saved_it(
+    manager, stt, brain, reached_brain
+):
+    start(manager, "u-alex")
+    stt.say("u-alex", "Let's talk", final=False)
+    stt.say("u-alex", "Let's talk refunds.")
+
+    await until(lambda: reached_brain)
+    assert [s.text for s in reached_brain] == ["Let's talk refunds."]
+    assert brain.texts() == ["Let's talk refunds."]
+
+
+async def test_a_final_held_during_an_outage_is_reported_when_it_is_saved(
+    make_manager, stt, reached_brain
+):
+    brain = FakeBrain(down=1)
+    manager = make_manager(brain)
+    start(manager, "u-alex")
+    stt.say("u-alex", "Said during the outage.")
+    await until(lambda: manager.unsaved_count() == 1)
+    assert reached_brain == []
+
+    stt.say("u-alex", "Said after it.")
+    await until(lambda: len(reached_brain) == 2)
+    assert [s.text for s in reached_brain] == ["Said during the outage.", "Said after it."]
+
+
+async def test_a_rejected_final_is_never_reported(make_manager, stt, reached_brain):
+    brain = FakeBrain(rejects=("Bad words.",))
+    manager = make_manager(brain)
+    start(manager, "u-alex")
+    stt.say("u-alex", "Bad words.")
+    stt.say("u-alex", "Good words.")
+
+    await until(lambda: brain.texts() == ["Good words."])
+    assert [s.text for s in reached_brain] == ["Good words."]

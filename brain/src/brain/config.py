@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     # The embeddings fallback, e.g. google/gemini-embedding-001: the same model as
     # GEMINI_EMBEDDING_MODEL (its vectors are compared with Gemini's), at GEMINI_EMBEDDING_DIM
     openrouter_embedding_model: str | None = None
+    # Live agenda tracking on Jev, TypeSafe's decision model, through OpenRouter's decisions API
+    # with OPENROUTER_API_KEY: e.g. typesafe/jev-1.13. Unset, the tracker asks the Gemini chain at
+    # its own pace. The realtime worker reads it too, and then checks the agenda after every
+    # caption instead of only on its timer.
+    jev_model: str | None = None
+    jev_url: str = "https://openrouter.ai/api/alpha/decisions"
 
     livekit_url: str | None = None
     livekit_api_key: str | None = None

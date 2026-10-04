@@ -80,6 +80,7 @@ class TranscriptionManager:
         on_invocation: Callable[[Invocation], Awaitable[None]],
         on_unavailable: Callable[[str, str], Awaitable[None]] | None = None,
         on_listening: Callable[[dict[str, str]], Awaitable[None]] | None = None,
+        on_saved: Callable[[list[TranscriptSegment]], None] | None = None,
         clock: Callable[[], float] | None = None,
         max_restarts: int = 3,
         restart_backoff: float = 1.0,
@@ -92,7 +93,8 @@ class TranscriptionManager:
         """clock() returns seconds since the meeting started (Meeting.started_at); every
         segment time and the Ask window are on it. on_unavailable(participant_id, name) is
         called when a participant's captions stop for good. on_listening(listening) gets who the
-        agent is listening to by voice (id -> name) whenever that changes. translate turns
+        agent is listening to by voice (id -> name) whenever that changes. on_saved(segments) gets
+        the final segments the brain has just saved. translate turns
         non-English speech into English (#106); without it every utterance is shown and saved as
         heard."""
         self.meeting_id = meeting_id
@@ -103,6 +105,7 @@ class TranscriptionManager:
         self._on_invocation = on_invocation
         self._on_unavailable = on_unavailable
         self._on_listening = on_listening
+        self._on_saved = on_saved
         if clock is None:
             origin = time.monotonic()
             clock = lambda: time.monotonic() - origin  # noqa: E731
@@ -393,6 +396,7 @@ class TranscriptionManager:
             await self._brain.ingest_segments(self.meeting_id, batch)
             self._saved += len(batch)
             self._backlog = []
+            self._reached_brain(batch)
             return
         except BrainRejected:
             held = []
@@ -400,6 +404,7 @@ class TranscriptionManager:
                 try:
                     await self._brain.ingest_segments(self.meeting_id, [segment])
                     self._saved += 1
+                    self._reached_brain([segment])
                 except BrainRejected as e:
                     self._dropped += 1
                     log.warning("Brain rejected segment %s (%d)", segment.seg_id, e.status)
@@ -409,6 +414,13 @@ class TranscriptionManager:
         except Exception as e:
             log.warning("Holding %d segment(s) to resend: %s", len(batch), e)
             self._hold(batch)
+
+    def _reached_brain(self, segments: list[TranscriptSegment]) -> None:
+        if self._on_saved:
+            try:
+                self._on_saved(segments)
+            except Exception:
+                log.exception("Could not report saved segments")
 
     def _hold(self, segments: list[TranscriptSegment]) -> None:
         overflow = max(0, len(segments) - self._backlog_limit)

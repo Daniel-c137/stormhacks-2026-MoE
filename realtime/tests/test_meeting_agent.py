@@ -5,6 +5,7 @@ fact-check is a private chat message to whoever made the claim."""
 
 import asyncio
 import logging
+import time
 from datetime import UTC, datetime
 
 import pytest
@@ -540,6 +541,118 @@ async def test_cancel_stops_listening_to_the_pressers_voice_too(agent, bus, tran
     await bus.deliver(Topic.ASK, AskSignal(by_id="u-alex", cancel=True), "u-alex")
 
     assert transcription.stopped_listening == ["u-alex"]
+
+
+# checking the agenda once each caption has settled in the brain (with Jev on)
+
+
+class MeetingClock:
+    """Seconds since the meeting started, running in real time from 100 s."""
+
+    def __init__(self):
+        self.origin = time.monotonic() - 100
+
+    def __call__(self) -> float:
+        return time.monotonic() - self.origin
+
+
+async def test_a_saved_caption_checks_the_agenda_once_it_has_settled(make_agent, bus, brain):
+    clock = MeetingClock()
+    agent = make_agent(agenda_after_captions=True, agenda_check_delay=0.1, clock=clock)
+
+    agent.caption_saved(clock())
+    await asyncio.sleep(0.02)
+    assert brain.agenda_calls == 0  # not before it settled in the brain
+
+    await until(lambda: brain.agenda_calls == 1)
+    assert bus.on(Topic.AGENDA)  # published to the room like a timer tick
+
+
+async def test_captions_that_settle_together_are_checked_once(make_agent, brain):
+    clock = MeetingClock()
+    agent = make_agent(agenda_after_captions=True, agenda_check_delay=0.05, clock=clock)
+
+    now = clock()
+    for t_end in (now - 0.02, now - 0.01, now):
+        agent.caption_saved(t_end)
+    await until(lambda: brain.agenda_calls == 1)
+    await asyncio.sleep(0.1)
+
+    assert brain.agenda_calls == 1
+
+
+async def test_a_caption_that_settles_later_gets_its_own_check(make_agent, brain):
+    clock = MeetingClock()
+    agent = make_agent(agenda_after_captions=True, agenda_check_delay=0.05, clock=clock)
+
+    agent.caption_saved(clock())
+    agent.caption_saved(clock() + meeting_agent.AGENDA_GATHER_S + 0.1)
+
+    await until(lambda: brain.agenda_calls == 1)
+    await until(lambda: brain.agenda_calls == 2)
+
+
+async def test_a_failing_check_is_logged_and_the_next_caption_checks_again(
+    make_agent, brain, caplog
+):
+    clock = MeetingClock()
+    agent = make_agent(agenda_after_captions=True, agenda_check_delay=0.01, clock=clock)
+    brain.agenda_ticks = [BrainUnavailable("brain is down")]
+
+    with caplog.at_level(logging.WARNING):
+        agent.caption_saved(clock())
+        await until(lambda: brain.agenda_calls == 1)
+        agent.caption_saved(clock())
+        await until(lambda: brain.agenda_calls == 2)
+
+    assert "brain is down" in caplog.text
+
+
+async def test_a_caption_saved_after_the_agent_closed_checks_nothing(make_agent, brain):
+    """Closing the meeting flushes the last captions after the agent has stopped."""
+    clock = MeetingClock()
+    agent = make_agent(agenda_after_captions=True, agenda_check_delay=0.01, clock=clock)
+    await agent.aclose()
+
+    agent.caption_saved(clock())
+    await asyncio.sleep(0.05)
+
+    assert brain.agenda_calls == 0
+
+
+async def test_without_jev_a_saved_caption_never_checks_the_agenda(make_agent, brain):
+    clock = MeetingClock()
+    agent = make_agent(agenda_check_delay=0.01, clock=clock)
+
+    agent.caption_saved(clock())
+    await asyncio.sleep(0.1)
+
+    assert brain.agenda_calls == 0
+
+
+async def test_a_caption_check_and_the_timer_tick_never_overlap(make_agent, brain):
+    clock = MeetingClock()
+    agent = make_agent(
+        agenda_after_captions=True, agenda_check_delay=0.01, agenda_tick_seconds=0.02, clock=clock
+    )
+    running, most = 0, 0
+    track = brain.track_agenda
+
+    async def slow_track(meeting_id):
+        nonlocal running, most
+        running += 1
+        most = max(most, running)
+        await asyncio.sleep(0.03)
+        running -= 1
+        return await track(meeting_id)
+
+    brain.track_agenda = slow_track
+    for _ in range(5):
+        agent.caption_saved(clock())
+        await asyncio.sleep(0.015)
+    await until(lambda: brain.agenda_calls >= 4)
+
+    assert most == 1
 
 
 # answering
