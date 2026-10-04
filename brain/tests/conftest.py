@@ -27,17 +27,21 @@ JIRA_ACCOUNTS: list[dict[str, str]] = [
 
 
 class FakeJira:
-    """Stand-in for the Jira MCP server's createJiraIssue and lookupJiraAccountId. A summary
-    starting with FAIL is rejected the way Jira rejects an invalid field. Lookups match any
-    account whose name or email contains the search string; set `lookup_error` to make the
-    lookup tool fail. Lookups answer {"users": [...]}, the shape the brain expects (unverified
-    against Atlassian's server)."""
+    """Stand-in for the Jira MCP server's createJiraIssue, lookupJiraAccountId and
+    searchJiraIssuesUsingJql. A summary starting with FAIL is rejected the way Jira rejects an
+    invalid field. Searches return `issues` (in Atlassian's shape) or fail with `search_error`.
+    Lookups match any account whose name or email contains the search string; set
+    `lookup_error` to make the lookup tool fail. Lookups answer {"users": [...]}, the shape the
+    brain expects (unverified against Atlassian's server)."""
 
     def __init__(self, first_number: int = 117, accounts: list[dict[str, str]] | None = None):
         self.created: list[dict[str, Any]] = []
         self.accounts = list(JIRA_ACCOUNTS if accounts is None else accounts)
         self.lookups: list[str] = []
         self.lookup_error: str | None = None
+        self.issues: list[dict[str, Any]] = []
+        self.searches: list[dict[str, Any]] = []
+        self.search_error: str | None = None
         self.server = MCPServer("jira")
 
         @self.server.tool()
@@ -53,6 +57,21 @@ class FakeJira:
                 or needle in account.get("emailAddress", "").lower()
             ]
             return {"users": users}
+
+        @self.server.tool()
+        def searchJiraIssuesUsingJql(
+            cloudId: str,
+            jql: str,
+            fields: list[str] | None = None,
+            maxResults: int | None = None,
+            nextPageToken: str | None = None,
+        ) -> dict[str, Any]:
+            self.searches.append(
+                {"cloudId": cloudId, "jql": jql, "fields": fields, "maxResults": maxResults}
+            )
+            if self.search_error:
+                raise ToolError(self.search_error)
+            return {"issues": self.issues[: maxResults or None], "isLast": True}
 
         @self.server.tool()
         def createJiraIssue(

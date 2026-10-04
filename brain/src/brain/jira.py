@@ -1,4 +1,5 @@
-"""Create Jira issues for task drafts a person approved, through the Jira MCP server.
+"""Create Jira issues for task drafts a person approved, and read unfinished work, through the
+Jira MCP server.
 
 The same tool names work against the world's mock and the real server; JIRA_MCP_URL decides.
 """
@@ -18,6 +19,10 @@ from contracts import TaskDraft, TaskPushRequest, TaskPushResult
 
 class JiraUnavailable(RuntimeError):
     """Jira is not configured."""
+
+
+class JiraError(RuntimeError):
+    """A Jira read failed."""
 
 
 class ApprovalRequired(PermissionError):
@@ -141,6 +146,77 @@ class JiraPusher:
     def pushed(self, task_id: str, key: str, warning: str | None = None) -> TaskPushResult:
         url = f"{self.config.base_url.rstrip('/')}/browse/{key}" if self.config.base_url else None
         return TaskPushResult(task_id=task_id, key=key, url=url, warning=warning)
+
+
+class JiraIssue(BaseModel):
+    key: str
+    summary: str
+    status: str | None = None
+    assignee: str | None = None
+    url: str | None = None
+
+
+class JiraReader:
+    """Read-only searches. Never calls a write tool."""
+
+    def __init__(self, config: JiraConfig, *, target: str | MCPServer | None = None):
+        self.config = config
+        self.target = target or config.mcp_url
+
+    async def unfinished(self, limit: int = 10) -> list[JiraIssue]:
+        """The project's issues not done yet, most recently updated first."""
+        project = self.config.project_key.replace('"', "")
+        jql = f'project = "{project}" AND statusCategory != Done ORDER BY updated DESC'
+        try:
+            async with Client(self.target) as client:
+                result = await client.call_tool(
+                    "searchJiraIssuesUsingJql",
+                    {
+                        "cloudId": self.config.cloud_id,
+                        "jql": jql,
+                        "fields": ["summary", "status", "assignee"],
+                        "maxResults": limit,
+                    },
+                )
+        except Exception as e:
+            raise JiraError(f"Jira MCP call failed: {root_cause(e)}") from e
+        if result.is_error:
+            raise JiraError(text_of(result) or "Jira refused the search")
+        issues = [self.issue(raw) for raw in raw_issues(result)]
+        return [issue for issue in issues if issue is not None][:limit]
+
+    def issue(self, raw: object) -> JiraIssue | None:
+        if not isinstance(raw, dict) or not isinstance(key := raw.get("key"), str):
+            return None
+        fields = raw.get("fields") if isinstance(raw.get("fields"), dict) else {}
+        status = fields.get("status") if isinstance(fields.get("status"), dict) else {}
+        category = status.get("statusCategory")
+        if isinstance(category, dict) and category.get("key") == "done":
+            return None
+        assignee = fields.get("assignee") if isinstance(fields.get("assignee"), dict) else {}
+        url = f"{self.config.base_url.rstrip('/')}/browse/{key}" if self.config.base_url else None
+        return JiraIssue(
+            key=key,
+            summary=str(fields.get("summary") or "").strip(),
+            status=status.get("name"),
+            assignee=assignee.get("displayName"),
+            url=url,
+        )
+
+
+def raw_issues(result: CallToolResult) -> list:
+    data = result.structured_content
+    if not isinstance(data, dict):
+        try:
+            data = json.loads(text_of(result))
+        except ValueError:
+            return []
+    if not isinstance(data, dict):
+        return []
+    for candidate in (data, data.get("result")):
+        if isinstance(candidate, dict) and isinstance(candidate.get("issues"), list):
+            return candidate["issues"]
+    return []
 
 
 def apply_results(tasks: list[TaskDraft], results: list[TaskPushResult]) -> list[TaskDraft]:

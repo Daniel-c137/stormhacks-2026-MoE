@@ -1,3 +1,10 @@
-from . import directory, history, internal, meetings, team
+from . import agenda, directory, history, internal, meetings, team
 
-routers = [meetings.router, history.router, team.router, internal.router, directory.router]
+routers = [
+    meetings.router,
+    agenda.router,
+    history.router,
+    team.router,
+    internal.router,
+    directory.router,
+]
