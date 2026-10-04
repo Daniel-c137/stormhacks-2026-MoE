@@ -16,12 +16,15 @@ Run from the repo root (deselected by default; skipped without Gemini and embedd
     GEMINI_EMBEDDING_MODEL=gemini-embedding-001 GEMINI_EMBEDDING_DIM=768 \\
     uv run pytest brain/tests/e2e/test_live_meeting.py -m live -v -s
 
-It takes about 2-3 minutes, plus a minute for each write-up retry. Cost: roughly 15-20 Gemini
-generate calls and a handful of embedding calls, a large share of the free tier's per-minute
-quota, so run it once and space runs at least a minute apart. If the write-up hits the quota,
-the host retries it through POST /meetings/{id}/report/retry after a minute's wait, up to three
-times. An OpenRouter fallback (#61) is landing separately; once it does, the brain picks it up
-from any OPENROUTER_* settings in the environment or .env, with no change here.
+Add E2E_LISTEN=1 to also run Listen (see below). Each step prints what it saw; the brain's log
+path is printed at the start.
+
+It takes about a minute and a half (84 s on 3 Oct 2026), plus a minute for each write-up retry.
+Cost: roughly 15-20 Gemini generate calls and about 5 embedding calls, a large share of the free
+tier's per-minute quota, so run it once and space runs at least a minute apart. If the write-up
+hits the quota, the host retries it through POST /meetings/{id}/report/retry after a minute's
+wait, up to three times. An OpenRouter fallback (#61) is landing separately; once it does, the
+brain picks it up from any OPENROUTER_* settings in the environment or .env, with no change here.
 
 ElevenLabs: listing voices is free and runs whenever ELEVENLABS_API_KEY is set. Listen (the
 summary read aloud) spends credits, so it runs only with E2E_LISTEN=1 and ELEVENLABS_API_KEY,
