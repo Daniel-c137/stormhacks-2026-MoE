@@ -16,7 +16,7 @@ from contracts import (
 from ..config import Settings
 from ..livekit_tokens import participant_token
 from ..store import NotFound, Store
-from .deps import current_user, get_settings, get_store, not_implemented
+from .deps import app_settings, current_user, get_store, not_implemented
 
 router = APIRouter(prefix="/meetings", tags=["meetings"])
 
@@ -73,7 +73,7 @@ async def join_meeting(
     code: str,
     user: Person = Depends(current_user),
     store: Store = Depends(get_store),
-    settings: Settings = Depends(get_settings),
+    settings: Settings = Depends(app_settings),
 ) -> JoinMeetingResponse:
     """Team members with a valid link join directly and get a LiveKit token."""
     try:

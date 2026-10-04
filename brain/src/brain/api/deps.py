@@ -14,7 +14,7 @@ def not_implemented() -> NoReturn:
 
 
 @cache
-def get_settings() -> Settings:
+def app_settings() -> Settings:
     return Settings()
 
 

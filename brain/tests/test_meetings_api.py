@@ -9,7 +9,7 @@ from fastapi import Header
 from fastapi.testclient import TestClient
 from livekit.api import TokenVerifier
 
-from brain.api.deps import current_user, get_settings, get_store
+from brain.api.deps import app_settings, current_user, get_store
 from brain.config import Settings
 from brain.main import create_app
 from brain.store import InMemoryStore
@@ -50,7 +50,7 @@ def user_from_test_header(x_test_user: str = Header()) -> Person:
 def app(store, settings):
     app = create_app()
     app.dependency_overrides[get_store] = lambda: store
-    app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[app_settings] = lambda: settings
     app.dependency_overrides[current_user] = user_from_test_header
     return app
 
@@ -206,7 +206,7 @@ def test_ended_meeting_cannot_be_joined(client_as):
 
 def test_join_without_livekit_credentials_is_unavailable_not_faked(app, client_as):
     meeting = create(client_as(ALEX))
-    app.dependency_overrides[get_settings] = lambda: Settings(_env_file=None)
+    app.dependency_overrides[app_settings] = lambda: Settings(_env_file=None)
 
     response = client_as(SARAH).post(f"/meetings/join/{meeting['code']}")
 
