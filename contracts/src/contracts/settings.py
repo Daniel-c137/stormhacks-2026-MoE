@@ -48,12 +48,17 @@ class GitLabSettings(BaseModel):
 
 
 class JiraSettings(BaseModel):
+    # The project the agent reads (answers, agenda suggestions, fact checks) and its site.
     site: str | None = None
     project: str | None = None
-    # An admin connected an Atlassian account (PUT /settings/jira/account): approved task drafts
-    # are created as issues on `site` as `account_email`. Its API token never leaves the brain.
+    # The account an admin connected for pushing (PUT /settings/jira/account): approved task
+    # drafts become issues in `account_project` on `account_site`, as `account_email`. Its own
+    # site and project, so connecting it changes nothing the agent reads. Its API token never
+    # leaves the brain.
     connected: bool = False
     account_email: str | None = None
+    account_site: str | None = None
+    account_project: str | None = None
 
 
 class Voice(BaseModel):
@@ -103,8 +108,8 @@ class JiraAccountConnect(BaseModel):
 
 class ConnectorsUpdate(BaseModel):
     """PUT /settings/connectors (admins only): the whole choice, replacing the saved one.
-    Repositories already connected keep their connection and index state. Another Jira site
-    (or none) disconnects the Jira account."""
+    Repositories already connected keep their connection and index state. The Jira account
+    connected for pushing is separate and stays as it is."""
 
     github: list[CodeRepoChoice] = Field(default=[], max_length=MAX_CODE_REPOS)
     gitlab: list[CodeRepoChoice] = Field(default=[], max_length=MAX_CODE_REPOS)

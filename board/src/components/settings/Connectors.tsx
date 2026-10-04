@@ -49,6 +49,8 @@ interface AccountDraft {
 }
 
 const TOKENS_URL = "https://id.atlassian.com/manage-profile/security/api-tokens";
+/** The account row's key in the open-menu state, beside the `name:index` keys of the others. */
+const ACCOUNT = "jira-account";
 
 const choices = (repos: CodeRepo[]): CodeRepoChoice[] => repos.map(({ path, ref }) => ({ path, ref }));
 
@@ -73,7 +75,8 @@ function State({ name, statuses }: { name: ConnectorName; statuses: Statuses }) 
 
 /** One row per connected repository, project and Jira; admins add, edit and remove them inline.
  * Each change is saved at once (PUT /settings/connectors) and the states are checked again.
- * The Jira row also carries the account an admin connects, which approved tasks are pushed as. */
+ * The Jira account approved tasks are pushed to is a row of its own, with its own site and
+ * project: connecting it leaves the Jira project the agent reads as it is. */
 export function Connectors({
   settings,
   statuses,
@@ -115,8 +118,8 @@ export function Connectors({
     setDraft(null);
     setProblem("");
     setAccount({
-      site: settings.jira.site ?? "",
-      project: settings.jira.project ?? "",
+      site: settings.jira.account_site ?? "",
+      project: settings.jira.account_project ?? "",
       email: settings.jira.account_email ?? "",
       token: "",
     });
@@ -201,15 +204,7 @@ export function Connectors({
     ...settings.gitlab.projects.map((r, index) => ({ name: "gitlab" as const, index, label: r.path, detail: r.ref ?? null })),
     ...(settings.jira.project
       ? [
-          {
-            name: "jira" as const,
-            index: 0,
-            label: settings.jira.project,
-            // Who approved tasks are pushed as, or that no account is connected for it yet.
-            detail: [settings.jira.site, settings.jira.connected ? `pushes as ${settings.jira.account_email}` : "no account for pushing"]
-              .filter(Boolean)
-              .join(" · "),
-          },
+          { name: "jira" as const, index: 0, label: settings.jira.project, detail: settings.jira.site ?? null },
         ]
       : []),
   ];
@@ -282,18 +277,7 @@ export function Connectors({
                         <Icon name="pencil" />
                         Edit
                       </button>
-                      {row.name === "jira" && (
-                        <button type="button" className="menu-item" role="menuitem" onClick={startAccount}>
-                          <Icon name="link" />
-                          {settings.jira.connected ? "Change account" : "Connect account"}
-                        </button>
-                      )}
-                      {row.name === "jira" && settings.jira.connected && (
-                        <button type="button" className="menu-item" role="menuitem" onClick={() => void disconnectAccount()}>
-                          <Icon name="log-out" />
-                          Disconnect account
-                        </button>
-                      )}
+
                       <button type="button" className="menu-item danger" role="menuitem" onClick={() => remove(row.name, row.index)}>
                         <Icon name="trash-2" />
                         Remove
@@ -307,10 +291,52 @@ export function Connectors({
         })}
         {draft && draft.index === null && <li>{form(draft)}</li>}
         {draft?.name === "jira" && !settings.jira.project && <li>{form(draft)}</li>}
+        {settings.jira.connected && !account && (
+          <li className="conn-row">
+            <Icon name="jira" className="conn-icon is-jira" />
+            <span className="conn-name">
+              {settings.jira.account_project}
+              <span className="conn-ref-text">
+                {" "}
+                · {settings.jira.account_site} · tasks are pushed here as {settings.jira.account_email}
+              </span>
+            </span>
+            <span className="conn-state" data-state="connected">
+              Connected
+            </span>
+            {canEdit && (
+              <div className="conn-more" ref={menu === ACCOUNT ? rowMenu : undefined}>
+                <button
+                  type="button"
+                  className="icon-btn sm"
+                  aria-label="More for the Jira account"
+                  aria-haspopup="menu"
+                  aria-expanded={menu === ACCOUNT}
+                  onClick={() => setMenu(menu === ACCOUNT ? null : ACCOUNT)}
+                  disabled={busy}
+                >
+                  <Icon name="ellipsis" />
+                </button>
+                {menu === ACCOUNT && (
+                  <div className="menu conn-menu" role="menu" aria-label="Jira account">
+                    <button type="button" className="menu-item" role="menuitem" onClick={startAccount}>
+                      <Icon name="pencil" />
+                      Change
+                    </button>
+                    <button type="button" className="menu-item danger" role="menuitem" onClick={() => void disconnectAccount()}>
+                      <Icon name="trash-2" />
+                      Disconnect
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </li>
+        )}
         {account && (
           <li>
             <form className="conn-account" onSubmit={(e) => void connectAccount(e)} aria-label="Connect a Jira account">
-              <h3>Connect a Jira account</h3>
+              <h3>Jira account for pushing tasks</h3>
               <label className="label">
                 Jira site
                 <input
@@ -357,7 +383,8 @@ export function Connectors({
                 />
               </label>
               <p className="note">
-                Approved tasks are created in this project as this account. Create a token at{" "}
+                Approved tasks are created in this project as this account; what the assistant reads from Jira is not
+                changed. Create a token at{" "}
                 <a className="link" href={TOKENS_URL} target="_blank" rel="noopener noreferrer">
                   id.atlassian.com
                 </a>{" "}
@@ -402,6 +429,19 @@ export function Connectors({
                   {label}
                 </button>
               ))}
+              <button
+                type="button"
+                className="menu-item"
+                role="menuitem"
+                disabled={settings.jira.connected}
+                onClick={() => {
+                  setAdding(false);
+                  startAccount();
+                }}
+              >
+                <Icon name="jira" className="conn-icon is-jira" />
+                Jira account, to push tasks
+              </button>
             </div>
           )}
         </div>

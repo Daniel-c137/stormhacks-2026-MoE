@@ -196,8 +196,9 @@ async def write_connectors(
 ) -> TeamSettings:
     """The team's GitHub repositories, GitLab projects and Jira site and project, replacing
     the saved ones; admins only. A repository that stays keeps its connection and index state
-    (a new branch or tag drops its index). Paths are checked and repeats refused. The Jira
-    account stays connected while the site does: its token was checked against that site only."""
+    (a new branch or tag drops its index). Paths are checked and repeats refused. The Jira site
+    and project here are what the agent reads; the account connected for pushing is separate
+    and stays as it is."""
     team = await user_team(store, user)
     current = await store.settings(team.id)
     github = repos(body.github, current.github.repos, "GitHub repository", github_path)
@@ -205,10 +206,6 @@ async def write_connectors(
     jira = current.jira.model_copy(
         update={"site": site_host(text(body.jira.site)), "project": jira_key(body.jira.project)}
     )
-    account = await store.jira_account(team.id)
-    if account is not None and jira.site != account.site:
-        await store.delete_jira_account(team.id)
-        jira = jira.model_copy(update={"connected": False, "account_email": None})
     return await store.save_settings(
         current.model_copy(
             update={
@@ -287,7 +284,8 @@ async def connect_jira_account(
     """Connects the team's Jira account; admins only. The email and API token are checked
     against the site, and the project against what that account can see, before anything is
     saved. The token is stored encrypted and never returned; approved task drafts are then
-    created as issues on the site as that account."""
+    created as issues in that project as that account. The Jira site and project the agent
+    reads (PUT /settings/connectors) are not changed."""
     email, token = body.email.strip(), body.api_token.strip()
     project = jira_key(body.project)
     if not email or not token or project is None:
@@ -330,6 +328,7 @@ async def connect_jira_account(
         JiraAccount(
             team_id=team.id,
             site=access.site,
+            project=project,
             email=email,
             sealed_token=seal(token, secret),
             connected_by=user.id,
@@ -338,7 +337,12 @@ async def connect_jira_account(
     )
     current = await store.settings(team.id)
     jira = current.jira.model_copy(
-        update={"site": access.site, "project": project, "connected": True, "account_email": email}
+        update={
+            "connected": True,
+            "account_email": email,
+            "account_site": access.site,
+            "account_project": project,
+        }
     )
     return await store.save_settings(current.model_copy(update={"jira": jira}))
 
@@ -347,11 +351,19 @@ async def connect_jira_account(
 async def disconnect_jira_account(
     user: Person = Depends(require_admin), store: Store = Depends(get_store)
 ) -> TeamSettings:
-    """Forgets the team's Jira account and its token; admins only. The site and project stay."""
+    """Forgets the team's Jira account and its token; admins only. The Jira site and project
+    the agent reads stay."""
     team = await user_team(store, user)
     await store.delete_jira_account(team.id)
     current = await store.settings(team.id)
-    jira = current.jira.model_copy(update={"connected": False, "account_email": None})
+    jira = current.jira.model_copy(
+        update={
+            "connected": False,
+            "account_email": None,
+            "account_site": None,
+            "account_project": None,
+        }
+    )
     return await store.save_settings(current.model_copy(update={"jira": jira}))
 
 

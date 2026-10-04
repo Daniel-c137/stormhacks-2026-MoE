@@ -587,7 +587,9 @@ function Tasks({
   const included = tasks.filter((t) => t.include);
   const jira = settings?.jira;
   const github = settings?.github;
-  const destinationLabel = destination === "jira" ? (jira?.project ?? "Jira") : (github?.repos[0]?.path ?? "GitHub");
+  // Tasks go to the connected Jira account's own project, which may not be the one the agent reads.
+  const destinationLabel =
+    destination === "jira" ? (jira?.account_project ?? jira?.project ?? "Jira") : (github?.repos[0]?.path ?? "GitHub");
   const keys = tasks.flatMap((t) => (t.key ? [t.key] : []));
 
   const commit = (task: TaskDraft) => {
@@ -641,7 +643,7 @@ function Tasks({
       pushed={pushed}
       destination={destination}
       destinationLabel={destinationLabel}
-      keyUrl={(task) => urls[task.id] ?? (destination === "jira" ? jiraIssueUrl(jira?.site, task.key) : null)}
+      keyUrl={(task) => urls[task.id] ?? task.url ?? (destination === "jira" ? jiraIssueUrl(jira?.site, task.key) : null)}
       status={status}
       onChange={(task) => setTasks((list) => list.map((t) => (t.id === task.id ? task : t)))}
       onCommit={commit}

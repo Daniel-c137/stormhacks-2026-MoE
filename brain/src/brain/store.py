@@ -44,11 +44,13 @@ class ReportAudio(NamedTuple):
 
 
 class JiraAccount(BaseModel):
-    """The Atlassian account an admin connected for a team's pushes. The API token is kept only
-    sealed (brain.sealing); it never leaves the brain."""
+    """The Atlassian account an admin connected for a team's pushes, and the project its issues
+    are created in. The API token is kept only sealed (brain.sealing); it never leaves the
+    brain."""
 
     team_id: str
     site: str  # name.atlassian.net
+    project: str
     email: str
     sealed_token: str
     connected_by: str  # the admin's person id

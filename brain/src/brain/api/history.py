@@ -225,19 +225,14 @@ CONNECT_AGAIN = (
 
 
 def connected_pusher(
-    account: JiraAccount,
-    project: str | None,
-    config: Settings,
-    transport: httpx.AsyncBaseTransport | None,
+    account: JiraAccount, config: Settings, transport: httpx.AsyncBaseTransport | None
 ) -> JiraRestPusher:
-    """The pusher for a team's connected account. 409 when the push cannot be made as it is
-    saved: no project chosen, or a token sealed under an AUTH_SECRET the server no longer has."""
-    if not project:
-        raise HTTPException(status_code=409, detail="No Jira project is chosen in Settings")
+    """The pusher for a team's connected account and its project. 409 when its token was sealed
+    under an AUTH_SECRET the server no longer has."""
     try:
         token = unseal(account.sealed_token, signing_secret(config) or "")
         access = JiraAccess(
-            site=account.site, email=account.email, api_token=token, project_key=project
+            site=account.site, email=account.email, api_token=token, project_key=account.project
         )
     except (Unsealable, ValueError):
         raise HTTPException(status_code=409, detail=CONNECT_AGAIN) from None
@@ -256,8 +251,8 @@ async def push_tasks(
 ) -> list[TaskPushResult]:
     """The only path to external writes. Runs once a human approved these drafts and destination:
     an admin, always recorded as the approver. With the team's Jira account connected, the drafts
-    become issues on its Jira site; otherwise they go to the Jira MCP server, when one is
-    configured. The meeting leaves review once every included draft has a key; a draft Jira
+    become issues in its project on its Jira site; otherwise they go to the Jira MCP server, when
+    one is configured. The meeting leaves review once every included draft has a key; a draft Jira
     rejected keeps it in review so it can be fixed and pushed again."""
     meeting = await team_meeting(store, user, meeting_id)
     if not user.is_admin:
@@ -270,7 +265,7 @@ async def push_tasks(
     account = await store.jira_account(meeting.team_id)
     pusher: TaskPusher
     if account is not None:
-        pusher = connected_pusher(account, team_settings.jira.project, config, transport)
+        pusher = connected_pusher(account, config, transport)
     else:
         try:
             pusher = make_pusher()

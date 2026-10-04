@@ -83,9 +83,9 @@ class TaskPusher:
                 results[task_id] = TaskPushResult(task_id=task_id, error="No such task draft")
             elif not draft.include:
                 results[task_id] = TaskPushResult(task_id=task_id, error="Draft is excluded")
-            elif draft.key:
+            elif draft.key:  # pushed before: its saved link, which may be to another site
                 results[task_id] = TaskPushResult(
-                    task_id=task_id, key=draft.key, url=self.url(draft.key)
+                    task_id=task_id, key=draft.key, url=draft.url or self.url(draft.key)
                 )
             else:
                 to_create.append(draft)
@@ -293,10 +293,12 @@ def raw_issues(data: object) -> list:
 
 
 def apply_results(tasks: list[TaskDraft], results: list[TaskPushResult]) -> list[TaskDraft]:
-    """Record new keys on the drafts that were just created."""
-    created = {r.task_id: r.key for r in results if r.key}
+    """Record new keys, and where their issues open, on the drafts that were just created."""
+    created = {r.task_id: r for r in results if r.key}
     return [
-        task.model_copy(update={"key": created[task.id], "jira_status": "todo"})
+        task.model_copy(
+            update={"key": created[task.id].key, "url": created[task.id].url, "jira_status": "todo"}
+        )
         if task.id in created and not task.key
         else task
         for task in tasks
