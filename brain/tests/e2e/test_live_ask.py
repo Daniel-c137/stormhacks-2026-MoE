@@ -76,6 +76,31 @@ async def test_gemini_answers_the_waitlist_question_citing_alices_moment():
 
 
 @pytest.mark.anyio
+async def test_gemini_keeps_the_version_as_written_in_the_meeting():
+    """#70: asked in the meeting, the answer keeps the version as the evidence writes it."""
+    team, people, meeting, segments, store, memory, llm = await indexed_standup()
+    bob = people[1]
+
+    answer = await ToolOrchestrator(llm, store, settings=settings, memory=memory).ask(
+        Question(
+            id="q-live-version",
+            team_id=team.id,
+            text="What did we decide about the waitlist email?",
+            asker_id=bob.id,
+            asker_name=bob.name,
+            visibility="public",
+            meeting_id=meeting.id,
+            recent=segments,
+        )
+    )
+
+    print(f"answered by {llm.last_model}: {answer.text}")
+    print(f"sources: {answer.sources}; unavailable: {answer.unavailable}")
+    assert "0.9.4" in answer.text
+    assert "zero point" not in answer.text.casefold()
+
+
+@pytest.mark.anyio
 async def test_gemini_answers_a_home_follow_up_without_meta_phrases():
     team, people, meeting, segments, store, memory, llm = await indexed_standup()
     bob = people[1]

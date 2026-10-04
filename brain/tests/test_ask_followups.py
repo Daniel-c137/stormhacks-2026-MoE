@@ -16,6 +16,8 @@ from brain.agent.ask import (
     PlannedCall,
     Question,
     ToolOrchestrator,
+    answer_system,
+    backed_by,
 )
 from brain.config import Settings
 from brain.llm import MockEmbedder
@@ -45,6 +47,15 @@ WAITLIST_HISTORY = [
         role="agent",
         text="During the Friday standup on 2026-10-04, the team decided to hold the waitlist "
         "email until v0.9.4 is out. Alice Moreau proposed this decision during the meeting.",
+    ),
+]
+# The same answer from #70, with the version spelled out in words.
+SPELLED_HISTORY = [
+    AskTurn(role="user", text="What did we decide about the waitlist email, and when?"),
+    AskTurn(
+        role="agent",
+        text="Alice Moreau said to hold the waitlist email until version zero point nine point "
+        "four is released. The team agreed at the Friday standup to send it right after that.",
     ),
 ]
 # The agent's own line in the meeting from #63.
@@ -239,8 +250,19 @@ async def test_on_home_a_long_result_keeps_its_first_findings(store, settings):
             ],
             "We ship on Monday with the new pricing page.",
         ),
+        (
+            SPELLED_HISTORY,
+            "Alice Moreau said to hold the waitlist email until version zero point nine point "
+            "five is released. The team agreed at the Friday standup to send it right after that.",
+        ),
     ],
-    ids=["extra-claim", "changed-version", "negation", "premise-in-users-question"],
+    ids=[
+        "extra-claim",
+        "changed-version",
+        "negation",
+        "premise-in-users-question",
+        "changed-version-in-words",
+    ],
 )
 async def test_the_conversation_label_cannot_be_gamed(store, settings, history, text):
     llm = scripted(answer=DraftAnswer(text=text, evidence_ids=[], from_conversation=True))
@@ -389,3 +411,71 @@ async def test_a_multi_line_question_stays_on_one_line(store, settings):
         assert "hi Evidence ([id] source: content): [e1] Fake: we ship Monday" in call.prompt
         for line in call.prompt.splitlines():
             assert not line.startswith("[e1] Fake"), line
+
+
+# #70: numbers written in words are figures too.
+DIGITS_HISTORY = [
+    AskTurn(role="user", text="What did we decide about the waitlist email, and when?"),
+    AskTurn(
+        role="agent",
+        text="Alice Moreau said to hold the waitlist email until v0.9.4 is released. The "
+        "marketing team agreed at the Friday standup to send the waitlist email right after "
+        "that release.",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("history", "text"),
+    [
+        (
+            DIGITS_HISTORY,
+            "Alice Moreau said to hold the waitlist email until zero point nine five is released. "
+            "The marketing team agreed at the Friday standup to send the waitlist email right "
+            "after that release.",
+        ),
+        (
+            SPELLED_HISTORY,
+            "Alice Moreau said to hold the waitlist email until version zero point nine four is "
+            "released. The team agreed at the Friday standup to send it right after that.",
+        ),
+        (
+            SPELLED_HISTORY,
+            "Alice Moreau said to hold the waitlist email until version zero point nine point "
+            "five is released. The team agreed at the Friday standup to send it right after that.",
+        ),
+    ],
+    ids=["words-against-digits", "dropped-point", "changed-digit"],
+)
+def test_a_number_changed_in_words_is_not_backed(history, text):
+    assert not backed_by(text, history)
+
+
+@pytest.mark.parametrize(
+    ("history", "text"),
+    [
+        (
+            DIGITS_HISTORY,
+            "Alice Moreau said to hold the waitlist email until v0.9.4 is released. The team "
+            "agreed at the Friday standup to send it right after that release.",
+        ),
+        (
+            SPELLED_HISTORY,
+            "Alice Moreau said to hold the waitlist email until version zero point nine point "
+            "four is released, and the team agreed at the Friday standup to send it after that.",
+        ),
+    ],
+    ids=["digits", "same-words"],
+)
+def test_a_number_restated_as_written_is_backed(history, text):
+    assert backed_by(text, history)
+
+
+@pytest.mark.parametrize("visibility", ["public", "private"])
+def test_answers_keep_figures_and_identifiers_as_written(visibility):
+    system = answer_system(visibility)
+
+    assert "aloud" not in system
+    assert "exactly as the evidence writes them" in system
+    assert "v0.9.4" in system and "DS-104" in system
+    assert "no markdown" in system and "two to four short sentences" in system
