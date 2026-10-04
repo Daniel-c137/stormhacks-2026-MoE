@@ -1,5 +1,5 @@
 """Catching up late joiners: who is in the room on the meeting's clock, and the one private chat
-message from Polaris that someone joining 5 minutes or more late (or coming back after 5 minutes
+message from Polaris that someone joining 2 minutes or more late (or coming back after 2 minutes
 or more away) gets. Never the agent, never twice for one absence, never someone on time, never the
 people already there when the worker (re)starts; never broadcast, spoken or stored."""
 
@@ -25,21 +25,21 @@ CAUGHT_UP = "Catching you up (00:00 to 07:00):\n- Refunds ship Friday. (01:30)\n
 # presence on its own
 
 
-def test_catching_up_starts_five_minutes_in():
-    assert CATCH_UP_AFTER_SECONDS == 300
+def test_catching_up_starts_two_minutes_in():
+    assert CATCH_UP_AFTER_SECONDS == 120
 
 
 def test_an_on_time_joiner_is_not_caught_up_and_a_late_one_is_from_the_start():
     presence = Presence()
 
     assert presence.joined("u-alex", 60) is None
-    assert presence.joined("u-sarah", 299.9) is None
-    assert presence.joined("u-bob", 300) == Span(0, 300)
+    assert presence.joined("u-sarah", 119.9) is None
+    assert presence.joined("u-bob", 120) == Span(0, 120)
     assert presence.joined("u-eve", 1200) == Span(0, 1200)
     assert all(presence.present(p) for p in ("u-alex", "u-sarah", "u-bob", "u-eve"))
 
 
-def test_a_rejoin_after_five_minutes_away_covers_only_the_absence_once():
+def test_a_rejoin_after_two_minutes_away_covers_only_the_absence_once():
     presence = Presence()
     presence.joined("u-alex", 10)
 
@@ -55,7 +55,7 @@ def test_a_short_blip_is_not_an_absence_worth_catching_up_on():
 
     presence.left("u-alex", 400)
 
-    assert presence.joined("u-alex", 699) is None
+    assert presence.joined("u-alex", 519) is None
     assert presence.present("u-alex")
 
 
@@ -207,7 +207,7 @@ def private_messages(bus: FakeBus) -> list[tuple[ChatMessage, list[str] | None]]
 
 
 async def test_an_on_time_joiner_gets_nothing(agent, bus, brain, clock):
-    clock.now = 120
+    clock.now = 90
 
     agent.on_participant_joined("u-sarah")
     await settle()
@@ -239,7 +239,7 @@ async def test_a_late_joiner_gets_one_private_message_from_polaris_only(agent, b
     assert brain.chat == []
 
 
-async def test_a_rejoin_after_five_minutes_covers_only_what_they_missed(agent, bus, brain, clock):
+async def test_a_rejoin_after_two_minutes_covers_only_what_they_missed(agent, bus, brain, clock):
     clock.now = 30
     agent.on_participant_joined("u-alex")
     clock.now = 400
