@@ -11,6 +11,7 @@ from contracts import Meeting, Person, Team
 from ..auth import AuthNotConfigured, InvalidToken, KeysUnavailable, TokenVerifier
 from ..config import Settings
 from ..jira import JiraPusher, jira_config
+from ..llm import LLM, LLMUnavailable, make_llm
 from ..store import NotFound, Store
 
 
@@ -31,6 +32,14 @@ def get_http_transport() -> httpx.AsyncBaseTransport | None:
 async def get_store() -> Store:
     """The Supabase store. Until it exists, tests and local runs override this dependency."""
     not_implemented()
+
+
+async def get_llm(settings: Settings = Depends(get_settings)) -> LLM:
+    """Gemini. Unconfigured is a clear 503, never a silent mock; tests override this."""
+    try:
+        return make_llm(settings)
+    except LLMUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e)) from None
 
 
 def get_verifier(request: Request, settings: Settings = Depends(get_settings)) -> TokenVerifier:

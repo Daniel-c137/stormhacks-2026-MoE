@@ -26,6 +26,13 @@ class Agenda(BaseModel):
     updated_at: datetime | None = None  # last human edit
 
 
+class AgendaSuggestions(BaseModel):
+    """Proposed items, not saved; a person adds the ones they want."""
+
+    items: list[AgendaItem]
+    unavailable: list[str] = []  # sources that were missing or failed; never papered over
+
+
 class AgendaNudge(BaseModel):
     """A reminder that an agenda item has not come up yet."""
 
