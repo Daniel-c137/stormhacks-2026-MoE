@@ -177,6 +177,27 @@ async def test_a_configured_language_is_pinned_instead_of_detected():
     assert "include_language_detection" not in query
 
 
+async def test_scribes_own_silence_threshold_is_kept_unless_one_is_configured():
+    scribe = FakeScribe()
+    mic = Mic()
+    mic.end()
+
+    await collect(stt(Connector(scribe)).stream(mic), [])
+
+    assert "vad_silence_threshold_secs" not in parse_qs(urlsplit(scribe.url).query)
+
+
+async def test_a_configured_silence_threshold_commits_utterances_sooner():
+    scribe = FakeScribe()
+    mic = Mic()
+    mic.end()
+
+    await collect(stt(Connector(scribe), vad_silence_seconds=0.8).stream(mic), [])
+
+    query = parse_qs(urlsplit(scribe.url).query)
+    assert query["vad_silence_threshold_secs"] == ["0.8"]
+
+
 async def test_a_custom_api_url_becomes_its_websocket_url():
     scribe = FakeScribe()
     mic = Mic()

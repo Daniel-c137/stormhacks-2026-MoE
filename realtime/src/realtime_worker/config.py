@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     # ISO 639-1 language Scribe is pinned to. A meeting with live translation on (#106) lets
     # Scribe detect each utterance's language instead.
     elevenlabs_stt_language: str = "en"
+    # Seconds of silence after which Scribe ends an utterance and sends its final. Scribe's own
+    # (about 1.5 s) made Polaris start working 1.8 s after a question ended; 1.0 makes it 1.3 s.
+    # Shorter still splits a sentence with a pause in it into more captions. Scribe refuses a
+    # session outside 0.3 to 3.0.
+    elevenlabs_vad_silence_seconds: float = Field(default=1.0, ge=0.3, le=3.0)
     # With translation on, a sentence still going after this long is translated so far, again
     # each period while it grows.
     translation_provisional_seconds: float = Field(default=1.5, gt=0)
