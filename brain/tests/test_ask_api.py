@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from brain.agent.ask import FROM_CONVERSATION, UNVERIFIED, DraftAnswer, PlannedCall
 from brain.agent.team_tools import TeamToolbox
-from brain.api.deps import get_llm, get_memory, get_settings
+from brain.api.deps import get_llm, get_memory, get_settings, get_store
 from brain.config import Settings
 from brain.llm import MockEmbedder
 from brain.memory import InMemoryMemoryStore, MeetingMemory, UnusableMemory
@@ -50,6 +50,7 @@ def indexed_standup(client: TestClient, memory) -> dict:
     """A team meeting holding the standup's transcript, indexed for search."""
     meeting = create(client, "Friday standup")
     segments = [s.model_copy(update={"meeting_id": meeting["id"]}) for s in STANDUP.segments]
+    asyncio.run(client.app.dependency_overrides[get_store]().add_segments(meeting["id"], segments))
     asyncio.run(memory.index_meeting(TEAM.id, meeting["id"], segments))
     return meeting
 

@@ -93,7 +93,7 @@ uv run world-seed --snapshot demo                   # the DropSubs team, logins,
 uv run world-seed --snapshot demo --reset           # remove the seeded team first (logins are kept)
 ```
 
-On Gemini's free tier, set `WORLD_SEED_EMBEDS_PER_MINUTE=90`. The free tier also allows only 1,000 embedded texts a day, which today's chunking uses up after one or two past meetings (#90); a re-run the next day carries on where the last one stopped.
+On Gemini's free tier, set `WORLD_SEED_EMBEDS_PER_MINUTE=90`. The free tier also allows only 1,000 embedded texts a day. Each past meeting embeds about 35 windows of its transcript plus its summary, decisions and tasks, so the four meetings fit in one day; if a run is stopped by the quota anyway, a re-run the next day carries on where the last one stopped.
 
 ## Deploying to a server
 

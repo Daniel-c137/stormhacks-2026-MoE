@@ -35,7 +35,9 @@ def memory(embedder) -> MeetingMemory:
     return MeetingMemory(embedder, InMemoryMemoryStore())
 
 
-async def test_a_question_finds_the_turn_that_answers_it(memory):
+async def test_a_question_finds_the_window_that_answers_it(embedder):
+    # Windows small enough that each of the standup's turns is its own.
+    memory = MeetingMemory(embedder, InMemoryMemoryStore(), max_chunk_chars=120)
     await memory.index_meeting("t-1", STANDUP.meeting_id, STANDUP.segments)
 
     hits = await memory.search("t-1", REFUND_QUESTION, k=3)
@@ -56,7 +58,7 @@ async def test_documents_and_queries_are_embedded_with_their_own_task(memory, em
 
     (documents, document_task), (queries, query_task) = embedder.calls
     assert document_task == "document"
-    assert len(documents) == 5 + 2  # five people's turns, the summary and one task
+    assert len(documents) == 1 + 2  # one window of the people's turns, the summary and a task
     assert (queries, query_task) == ([REFUND_QUESTION], "query")
 
 
@@ -76,7 +78,7 @@ async def test_indexing_a_meeting_again_replaces_what_it_had(memory):
 
     hits = await memory.search("t-1", "task", k=50)
     assert [h.chunk.text for h in hits if h.chunk.kind == "task"] == ["Task: Refund users"]
-    assert len(hits) == 5 + 2
+    assert len(hits) == 1 + 2
 
 
 async def test_deleting_the_transcript_keeps_the_report(memory):
@@ -115,7 +117,9 @@ async def test_the_standup_round_trips_through_postgres(memory_pool, embedder):
 
     hits = await memory.search("t-1", REFUND_QUESTION, k=3)
 
-    assert hits[0].chunk.speaker_id == "p-bob"
+    top = hits[0].chunk
+    assert top.kind == "transcript" and "Bob Okafor: The double-charge fix" in top.text
+    assert (top.speaker_id, top.t_start, top.t_end) == (None, 0, 47)
     assert await memory.search("t-2", REFUND_QUESTION) == []
 
 
@@ -160,5 +164,5 @@ async def test_indexing_again_drops_agent_chunks_indexed_before(either_memory, e
     await either_memory.index_meeting("t-1", STANDUP.meeting_id, STANDUP.segments)
 
     hits = await either_memory.search("t-1", AGENTS_LINE, k=50)
-    assert len(hits) == 5
+    assert len(hits) == 1
     assert all(h.chunk.speaker_id != AGENT_PARTICIPANT_ID for h in hits)
