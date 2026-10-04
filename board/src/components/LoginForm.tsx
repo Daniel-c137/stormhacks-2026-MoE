@@ -2,8 +2,9 @@
 
 import { type AuthOptions, identity } from "@moe/contracts";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useEffect, useState } from "react";
+import { type CSSProperties, type FormEvent, useEffect, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
+import { Mark } from "@/components/ui/Mark";
 import { waitText } from "@/lib/api";
 import { apiBase, apiConfigured } from "@/lib/apiUrl";
 import { LoginError, authOptions, finishGoogleSignIn, googleSignInUrl, login, signUp } from "@/lib/auth";
@@ -297,14 +298,21 @@ export function LoginForm() {
   );
 }
 
+/** The logo with Reyhaneh's animation (globals.css): the star spins, then a hop passes through
+ * the letters. Read once as the product name; reduced motion turns the animation off. */
 function Brand() {
   return (
-    <div className={styles.brand}>
-      <svg viewBox="-50 -50 100 100" aria-hidden="true">
-        <path d="M0 -46 Q5 -5 40 0 Q5 5 0 46 Q-5 5 -40 0 Q-5 -5 0 -46Z" fill="none" stroke="currentColor" strokeWidth="3" strokeLinejoin="round" />
-        <circle r="3.5" fill="currentColor" />
-      </svg>
-      <span>{identity.product_name}</span>
+    <div className={`${styles.brand} login-brand`}>
+      <span className="mark-slot">
+        <Mark size={34} />
+      </span>
+      <span className="wordmark" role="img" aria-label={identity.product_name}>
+        {[...identity.product_name].map((ch, i) => (
+          <span key={i} className="wordmark-ch" style={{ "--i": i } as CSSProperties} aria-hidden="true">
+            {ch}
+          </span>
+        ))}
+      </span>
     </div>
   );
 }
