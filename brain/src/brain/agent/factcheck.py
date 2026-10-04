@@ -14,10 +14,12 @@ sensitivity is quiet. Each tick:
 5. Verdicts: one model call for the batch. Only evidence that exists counts, confidence is
    clamped to [0, 1], and a verdict without evidence is unknown.
 
-A confident, high-severity contradiction is shown to the room and raises the hand, a visual cue at
-most once per interrupt_minutes. A weaker one goes only to the person who said it. Supported and
-unverified claims are shown only at eager. Private checks are never stored, indexed or logged, and
-the agent never speaks on its own.
+Nothing goes to the room. Every check returned is addressed (recipient_id) to the person who
+made the claim, and the worker sends it to them alone as a private chat message: each
+contradiction, and at eager a claim that could not be verified. Nobody said anything wrong when a
+claim is supported, so it is never sent. A confident, high-severity contradiction, and at eager a
+supported claim, is kept for the write-up without its recipient; the rest is never stored,
+indexed or logged, and the agent never speaks a check.
 """
 
 import math
@@ -38,7 +40,6 @@ from brain.memory import MeetingMemory
 from brain.report.extraction import by_agent, clock
 from brain.store import Conflict, FactCheckState, Store
 from contracts import (
-    AgentState,
     CodeSnippet,
     FactCheck,
     FactCheckResponse,
@@ -71,14 +72,13 @@ MAX_LOOKUPS = 6  # tool calls per batch, across its claims
 MAX_EVIDENCE = 30
 MAX_CODE_QUERIES = 2
 MAX_SNIPPETS = 3  # per code query
-HAND_CONFIDENCE = 0.8  # a high-severity contradiction at least this sure raises the hand
-MAX_REASON = 160
+KEEP_CONFIDENCE = 0.8  # a high-severity contradiction at least this sure is kept for the report
+MAX_FINDING = 240
 
 NO_CODE_SEARCH = "Code search is not available yet"
 # Code is looked up through each claim's code_query, so the toolbox's own code tool stays off
 # the fact-check menu and is never run from a plan.
 OWN_CODE_TOOL = "github_code"
-HAND_DETAIL = "Raised hand: a claim conflicts with the team's records"
 
 
 # the claim filter
@@ -172,6 +172,12 @@ class ClaimVerdict(BaseModel):
     evidence_ids: list[str] = Field(
         default=[], description="Ids of every evidence item the verdict relies on, e.g. ['e2']."
     )
+    finding: str = Field(
+        default="",
+        description="One short, factual sentence on what the evidence shows about the claim, "
+        "e.g. 'PR #41 was merged on 30 September, after the latest release (v0.9.3, 28 "
+        "September)'. No evidence ids.",
+    )
 
 
 class FactCheckVerdicts(BaseModel):
@@ -190,13 +196,14 @@ class Settled(BaseModel):
     verdict: Verdict
     confidence: float
     severity: Severity
+    finding: str = ""
     sources: list[Source] = []
     snippets: list[CodeSnippet] = []
 
 
 class FactChecker:
     """Checks a live meeting's claims with the team's read-only tools. It writes only its own
-    progress and the public checks, for the report; never to memory, Jira or GitHub.
+    progress and the checks worth keeping, for the report; never to memory, Jira or GitHub.
 
     `llm` is a model, or a factory called only once a claim needs checking, so a quiet team or a
     stretch of small talk never needs one. `code` adds code evidence when code search is set up.
@@ -253,53 +260,35 @@ class FactChecker:
         labelled = {f"c{n}": s for n, s in enumerate(claims[-MAX_CLAIMS[sensitivity] :], 1)}
         settled = await self._check(meeting, labelled, sensitivity)
 
-        checks: list[FactCheck] = []
-        hand: FactCheck | None = None
+        checks: list[FactCheck] = []  # each sent only to whoever made the claim
+        kept: list[FactCheck] = []  # for the write-up
         for label, segment in labelled.items():
             if label not in settled:
                 continue
             found = settled[label]
-            loud = (
+            check = fact_check(segment, found)
+            if found.verdict == "contradicted" or (
+                found.verdict == "unknown" and sensitivity == "eager"
+            ):
+                checks.append(check)
+            if (
                 found.verdict == "contradicted"
                 and found.severity == "high"
-                and found.confidence >= HAND_CONFIDENCE
-            )
-            if loud or (found.verdict == "supported" and sensitivity == "eager"):
-                check = fact_check(segment, found)
-            elif found.verdict == "contradicted" or sensitivity == "eager":
-                check = fact_check(segment, found, recipient_id=segment.speaker_id)
-            else:
-                continue
-            checks.append(check)
-            if loud and (hand is None or check.confidence > hand.confidence):
-                hand = check
+                and found.confidence >= KEEP_CONFIDENCE
+            ) or (found.verdict == "supported" and sensitivity == "eager"):
+                kept.append(check.model_copy(update={"recipient_id": None}))
 
-        cooled = state.hand_raised_at is None or (
-            now - state.hand_raised_at >= team.interrupt_minutes * 60
-        )
-        raised = hand is not None and cooled
-        if raised:
-            checks = [
-                c.model_copy(update={"raised_hand": True}) if c is hand else c for c in checks
-            ]
         changes = {"checked_until": until, "checked_at": now}
-        if raised:
-            changes["hand_raised_at"] = now
         if not await self._save(state.model_copy(update=changes), since):
             return FactCheckResponse()  # another replica checked this stretch first
 
-        for check in checks:
-            if check.visibility == "public":
-                await self.store.add_fact_check(meeting.id, check)
+        for check in kept:
+            await self.store.add_fact_check(meeting.id, check)
         snippets: list[CodeSnippet] = []
         for found in settled.values():
             snippets += [s for s in found.snippets if s not in snippets]
         cited = {i for c in checks for i in c.snippet_ids}
-        return FactCheckResponse(
-            checks=checks,
-            agent_state=hand_state(next(c for c in checks if c.raised_hand)) if raised else None,
-            snippets=[s for s in snippets if s.id in cited],
-        )
+        return FactCheckResponse(checks=checks, snippets=[s for s in snippets if s.id in cited])
 
     async def _save(self, state: FactCheckState, since: float | None) -> bool:
         try:
@@ -430,14 +419,14 @@ def settle(draft: ClaimVerdict, evidence: Sequence[Evidence]) -> Settled:
         verdict=draft.verdict,
         confidence=min(1.0, max(0.0, confidence)),
         severity=draft.severity,
+        finding=clip(draft.finding, MAX_FINDING),
         sources=sources,
         snippets=snippets,
     )
 
 
-def fact_check(
-    segment: TranscriptSegment, found: Settled, *, recipient_id: str | None = None
-) -> FactCheck:
+def fact_check(segment: TranscriptSegment, found: Settled) -> FactCheck:
+    """Addressed to whoever made the claim."""
     return FactCheck(
         id=str(uuid4()),
         claim=clip(segment.text),
@@ -445,21 +434,12 @@ def fact_check(
         verdict=found.verdict,
         confidence=found.confidence,
         severity=found.severity,
+        finding=found.finding,
         snippet_ids=[s.id for s in found.snippets],
         sources=found.sources,
-        visibility="private" if recipient_id else "public",
-        recipient_id=recipient_id,
+        recipient_id=segment.speaker_id,
         t=segment.t_start,
         created_at=datetime.now(UTC),
-    )
-
-
-def hand_state(check: FactCheck) -> AgentState:
-    reason = f"{check.speaker_name}: {check.claim}"
-    if len(reason) > MAX_REASON:
-        reason = reason[: MAX_REASON - 1] + "…"
-    return AgentState(
-        state="hand_raised", detail=HAND_DETAIL, hand_urgency="critical", hand_reason=reason
     )
 
 
@@ -492,8 +472,8 @@ Rules:
 def verdict_system() -> str:
     agent = get_identity().agent_name
     return f"""You are {agent}, the assistant of a software team. You check claims people made \
-in a live meeting against numbered evidence from the team's records. Your verdicts are shown as \
-small notes; nobody hears them.
+in a live meeting against numbered evidence from the team's records. Each verdict goes, as a \
+short private chat message, only to the person who made the claim; nobody else sees or hears it.
 
 Rules:
 - Give one verdict per claim label, using only the numbered evidence.
@@ -502,6 +482,8 @@ Rules:
 - Merged is not released: a pull request merged after the latest release was published is not
   in any release yet.
 - Put the id of every evidence item the verdict relies on in evidence_ids.
+- finding is one short, factual sentence on what the evidence shows about the claim, with dates,
+  numbers or statuses where they settle it; no evidence ids and no opinion of the speaker.
 - confidence is 0 to 1: how sure the evidence makes you.
 - severity is high when acting on a wrong claim could cause real harm or a bad decision now:
   announcing or relying on something not released, customer-facing behaviour, security, money,

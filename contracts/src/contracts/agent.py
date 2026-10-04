@@ -97,16 +97,19 @@ class QuestionAnswered(BaseModel):
 
 
 class FactCheck(BaseModel):
+    """A claim checked against the team's records during a live meeting. It is never shown to the
+    room: the agent sends it as a private chat message to recipient_id, the participant who made
+    the claim. The copy kept for the write-up has no recipient_id."""
+
     id: str
     claim: str
     speaker_name: str
     verdict: Verdict
     confidence: float
     severity: Severity
+    finding: str = ""  # what the records show, in one short sentence
     snippet_ids: list[str] = []
     sources: list[Source] = []
-    raised_hand: bool = False
-    visibility: Visibility = "public"
-    recipient_id: str | None = None  # set when visibility is private
+    recipient_id: str | None = None  # the claimant's participant id
     t: float | None = None
     created_at: datetime | None = None

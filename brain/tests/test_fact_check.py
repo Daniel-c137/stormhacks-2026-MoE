@@ -378,7 +378,7 @@ async def test_confidence_is_clamped_to_zero_and_one(store, fake_jira, github):
     llm = scripted(
         plan(check("c1", READ_41, RELEASES_CALL), check("c2", RELEASES_CALL)),
         verdict("c1", confidence=1.7),
-        verdict("c2", "supported", confidence=-0.3, cite=("dropsubs/app@v0.9.3",)),
+        verdict("c2", "unknown", confidence=-0.3, cite=("dropsubs/app@v0.9.3",)),
     )
 
     response = await checker(llm, store, fake_jira, github).tick(meeting, 60)

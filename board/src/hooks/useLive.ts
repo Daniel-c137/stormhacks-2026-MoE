@@ -8,13 +8,13 @@ import {
   type AgendaNudge,
   type AgentState,
   type ChatMessage,
-  type FactCheck,
   type Participant,
   type ResponseCard,
   type StagePayload,
   Topic,
   type TopicPayloads,
   type TranscriptSegment,
+  identity,
 } from "@moe/contracts";
 import { useChat as useLiveKitChat, useRoomContext } from "@livekit/components-react";
 import { type RemoteParticipant, RoomEvent } from "livekit-client";
@@ -158,18 +158,27 @@ export function useChat(meetingId: string): { messages: ChatMessage[]; send: (te
   return { messages, send: sendText };
 }
 
-/** Private messages between two people. Sent to one participant only; never stored anywhere. */
+/** Private messages to this participant: from another person, or a fact-check from the agent about
+ * something they said. Sent to one participant only; never stored anywhere. */
 export function usePrivateChat(): { messages: ChatMessage[]; send: (message: ChatMessage) => Promise<void> } {
   const room = useRoomContext();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   useTopic(
     Topic.PRIVATE_CHAT,
     (message, from) => {
-      // The sender is whoever LiveKit says sent it, not what the payload claims.
+      // The sender is whoever LiveKit says sent it, not what the payload claims: a message is the
+      // agent's only when it comes from the agent's own identity.
       if (!from || message.recipient_id !== room.localParticipant.identity) return;
+      const fromAgent = from.identity === AGENT_PARTICIPANT_ID;
       setMessages((list) => [
         ...list,
-        { ...message, sender_id: from.identity, sender_name: from.name || from.identity, is_agent: false, visibility: "private" },
+        {
+          ...message,
+          sender_id: from.identity,
+          sender_name: fromAgent ? identity.agent_name : from.name || from.identity,
+          is_agent: fromAgent,
+          visibility: "private",
+        },
       ]);
     },
     false,
@@ -192,18 +201,6 @@ export function useResponseCards(): ResponseCard[] {
     setCards((list) => (list.some((c) => c.id === card.id) ? list.map((c) => (c.id === card.id ? card : c)) : [...list, card])),
   );
   return cards;
-}
-
-/** Public fact-checks plus private ones addressed to this participant, oldest first. The worker
- * sends a private one only to its recipient; one addressed to anyone else is dropped here too. */
-export function useFactChecks(): FactCheck[] {
-  const room = useRoomContext();
-  const [checks, setChecks] = useState<FactCheck[]>([]);
-  useTopic(Topic.FACT_CHECK, (check) => {
-    if (check.visibility !== "public" && check.recipient_id !== room.localParticipant.identity) return;
-    setChecks((list) => (list.some((c) => c.id === check.id) ? list.map((c) => (c.id === check.id ? check : c)) : [...list, check]));
-  });
-  return checks;
 }
 
 /** The meeting's agenda: the saved one, loaded once on joining so a late joiner sees it, then each
