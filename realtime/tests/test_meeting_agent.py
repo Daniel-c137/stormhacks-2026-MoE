@@ -149,6 +149,7 @@ class FakeTranscription:
     def __init__(self):
         self.armed: list[str] = []
         self.cancelled: list[str] = []
+        self.stopped_listening: list[str] = []
         self.recent = [segment("Let's talk refunds.")]
 
     def arm_ask(self, participant_id: str) -> None:
@@ -157,6 +158,10 @@ class FakeTranscription:
     def cancel_ask(self, participant_id: str) -> bool:
         self.cancelled.append(participant_id)
         return participant_id in self.armed
+
+    def cancel_listening(self, participant_id: str) -> bool:
+        self.stopped_listening.append(participant_id)
+        return True
 
     def recent_finals(self) -> list[TranscriptSegment]:
         return list(self.recent)
@@ -382,6 +387,105 @@ async def test_the_question_after_an_ask_moves_from_listening_to_working(agent, 
     await agent.on_invocation(invocation(via="ask"))
 
     assert bus.states() == ["capturing", "working", "hand_raised"]
+
+
+# hearing its name: Polaris listens as soon as someone calls it
+
+
+ALEX = {"u-alex": "Alex Chen"}
+SARAH = {"u-sarah": "Sarah Kim"}
+
+
+def details(bus: FakeBus) -> list[str]:
+    return [p.detail for p, _ in bus.on(Topic.AGENT_STATE)]
+
+
+async def test_hearing_its_name_shows_polaris_listening_to_the_speaker(agent, bus):
+    await agent.on_listening(ALEX)
+
+    assert bus.states() == ["capturing"]
+    assert details(bus) == ["Listening to Alex Chen"]
+    assert all(to is None for _, to in bus.on(Topic.AGENT_STATE))
+
+
+async def test_listening_ends_when_nobody_is_calling_polaris_any_more(agent, bus):
+    await agent.on_listening(ALEX)
+    await agent.on_listening({})
+
+    assert bus.states() == ["capturing", "idle"]
+
+
+async def test_the_question_moves_listening_straight_to_working(agent, bus):
+    """The worker hands on the question and the end of listening together: never idle between."""
+    await agent.on_listening(ALEX)
+
+    await asyncio.gather(agent.on_invocation(invocation()), agent.on_listening({}))
+
+    assert bus.states() == ["capturing", "working", "hand_raised"]
+
+
+async def test_listening_while_an_answer_waits_goes_back_to_the_raised_hand(agent, bus):
+    await card_for(agent, bus)
+    await agent.on_listening(SARAH)
+    await agent.on_listening({})
+
+    assert bus.states() == ["working", "hand_raised", "capturing", "hand_raised"]
+
+
+async def test_someone_calling_polaris_while_it_works_is_listened_to_once_the_answer_is_in(
+    agent, bus, brain
+):
+    answered = asyncio.Event()
+    invoke = brain.invoke
+
+    async def slow_invoke(inv, recent):
+        await answered.wait()
+        return await invoke(inv, recent)
+
+    brain.invoke = slow_invoke
+    working = asyncio.create_task(agent.on_invocation(invocation()))
+    await until(lambda: bus.states() == ["working"])
+    await agent.on_listening(SARAH)
+    assert bus.states() == ["working"]
+
+    answered.set()
+    await working
+
+    assert bus.states() == ["working", "capturing"]
+    assert details(bus)[-1] == "Listening to Sarah Kim"
+
+
+async def test_someone_calling_polaris_while_it_speaks_is_listened_to_once_it_stops(
+    agent, bus, speaker
+):
+    card = await card_for(agent, bus)
+    speaker.hold = asyncio.Event()
+    speaking = asyncio.create_task(
+        bus.deliver(Topic.RESPONSE_ACTION, act(card, "speak"), "u-sarah")
+    )
+    await until(lambda: bus.states()[-1] == "speaking")
+    await agent.on_listening(ALEX)
+    assert bus.states()[-1] == "speaking"
+
+    speaker.hold.set()
+    await speaking
+
+    assert bus.states()[-1] == "capturing"
+
+
+async def test_the_ask_button_and_a_voice_call_together_show_the_ask(agent, bus):
+    await bus.deliver(Topic.ASK, AskSignal(by_id="u-sarah"), "u-sarah")
+    await agent.on_listening(ALEX)
+
+    assert details(bus)[-1] == "Listening for a question"
+
+
+async def test_cancel_stops_listening_to_the_pressers_voice_too(agent, bus, transcription):
+    await agent.on_listening(ALEX)
+
+    await bus.deliver(Topic.ASK, AskSignal(by_id="u-alex", cancel=True), "u-alex")
+
+    assert transcription.stopped_listening == ["u-alex"]
 
 
 # answering

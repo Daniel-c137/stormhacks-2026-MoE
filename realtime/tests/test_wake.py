@@ -7,7 +7,13 @@ from itertools import count
 import pytest
 
 from contracts import AGENT_PARTICIPANT_ID, ChatMessage, TranscriptSegment
-from realtime_worker.invocation import TRAILING_SECONDS, WakeDetector, default_aliases
+from realtime_worker.invocation import (
+    HEARD_SECONDS,
+    NAME_ONLY_SECONDS,
+    TRAILING_SECONDS,
+    WakeDetector,
+    default_aliases,
+)
 
 MEETING = "m-1"
 _seq = count(1)
@@ -671,3 +677,191 @@ def test_um_polaris_alone_at_the_end_waits_for_the_question(polaris):
 )
 def test_a_mention_inside_a_sentence_still_is_not_a_question(polaris, text):
     assert polaris.on_segment(said(text)) is None
+
+
+# listening: who the assistant shows it is listening to, as soon as a partial caption says its name
+
+
+def partial(
+    text: str,
+    *,
+    seg: str = "utt-1",
+    by: str = "u-alex",
+    name: str = "Alex Chen",
+    t: float = 10.0,
+    end: float = 11.0,
+):
+    return TranscriptSegment(
+        seg_id=seg,
+        meeting_id=MEETING,
+        speaker_id=by,
+        speaker_name=name,
+        text=text,
+        is_final=False,
+        t_start=t,
+        t_end=end,
+    )
+
+
+def final(
+    text: str,
+    *,
+    seg: str = "utt-1",
+    by: str = "u-alex",
+    name: str = "Alex Chen",
+    t: float = 10.0,
+    end: float = 12.0,
+):
+    return partial(text, seg=seg, by=by, name=name, t=t, end=end).model_copy(
+        update={"is_final": True}
+    )
+
+
+@pytest.mark.parametrize("text", ["OmniMan", "OmniMan,", "Hey OmniMan", "OmniMan what's the"])
+def test_a_partial_that_opens_with_the_name_starts_listening_to_its_speaker(detector, text):
+    assert detector.on_partial(partial(text)) is None
+
+    assert detector.listening(11.0) == {"u-alex": "Alex Chen"}
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["Let's talk refunds", "I asked OmniMan yesterday", "OmniMan said earlier that"],
+)
+def test_a_partial_that_does_not_address_the_assistant_is_not_listened_to(detector, text):
+    detector.on_partial(partial(text))
+
+    assert detector.listening(11.0) == {}
+
+
+def test_the_name_later_in_a_partial_after_a_sentence_or_filler_starts_listening(detector):
+    detector.on_partial(partial("We're covered there. Um, OmniMan, what"))
+
+    assert detector.listening(11.0) == {"u-alex": "Alex Chen"}
+
+
+def test_listening_stops_once_the_partial_turns_out_to_be_about_the_assistant(detector):
+    detector.on_partial(partial("OmniMan"))
+    detector.on_partial(partial("OmniMan said earlier that", end=12.0))
+
+    assert detector.listening(12.0) == {}
+
+
+def test_the_final_decides_after_a_partial_heard_the_name(detector):
+    detector.on_partial(partial("OmniMan, what's the"))
+
+    inv = detector.on_segment(final("OmniMan, what's the refund window?"))
+
+    assert inv is not None and inv.question == "what's the refund window?"
+    assert detector.listening(12.0) == {}
+
+
+def test_a_final_that_only_mentions_the_name_stops_listening(detector):
+    detector.on_partial(partial("OmniMan is"))
+
+    assert detector.on_segment(final("OmniMan is down again.")) is None
+    assert detector.listening(12.0) == {}
+
+
+def test_another_speakers_final_does_not_stop_listening_to_someone_still_talking(detector):
+    detector.on_partial(partial("OmniMan, what's"))
+    detector.on_segment(final("Sure.", seg="utt-2", by="u-sarah", name="Sarah Kim", end=11.0))
+
+    assert detector.listening(11.0) == {"u-alex": "Alex Chen"}
+
+
+def test_listening_to_a_partial_ends_if_its_final_never_comes(detector):
+    detector.on_partial(partial("OmniMan,", end=11.0))
+
+    assert detector.listening_ends(11.0) == pytest.approx(11.0 + HEARD_SECONDS)
+    assert detector.listening(11.0 + HEARD_SECONDS) == {}
+    assert detector.listening_ends(11.0 + HEARD_SECONDS) is None
+
+
+def test_the_name_alone_is_listened_to_for_as_long_as_its_wait(detector):
+    detector.on_segment(final("OmniMan.", end=10.6))
+
+    assert detector.listening(11.0) == {"u-alex": "Alex Chen"}
+    assert detector.listening_ends(11.0) == pytest.approx(10.6 + NAME_ONLY_SECONDS)
+    assert detector.listening(10.6 + NAME_ONLY_SECONDS) == {}
+
+
+def test_talking_after_the_name_alone_keeps_listening_past_its_wait(detector):
+    """The question starts within the wait and is still being said when the wait ends."""
+    detector.on_segment(final("OmniMan.", end=10.6))
+    detector.on_partial(partial("What's the status of", seg="utt-2", t=10.6, end=18.0))
+
+    assert detector.listening(19.0) == {"u-alex": "Alex Chen"}
+    inv = detector.on_segment(final("What's the status of DS-104?", seg="utt-2", t=17.0, end=20.0))
+    assert inv is not None and inv.question == "What's the status of DS-104?"
+    assert detector.listening(20.0) == {}
+
+
+def test_someone_else_speaking_after_the_name_alone_stops_listening(detector):
+    detector.on_segment(final("OmniMan.", end=10.6))
+    detector.on_segment(final("Anyway.", seg="utt-2", by="u-sarah", name="Sarah Kim", t=11.0))
+
+    assert detector.listening(12.0) == {}
+
+
+def test_a_question_that_trails_off_is_listened_to_until_it_is_sent(detector):
+    detector.on_segment(final("OmniMan, what's the status of...", end=12.0))
+
+    assert detector.listening(13.0) == {"u-alex": "Alex Chen"}
+    [inv] = detector.due(12.0 + TRAILING_SECONDS)
+    assert inv.question == "what's the status of..."
+    assert detector.listening(12.0 + TRAILING_SECONDS) == {}
+
+
+def test_the_ask_button_is_not_voice_listening(detector):
+    """The agent shows the Ask button's listening itself."""
+    detector.arm_ask("u-alex", at=10.0)
+
+    assert detector.listening(11.0) == {}
+
+
+def test_listening_to_several_people_at_once(detector):
+    detector.on_partial(partial("OmniMan,"))
+    detector.on_partial(partial("Hey OmniMan", seg="utt-2", by="u-sarah", name="Sarah Kim"))
+
+    assert detector.listening(11.0) == {"u-alex": "Alex Chen", "u-sarah": "Sarah Kim"}
+
+
+def test_cancelling_stops_listening_to_the_rest_of_that_utterance(detector):
+    detector.on_partial(partial("OmniMan, what's"))
+
+    assert detector.cancel_listening("u-alex") is True
+    assert detector.listening(11.0) == {}
+    detector.on_partial(partial("OmniMan, what's the refund", end=11.5))
+    assert detector.listening(11.5) == {}
+    assert detector.on_segment(final("OmniMan, what's the refund window?")) is None
+    # the next utterance is heard again
+    detector.on_partial(partial("OmniMan,", seg="utt-2", t=13.0, end=13.5))
+    assert detector.listening(13.5) == {"u-alex": "Alex Chen"}
+
+
+def test_cancelling_drops_the_wait_after_the_name_alone_and_a_trailing_question(detector):
+    detector.on_segment(final("OmniMan.", end=10.6))
+    assert detector.cancel_listening("u-alex") is True
+    assert detector.on_segment(final("Who owns DS-115?", seg="utt-2", t=11.0)) is None
+
+    detector.on_segment(final("OmniMan, what's the status of...", seg="utt-3", t=20.0, end=22.0))
+    assert detector.cancel_listening("u-alex") is True
+    assert detector.due(float("inf")) == []
+    assert detector.listening(23.0) == {}
+
+
+def test_cancelling_leaves_other_speakers_and_the_ask_button(detector):
+    detector.on_partial(partial("OmniMan,", by="u-sarah", name="Sarah Kim"))
+    detector.arm_ask("u-alex", at=10.0)
+
+    assert detector.cancel_listening("u-alex") is False
+    assert detector.listening(11.0) == {"u-sarah": "Sarah Kim"}
+    inv = detector.on_segment(final("Who owns the payment API?", seg="utt-2", t=12.0))
+    assert inv is not None and inv.via == "ask"
+
+
+def test_the_agents_own_partials_are_never_listened_to(detector):
+    detector.on_partial(partial("OmniMan here.", by=AGENT_PARTICIPANT_ID, name="OmniMan"))
+
+    assert detector.listening(11.0) == {}
