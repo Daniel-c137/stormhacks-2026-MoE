@@ -1,4 +1,5 @@
-"""OpenRouter's OpenAI-compatible chat completions, the fallback when Gemini is out of capacity.
+"""OpenRouter's OpenAI-compatible chat completions and embeddings, the fallback when Gemini is
+out of capacity.
 
 Meeting transcripts go through it, so every request asks only for providers that keep no data
 and support every parameter sent (structured output included)."""
@@ -11,7 +12,7 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from .base import LLMError, LLMOutOfCapacity
+from .base import Embeddings, EmbedTask, LLMError, LLMOutOfCapacity
 
 # Bounds the cost of one call; a one-hour meeting's write-up fits well inside it.
 MAX_TOKENS = 8192
@@ -52,6 +53,32 @@ def error_message(data: Any, fallback: str) -> str:
 def without_fence(text: str) -> str:
     match = FENCE.match(text.strip())
     return match.group(1) if match else text
+
+
+async def post(
+    client: httpx.AsyncClient, endpoint: str, api_key: str, body: dict[str, Any]
+) -> dict[str, Any]:
+    """The JSON object OpenRouter answered with, or a RouteError with its status and message."""
+    headers = {"Authorization": f"Bearer {api_key}"}
+    try:
+        response = await client.post(endpoint, json=body, headers=headers)
+    except httpx.TimeoutException:
+        raise RouteError(408, "timed out") from None
+    except httpx.TransportError as e:
+        raise RouteError(503, f"network error: {type(e).__name__}") from None
+    try:
+        data = response.json()
+    except ValueError:
+        data = None
+    if response.is_error:
+        raise RouteError(response.status_code, error_message(data, response.reason_phrase))
+    if not isinstance(data, dict):
+        raise RouteError(502, "the response is not a JSON object")
+    if "error" in data:  # a provider's failure, passed on with a 200
+        error = data["error"] if isinstance(data["error"], dict) else {}
+        code = error.get("code")
+        raise RouteError(code if isinstance(code, int) else 502, error_message(data, "error"))
+    return data
 
 
 class OpenRouterLLM:
@@ -146,26 +173,7 @@ class OpenRouterLLM:
         )
 
     async def _post(self, client: httpx.AsyncClient, body: dict[str, Any]) -> dict[str, Any]:
-        headers = {"Authorization": f"Bearer {self._api_key}"}
-        try:
-            response = await client.post(self.endpoint, json=body, headers=headers)
-        except httpx.TimeoutException:
-            raise RouteError(408, "timed out") from None
-        except httpx.TransportError as e:
-            raise RouteError(503, f"network error: {type(e).__name__}") from None
-        try:
-            data = response.json()
-        except ValueError:
-            data = None
-        if response.is_error:
-            raise RouteError(response.status_code, error_message(data, response.reason_phrase))
-        if not isinstance(data, dict):
-            raise RouteError(502, "the response is not a JSON object")
-        if "error" in data:  # a provider's failure, passed on with a 200
-            error = data["error"] if isinstance(data["error"], dict) else {}
-            code = error.get("code")
-            raise RouteError(code if isinstance(code, int) else 502, error_message(data, "error"))
-        return data
+        return await post(client, self.endpoint, self._api_key, body)
 
     def _content(self, data: dict[str, Any]) -> str:
         choices = data.get("choices") or [{}]
@@ -176,3 +184,104 @@ class OpenRouterLLM:
         if not isinstance(content, str) or not content.strip():
             raise LLMError(f"OpenRouter ({self.last_model}) returned no content")
         return content
+
+
+# Gemini models on OpenRouter are "google/<Gemini name>".
+GEMINI_PREFIX = "google/"
+# OpenRouter's input types for Gemini's document and query tasks; a provider may ignore them.
+EMBED_INPUT_TYPES: dict[EmbedTask, str] = {
+    "document": "search_document",
+    "query": "search_query",
+}
+EMBED_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
+
+
+def recorded_model_name(model: str) -> str:
+    """The name OpenRouter's `model` is recorded under in memory: a Gemini model's own name, so
+    its vectors are compared with those Gemini made; any other model keeps its OpenRouter id."""
+    return model.removeprefix(GEMINI_PREFIX)
+
+
+def without_input(message: str, texts: list[str]) -> str:
+    """`message`, unless it quotes any of `texts` (four words in a row, or a whole short text)."""
+    words = message.lower().split()
+    quoted = {" ".join(words[i : i + 4]) for i in range(len(words))}
+    flat = " ".join(words)
+    for text in texts:
+        tokens = text.lower().split()
+        if len(tokens) < 4 and tokens and " ".join(tokens) in flat:
+            return "message withheld: it quotes the input"
+        if any(" ".join(tokens[i : i + 4]) in quoted for i in range(len(tokens) - 3)):
+            return "message withheld: it quotes the input"
+    return message
+
+
+class OpenRouterEmbedder:
+    """Embeds with one OpenRouter `model` at `dim` dimensions, recorded as `recorded_model`.
+    Rate limits, timeouts and upstream failures are LLMOutOfCapacity; anything else is final.
+    Texts are never logged or put in errors. `last_usage` is the latest call's usage."""
+
+    def __init__(
+        self,
+        model: str,
+        *,
+        dim: int,
+        api_key: str,
+        base_url: str,
+        transport: httpx.AsyncBaseTransport | None = None,
+        batch_size: int = 100,
+    ):
+        self.model = model
+        self.recorded_model = recorded_model_name(model)
+        self.dim = dim
+        self.batch_size = batch_size
+        self.endpoint = f"{base_url.rstrip('/')}/embeddings"
+        self.last_usage: dict[str, Any] | None = None
+        self._api_key = api_key
+        self._transport = transport
+
+    async def embed(self, texts: list[str], *, task: EmbedTask = "document") -> Embeddings:
+        self.last_usage = None
+        vectors: list[list[float]] = []
+        cost = 0.0
+        async with httpx.AsyncClient(transport=self._transport, timeout=EMBED_TIMEOUT) as client:
+            for start in range(0, len(texts), self.batch_size):
+                batch = texts[start : start + self.batch_size]
+                body = {
+                    "model": self.model,
+                    "input": batch,
+                    "dimensions": self.dim,
+                    "input_type": EMBED_INPUT_TYPES[task],
+                    "encoding_format": "float",
+                    "provider": PROVIDER_RULES,
+                }
+                try:
+                    data = await post(client, self.endpoint, self._api_key, body)
+                except RouteError as e:
+                    failure = (
+                        f"OpenRouter embedding request to {self.model} failed: {e.code} "
+                        f"({without_input(e.message, batch)})"
+                    )
+                    if next_model_may_help(e.code):
+                        raise LLMOutOfCapacity(failure) from None
+                    raise LLMError(failure) from None
+                vectors += self._vectors(data, len(batch))
+                usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+                cost += float(usage.get("cost") or 0)
+                self.last_usage = {"texts": len(texts), "cost": cost}
+        return Embeddings(model=self.recorded_model, vectors=vectors)
+
+    def _vectors(self, data: dict[str, Any], expected: int) -> list[list[float]]:
+        items = data.get("data")
+        items = [i for i in items if isinstance(i, dict)] if isinstance(items, list) else []
+        if len(items) != expected:
+            raise LLMError(
+                f"OpenRouter ({self.model}) returned {len(items)} vectors for {expected} texts"
+            )
+        items.sort(key=lambda item: item.get("index", 0))
+        vectors = [item.get("embedding") for item in items]
+        if any(not isinstance(v, list) or len(v) != self.dim for v in vectors):
+            raise LLMError(
+                f"OpenRouter ({self.model}) returned vectors without {self.dim} dimensions"
+            )
+        return [[float(x) for x in v] for v in vectors]  # type: ignore[union-attr]
