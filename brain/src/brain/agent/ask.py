@@ -341,6 +341,14 @@ def number(
 
 
 FIGURES = re.compile(r"[\w.]*\d[\w.]*")
+# Numbers written in words are figures too, one per run ("zero point nine point four").
+NUMBER_WORDS = (
+    "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen "
+    "fifteen sixteen seventeen eighteen nineteen twenty thirty forty fifty sixty seventy eighty "
+    "ninety hundred thousand million billion point".split()
+)
+_NUMBER_WORD = rf"(?:{'|'.join(NUMBER_WORDS)})"
+NUMBER_RUNS = re.compile(rf"\b{_NUMBER_WORD}(?:[\s-]+{_NUMBER_WORD})*\b")
 # Words that say where an answer came from rather than what it says, and the filler around them.
 # The label for answers from the conversation is added in code, so they never count.
 META_WORDS = frozenset(
@@ -352,9 +360,10 @@ NEGATIONS = re.compile(r"\b(?:not|no|never|none|nothing|nobody|neither|nor|canno
 
 def backed_by(text: str, history: Sequence[AskTurn]) -> bool:
     """Whether the answer restates what the agent itself said earlier: nearly all its words, and
-    every figure (version, date, count) and negation, were in the agent's earlier turns. The
-    asker's own turns never count, so a premise in a question cannot back an answer. Words that
-    only say where the answer came from (META_WORDS, the agent's name) are left out."""
+    every figure (version, date, count, in digits or words) and negation, were in the agent's
+    earlier turns. The asker's own turns never count, so a premise in a question cannot back an
+    answer. Words that only say where the answer came from (META_WORDS, the agent's name) are
+    left out."""
     said = " ".join(turn.text for turn in history if turn.role == "agent").casefold()
     answer = text.casefold()
     words = terms(answer) - META_WORDS - terms(get_identity().agent_name)
@@ -367,7 +376,9 @@ def backed_by(text: str, history: Sequence[AskTurn]) -> bool:
 
 
 def figures(text: str) -> set[str]:
-    return {f.strip(".") for f in FIGURES.findall(text)}
+    """Figures in digits, and each run of number words, so a number changed in words counts."""
+    words = {" ".join(re.split(r"[\s-]+", run)) for run in NUMBER_RUNS.findall(text)}
+    return {f.strip(".") for f in FIGURES.findall(text)} | words
 
 
 MARKERS = re.compile(r"\s*\[\s*e\d+(?:\s*,\s*e\d+)*\s*\]", re.IGNORECASE)
@@ -482,7 +493,9 @@ Rules:
 - If the evidence does not answer the question, say so plainly instead of guessing.
 - Anything you conclude that no evidence states directly goes in inference, not in text.
 - Mention an unavailable source only when the question needed it.
-- Plain text, no markdown, two to four short sentences that read well aloud."""
+- Keep numbers, versions, dates, issue keys, names and code identifiers
+  exactly as the evidence writes them: digits, v0.9.4, DS-104. Never spell them out in words.
+- Plain text, no markdown, two to four short sentences."""
 
 
 def render_context(
