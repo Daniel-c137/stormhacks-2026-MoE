@@ -1,0 +1,163 @@
+# One server: Postgres, the brain, the realtime worker, the demo-world mock MCP servers, the board
+# and Caddy in front. Run it with the production env file:
+#   docker compose --env-file deploy/.env up -d --build
+# --env-file fills the ${...} below; the services that read settings also load the same file.
+# Only Caddy publishes ports. See README.md.
+
+# A fixed project name keeps container and volume names the same whatever the checkout is called.
+name: moe
+
+x-python-settings: &python-settings
+  env_file:
+    - path: deploy/.env
+      required: false
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.7-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-moe}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the env file}
+      POSTGRES_DB: ${POSTGRES_DB:-moe}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  migrate:
+    build:
+      context: .
+      dockerfile: brain/Dockerfile
+    image: moe-brain
+    <<: *python-settings
+    command: ["brain", "migrate"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  brain:
+    build:
+      context: .
+      dockerfile: brain/Dockerfile
+    image: moe-brain
+    <<: *python-settings
+    environment:
+      GITHUB_MCP_URL: ${GITHUB_MCP_URL:-http://world-github:8101/mcp}
+      JIRA_MCP_URL: ${JIRA_MCP_URL:-http://world-jira:8102/mcp}
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/openapi.json', timeout=4)
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  worker:
+    build:
+      context: .
+      dockerfile: realtime/Dockerfile
+    image: moe-worker
+    <<: *python-settings
+    environment:
+      # Straight to the brain on the compose network; Caddy refuses /api/internal from outside.
+      BRAIN_URL: http://brain:8000
+    restart: unless-stopped
+    depends_on:
+      brain:
+        condition: service_healthy
+
+  world-github:
+    build:
+      context: .
+      dockerfile: world/Dockerfile
+    image: moe-world
+    command: ["world-github-mcp"]
+    environment: &world-environment
+      WORLD_SNAPSHOT: ${WORLD_SNAPSHOT:-demo}
+    volumes:
+      - world-overlay:/data/overlay
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8101), 3)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  world-jira:
+    build:
+      context: .
+      dockerfile: world/Dockerfile
+    image: moe-world
+    command: ["world-jira-mcp"]
+    environment:
+      <<: *world-environment
+    volumes:
+      - world-overlay:/data/overlay
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8102), 3)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  board:
+    build:
+      context: .
+      dockerfile: board/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: /api
+    image: moe-board
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  caddy:
+    image: caddy:2.11.6-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+      EXPOSE_API_DOCS: ${EXPOSE_API_DOCS:-false}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - brain
+      - board
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  postgres-data:
+  world-overlay:
+  caddy-data:
+  caddy-config:
