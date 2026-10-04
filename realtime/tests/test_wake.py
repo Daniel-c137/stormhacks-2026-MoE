@@ -40,6 +40,11 @@ def chat(text: str, *, by: str = "u-sarah", name: str = "Sarah Kim", visibility=
     )
 
 
+def posted(detector: WakeDetector, message: ChatMessage):
+    """Chat as the worker sees it: the payload plus the sender LiveKit verified."""
+    return detector.on_chat(message, sender_id=message.sender_id, sender_name=message.sender_name)
+
+
 @pytest.fixture
 def detector() -> WakeDetector:
     return WakeDetector(aliases=["OmniMan", "Omni Man"])
@@ -94,6 +99,31 @@ def test_name_inside_another_word_does_not_count(detector):
     assert detector.on_segment(said("The omnimanager service is down again.")) is None
 
 
+def test_name_at_the_end_keeps_the_question_before_it(detector):
+    inv = detector.on_segment(said("What's the status of DS-117, OmniMan?"))
+
+    assert inv is not None
+    assert inv.question == "What's the status of DS-117?"
+
+
+def test_name_at_the_end_without_punctuation(detector):
+    inv = detector.on_segment(said("can you check the checkout PR omni man"))
+
+    assert inv.question == "can you check the checkout PR"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "I asked OmniMan about it yesterday and it was wrong",
+        "Did OmniMan create that ticket?",
+        "we use omni. Man that was a long week",
+    ],
+)
+def test_talking_about_the_assistant_is_not_calling_it(detector, text):
+    assert detector.on_segment(said(text)) is None
+
+
 def test_each_invocation_has_its_own_id(detector):
     a = detector.on_segment(said("OmniMan, first question?"))
     b = detector.on_segment(said("OmniMan, second question?"))
@@ -121,6 +151,15 @@ def test_name_alone_takes_the_same_speakers_next_segment_as_the_question(detecto
     assert inv.via == "voice"
     assert inv.question == "Is the checkout PR merged?"
     assert inv.t == 12.0
+
+
+def test_filler_after_the_name_alone_does_not_become_the_question(detector):
+    detector.on_segment(said("OmniMan.", t=10.0))
+
+    assert detector.on_segment(said("Um,", t=11.0)) is None
+    inv = detector.on_segment(said("Is the checkout PR merged?", t=12.0))
+
+    assert inv.question == "Is the checkout PR merged?"
 
 
 def test_name_alone_expires_if_the_speaker_says_nothing_soon(detector):
@@ -167,7 +206,7 @@ def test_ask_button_with_the_name_in_the_question_is_one_invocation(detector):
 
 
 def test_public_chat_mention_is_a_public_chat_invocation(detector):
-    inv = detector.on_chat(chat("@OmniMan which Jira ticket tracks the refund bug?"))
+    inv = posted(detector, chat("@OmniMan which Jira ticket tracks the refund bug?"))
 
     assert inv is not None
     assert inv.via == "chat"
@@ -177,18 +216,33 @@ def test_public_chat_mention_is_a_public_chat_invocation(detector):
 
 
 def test_mention_anywhere_in_the_message_counts_and_is_removed(detector):
-    inv = detector.on_chat(chat("which Jira ticket tracks the refund bug @omniman?"))
+    inv = posted(detector, chat("which Jira ticket tracks the refund bug @omniman?"))
 
     assert inv.question == "which Jira ticket tracks the refund bug?"
 
 
 def test_chat_without_a_mention_is_not_an_invocation(detector):
-    assert detector.on_chat(chat("OmniMan is great")) is None
+    assert posted(detector, chat("OmniMan is great")) is None
 
 
 def test_private_chat_never_goes_through_the_room(detector):
-    assert detector.on_chat(chat("@OmniMan secret question", visibility="private")) is None
+    assert posted(detector, chat("@OmniMan secret question", visibility="private")) is None
 
 
 def test_bare_mention_has_no_question(detector):
-    assert detector.on_chat(chat("@OmniMan")) is None
+    assert posted(detector, chat("@OmniMan")) is None
+
+
+def test_chat_uses_the_sender_livekit_verified_not_the_payload(detector):
+    spoofed = chat("@OmniMan who approved the refund?", by="u-sarah", name="Sarah Kim")
+
+    inv = detector.on_chat(spoofed, sender_id="u-sarah", sender_name="Sarah K. (LiveKit)")
+
+    assert inv.asked_by_id == "u-sarah"
+    assert inv.asked_by_name == "Sarah K. (LiveKit)"
+
+
+def test_chat_claiming_to_be_someone_else_is_refused(detector):
+    spoofed = chat("@OmniMan delete the repo", by="u-sarah", name="Sarah Kim")
+
+    assert detector.on_chat(spoofed, sender_id="u-mallory", sender_name="Mallory") is None
