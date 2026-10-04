@@ -13,7 +13,7 @@ from brain.report import (
     TranscriptInput,
     build_report,
 )
-from contracts import AGENT_PARTICIPANT_ID, Report, TranscriptSegment, get_identity
+from contracts import AGENT_PARTICIPANT_ID, AgendaItem, Report, TranscriptSegment, get_identity
 
 pytestmark = pytest.mark.anyio
 
@@ -180,6 +180,32 @@ async def test_without_a_meeting_date_due_dates_are_not_range_checked():
 
     assert "Date: unknown" in llm.calls[0].prompt
     assert task(report, "Backdated").due == date(2026, 9, 1)
+
+
+async def test_the_agenda_is_given_in_order_with_its_timeboxes():
+    llm = MockLLM(structured={ReportExtraction: EXTRACTION})
+    agenda = [
+        AgendaItem(id="a-1", title="Double charge", minutes=10),
+        AgendaItem(id="a-2", title="Waitlist email"),
+    ]
+
+    report = await build_report(llm, standup(), agenda=agenda)
+
+    prompt = llm.calls[0].prompt
+    assert "Agenda" in prompt
+    assert prompt.index("1. Double charge (10 min)\n") < prompt.index("2. Waitlist email\n")
+    assert prompt.index("Agenda") < prompt.index("Transcript")
+    assert report == (await report_for())[0]  # the same grounding either way
+
+
+async def test_without_an_agenda_the_prompt_is_unchanged():
+    _, without = await report_for()
+    llm = MockLLM(structured={ReportExtraction: EXTRACTION})
+
+    await build_report(llm, standup(), agenda=[])
+
+    assert "Agenda" not in without.calls[0].prompt
+    assert llm.calls[0].prompt == without.calls[0].prompt
 
 
 def test_the_fixture_meeting_is_a_friday():
