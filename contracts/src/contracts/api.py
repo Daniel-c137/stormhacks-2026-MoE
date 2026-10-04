@@ -59,6 +59,7 @@ class CreateMeetingRequest(BaseModel):
     scheduled_start: datetime | None = None
     duration_min: int | None = None
     invitee_ids: list[str] = []
+    translate: bool = False  # live translation of non-English speech (#106)
 
 
 class JoinMeetingResponse(BaseModel):
@@ -168,6 +169,28 @@ class ProfileUpdate(BaseModel):
 
 class SegmentsIngest(BaseModel):
     segments: list[TranscriptSegment]
+
+
+class TranslationUpdate(BaseModel):
+    """board -> brain: the host switches live translation on or off before anyone joins."""
+
+    translate: bool
+
+
+class TranslateRequest(BaseModel):
+    """realtime -> brain: speech to put into English. `language` is Scribe's detected ISO 639-1
+    code when it gave one; None asks the brain to detect it."""
+
+    text: str
+    language: str | None = None
+
+
+class TranslateResponse(BaseModel):
+    """`language` is the detected (or given) language; `text` is English, unchanged when the
+    speech already was."""
+
+    language: str
+    text: str
 
 
 class InvokeRequest(BaseModel):

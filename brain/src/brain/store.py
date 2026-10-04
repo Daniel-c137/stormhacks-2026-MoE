@@ -137,6 +137,7 @@ class Store(Protocol):
         scheduled_start: datetime | None = None,
         duration_min: int | None = None,
         invitee_ids: Sequence[str] = (),
+        translate: bool = False,
     ) -> Meeting:
         """Scheduled when scheduled_start is given; otherwise live, started now."""
         ...
@@ -178,6 +179,12 @@ class Store(Protocol):
 
     async def update_meeting(self, meeting: Meeting) -> Meeting:
         """Saves the whole meeting, e.g. jira_keys or ended_at."""
+        ...
+
+    async def set_translate(self, meeting_id: str, on: bool) -> Meeting:
+        """Switches live translation (#106). Atomic, and only while the meeting is scheduled or
+        live and nobody has joined: the worker reads it once when it opens the meeting.
+        Conflict otherwise; NotFound for an unknown meeting."""
         ...
 
     async def mark_agent_joined(self, meeting_id: str, at: datetime) -> Meeting:
@@ -482,6 +489,7 @@ class InMemoryStore:
         scheduled_start: datetime | None = None,
         duration_min: int | None = None,
         invitee_ids: Sequence[str] = (),
+        translate: bool = False,
     ) -> Meeting:
         meeting = Meeting(
             id=str(uuid4()),
@@ -495,12 +503,20 @@ class InMemoryStore:
             scheduled_start=scheduled_start,
             started_at=None if scheduled_start else datetime.now(UTC),
             duration_min=duration_min,
+            translate=translate,
         )
         self._meetings[meeting.id] = meeting
         return _copy(meeting)
 
     async def meeting(self, meeting_id: str) -> Meeting:
         return _copy(self._meeting(meeting_id))
+
+    async def set_translate(self, meeting_id: str, on: bool) -> Meeting:
+        # No await between the check and the write, so this is atomic on the event loop.
+        meeting = self._meeting(meeting_id)
+        if meeting.status not in ("scheduled", "live") or meeting.participant_ids:
+            raise Conflict(f"meeting {meeting_id} can't change translation once someone joined")
+        return self._save_meeting(meeting, translate=on)
 
     async def meeting_by_code(self, code: str) -> Meeting:
         for meeting in self._meetings.values():

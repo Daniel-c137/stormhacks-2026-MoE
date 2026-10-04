@@ -8,12 +8,14 @@ from livekit import rtc
 @dataclass(frozen=True)
 class SpeechPiece:
     """Text heard on one stream. start and end are seconds from that stream's start; the
-    TranscriptionManager moves them onto the meeting clock and attaches identity and seg_id."""
+    TranscriptionManager moves them onto the meeting clock and attaches identity and seg_id.
+    language is the transcriber's detected ISO 639-1 code; Scribe gives it on finals only."""
 
     text: str
     is_final: bool
     start: float
     end: float
+    language: str | None = None
 
 
 class SpeechToText(Protocol):

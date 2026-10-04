@@ -6,6 +6,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from weakref import WeakValueDictionary
 
+import anyio
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
@@ -24,8 +25,11 @@ from contracts import (
     KeytermsResponse,
     SegmentsIngest,
     TranscriptSegment,
+    TranslateRequest,
+    TranslateResponse,
     WorkerMeetingResponse,
 )
+from contracts.language import ISO_CODE
 from contracts.meeting import MeetingStatus
 
 from ..agent.ask import Question, ToolOrchestrator
@@ -41,6 +45,7 @@ from ..config import Settings
 from ..keyterms import meeting_keyterms
 from ..llm import LLM, LLMError, LLMUnavailable
 from ..store import Conflict, NotFound, Store
+from ..translation import TranslationFailed, translate
 from .deps import (
     ask_agent,
     get_fact_checker,
@@ -48,6 +53,7 @@ from .deps import (
     get_orchestrator,
     get_settings,
     get_store,
+    get_translation_llm_factory,
     is_host_or_admin,
     require_internal,
 )
@@ -110,7 +116,46 @@ def segment_problem(segment: TranscriptSegment, meeting_id: str, speakers: set[s
         return "times must satisfy 0 <= t_start <= t_end"
     if segment.speaker_id not in speakers:
         return "speaker is not a participant of this meeting (expected an account id)"
+    if segment.language is not None and not ISO_CODE.match(segment.language):
+        return "language must be a lowercase ISO 639 code"
+    if segment.original_text is not None:
+        if not segment.original_text.strip():
+            return "original_text is blank"
+        if len(segment.original_text) > MAX_TEXT:
+            return f"original_text is over {MAX_TEXT} characters"
     return None
+
+
+@router.post("/meetings/{meeting_id}/translate")
+async def translate_speech(
+    meeting_id: str,
+    body: TranslateRequest,
+    store: Store = Depends(get_store),
+    settings: Settings = Depends(get_settings),
+    make_llm: Callable[[], LLM] = Depends(get_translation_llm_factory),
+) -> TranslateResponse:
+    """Non-English speech into English for the live captions and the saved transcript (#106):
+    a finished sentence, or a provisional translation of one still going. Speech that turns out
+    to be English comes back unchanged. One cheap model attempt (make_translation_llm), given
+    up on after TRANSLATION_TIMEOUT_SECONDS. 503 when no model is configured, 502 when it
+    fails, 504 when it's too slow; the worker then shows the original, marked untranslated."""
+    if not body.text.strip():
+        raise HTTPException(status_code=422, detail="text is blank")
+    if len(body.text) > MAX_TEXT:
+        raise HTTPException(status_code=422, detail=f"text is over {MAX_TEXT} characters")
+    try:
+        await store.meeting(meeting_id)
+    except NotFound:
+        raise HTTPException(status_code=404, detail="Meeting not found") from None
+    try:
+        with anyio.fail_after(settings.translation_timeout_seconds):
+            return await translate(make_llm(), body.text, body.language)
+    except TimeoutError:
+        raise HTTPException(status_code=504, detail="Translation timed out") from None
+    except LLMUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e)) from None
+    except (LLMError, TranslationFailed) as e:
+        raise HTTPException(status_code=502, detail=f"Could not translate: {e}") from None
 
 
 @router.get("/meetings/{meeting_id}")

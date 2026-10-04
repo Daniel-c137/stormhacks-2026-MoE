@@ -271,3 +271,47 @@ def test_another_team_cannot_end_the_meeting(client_as, rooms):
     assert response.status_code == 404
     assert client_as(ALEX).get(f"/meetings/{meeting['id']}").json()["status"] == "live"
     assert rooms.closed == []
+
+
+# live translation is a per-meeting switch (#106)
+
+
+def switch(client, meeting_id: str, on: bool):
+    return client.put(f"/meetings/{meeting_id}/translation", json={"translate": on})
+
+
+def test_a_meeting_is_untranslated_unless_created_with_translation(client_as):
+    alex = client_as(ALEX)
+
+    assert create(alex)["translate"] is False
+    created = alex.post("/meetings", json={"title": "Sync", "translate": True})
+    assert created.json()["translate"] is True
+
+
+def test_the_host_switches_translation_on_in_the_lobby(client_as):
+    alex = client_as(ALEX)
+    meeting = create(alex)
+
+    response = switch(alex, meeting["id"], True)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["translate"] is True
+    assert alex.get(f"/meetings/{meeting['id']}").json()["translate"] is True
+
+
+def test_only_the_host_switches_translation(client_as):
+    meeting = create(client_as(ALEX))
+
+    assert switch(client_as(SARAH), meeting["id"], True).status_code == 403
+    assert switch(client_as(OUTSIDER), meeting["id"], True).status_code == 404
+
+
+def test_translation_is_fixed_once_someone_joined(client_as):
+    alex = client_as(ALEX)
+    meeting = create(alex)
+    client_as(SARAH).post(f"/meetings/join/{meeting['code']}")
+
+    response = switch(alex, meeting["id"], True)
+
+    assert response.status_code == 409
+    assert alex.get(f"/meetings/{meeting['id']}").json()["translate"] is False

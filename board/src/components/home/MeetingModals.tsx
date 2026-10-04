@@ -8,6 +8,7 @@ import { Avatar } from "@/components/ui/Avatar";
 import { Icon, Spinner } from "@/components/ui/Icon";
 import { draftAgendaInto } from "@/lib/agenda";
 import { createMeeting, describeError } from "@/lib/api";
+import { TranslationSwitch } from "@/components/TranslationSwitch";
 import { fmtClock, fmtDate, fmtDuration, isoDay, parseMeetingCode } from "@/lib/format";
 
 const DURATIONS = [15, 30, 45, 60, 90, 120];
@@ -55,6 +56,7 @@ export function NewMeetingModal({ onClose, onScheduled }: { onClose: () => void;
   const [query, setQuery] = useState("");
   const [inviteOpen, setInviteOpen] = useState(false);
   const [draftAgenda, setDraftAgenda] = useState(false);
+  const [translate, setTranslate] = useState(false);
   const [busy, setBusy] = useState<"" | "creating" | "drafting">("");
   // Created, but the agenda draft failed: the meeting stands and the dialog only says so.
   const [scheduled, setScheduled] = useState<Meeting | null>(null);
@@ -103,7 +105,7 @@ export function NewMeetingModal({ onClose, onScheduled }: { onClose: () => void;
     try {
       const name = title.trim() || "Untitled meeting";
       if (when === "now") {
-        meeting = await createMeeting({ title: name });
+        meeting = await createMeeting({ title: name, translate });
         router.push(`/m/${meeting.code}`);
         return;
       }
@@ -112,6 +114,7 @@ export function NewMeetingModal({ onClose, onScheduled }: { onClose: () => void;
         scheduled_start: start.toISOString(),
         duration_min: duration,
         invitee_ids: invitees,
+        translate,
       });
     } catch (err) {
       setError(`The meeting wasn't created. ${describeError(err)}`);
@@ -280,6 +283,7 @@ export function NewMeetingModal({ onClose, onScheduled }: { onClose: () => void;
             </div>
           </>
         )}
+        <TranslationSwitch checked={translate} onChange={setTranslate} disabled={Boolean(scheduled)} />
         <span role="alert" className="err">
           {error}
         </span>

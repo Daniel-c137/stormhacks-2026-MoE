@@ -17,6 +17,7 @@ from contracts import (
     Invocation,
     Meeting,
     TranscriptSegment,
+    TranslateResponse,
     WorkerMeetingResponse,
 )
 from realtime_worker.brain_client import (
@@ -224,6 +225,68 @@ async def test_segments_land_in_the_real_brain_transcript():
 
     saved = await store.transcript(meeting.id)
     assert [s.seg_id for s in saved] == [seg(meeting.id, 1).seg_id, seg(meeting.id, 2).seg_id]
+
+
+# translation (#106)
+
+
+async def test_translate_posts_the_speech_and_the_detected_language():
+    answer = TranslateResponse(language="es", text="We keep Postgres for now.")
+    recorder = Recorder(json_response(answer))
+
+    got = await client(recorder).translate("m-1", "Por ahora nos quedamos con Postgres.", "es")
+
+    assert got == answer
+    [request] = recorder.requests
+    assert str(request.url) == "http://brain.test/internal/meetings/m-1/translate"
+    assert request.headers["X-Internal-Token"] == TOKEN
+    body = httpx.Response(200, content=request.content).json()
+    assert body == {"text": "Por ahora nos quedamos con Postgres.", "language": "es"}
+
+
+@pytest.mark.parametrize("failure", [503, 502, httpx.ReadTimeout("slow")])
+async def test_translate_is_tried_once_because_a_late_caption_is_useless(failure):
+    recorder = Recorder(failure, json_response(TranslateResponse(language="es", text="x")))
+
+    with pytest.raises(BrainUnavailable):
+        await client(recorder).translate("m-1", "Hola", None)
+
+    assert len(recorder.requests) == 1
+
+
+async def test_a_failed_translate_says_which_status_so_the_worker_can_back_off():
+    with pytest.raises(BrainUnavailable) as off:
+        await client(Recorder(503)).translate("m-1", "Hola", None)
+    with pytest.raises(BrainUnavailable) as slow:
+        await client(Recorder(httpx.ReadTimeout("slow"))).translate("m-1", "Hola", None)
+
+    assert off.value.status == 503
+    assert slow.value.status is None
+
+
+async def test_translate_against_the_real_brain_endpoint():
+    from brain.api.deps import get_settings, get_store, get_translation_llm_factory
+    from brain.config import Settings as BrainSettings
+    from brain.llm import MockLLM
+    from brain.main import create_app
+    from brain.store import InMemoryStore
+    from brain.translation import Translation
+    from contracts import Team
+
+    store = InMemoryStore(teams=[Team(id="t-1", name="Checkout", member_ids=["u-alex"])], people=[])
+    meeting = await store.create_meeting("t-1", "Standup", host_id="u-alex")
+    llm = MockLLM(structured={Translation: Translation(language="es", english="Hello everyone")})
+    app = create_app()
+    app.dependency_overrides[get_store] = lambda: store
+    app.dependency_overrides[get_translation_llm_factory] = lambda: lambda: llm
+    app.dependency_overrides[get_settings] = lambda: BrainSettings(
+        _env_file=None, brain_internal_token=TOKEN
+    )
+    brain = HttpBrainClient("http://brain.test", TOKEN, transport=httpx.ASGITransport(app=app))
+
+    got = await brain.translate(meeting.id, "Hola a todos", None)
+
+    assert got == TranslateResponse(language="es", text="Hello everyone")
 
 
 # what the worker reads when it joins
