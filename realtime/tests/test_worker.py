@@ -176,3 +176,12 @@ def test_scribes_silence_threshold_defaults_to_one_second_within_what_scribe_acc
     for refused in (0.2, 3.5):
         with pytest.raises(ValueError):
             Settings(_env_file=None, elevenlabs_vad_silence_seconds=refused)
+
+
+def test_the_agenda_is_checked_after_each_caption_only_with_jev():
+    """JEV_MODEL is the brain's; the worker reads the same setting to know the tracker is cheap
+    enough to ask after every caption. It waits for the brain's settle time first."""
+    assert Settings(_env_file=None).agenda_after_captions is False
+    on = Settings(_env_file=None, jev_model="typesafe/jev-1.13")
+    assert on.agenda_after_captions is True
+    assert on.agenda_check_delay_seconds == 2.5
