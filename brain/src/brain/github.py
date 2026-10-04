@@ -110,6 +110,7 @@ class GitHubItem(BaseModel):
     state: str | None = None
     merged: bool | None = None
     merged_at: datetime | None = None
+    updated_at: datetime | None = None
     body: str | None = None
     url: str | None = None
     # A pull request's read only, when the server gives them: e.g. "2 passed, 1 failed (lint)"
@@ -151,6 +152,23 @@ class GitHubReader:
             return []
         tool = "search_pull_requests" if kind == "pr" else "search_issues"
         data = await self._call(tool, {"query": words, "owner": self.owner, "repo": self.repo})
+        return self.found(data, kind, limit)
+
+    async def latest(self, kind: GitHubKind, limit: int = 6) -> list[GitHubItem]:
+        """The repository's most recently updated issues or pull requests, open or closed. The
+        query is only the kind's qualifier, written here; the server scopes it to the
+        repository."""
+        tool, qualifier = (
+            ("search_pull_requests", "is:pr") if kind == "pr" else ("search_issues", "is:issue")
+        )
+        arguments = {"query": qualifier, "owner": self.owner, "repo": self.repo}
+        data = await self._call(
+            tool, arguments | {"sort": "updated", "order": "desc", "perPage": limit}
+        )
+        return self.found(data, kind, limit)
+
+    def found(self, data: Any, kind: GitHubKind, limit: int) -> list[GitHubItem]:
+        """A search's items of this repository; anything from elsewhere is dropped."""
         if isinstance(data, dict):
             data = data.get("items", data.get("result"))
         if isinstance(data, dict):
@@ -295,6 +313,7 @@ class GitHubReader:
             state=raw.get("state") if isinstance(raw.get("state"), str) else None,
             merged=raw.get("merged") if isinstance(raw.get("merged"), bool) else None,
             merged_at=timestamp(raw.get("merged_at")),
+            updated_at=timestamp(raw.get("updated_at")),
             body=body.strip()[:MAX_BODY] if isinstance(body, str) and body.strip() else None,
             url=raw.get("html_url") if isinstance(raw.get("html_url"), str) else None,
         )
