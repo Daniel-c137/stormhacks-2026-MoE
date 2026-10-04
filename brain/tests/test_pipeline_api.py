@@ -3,20 +3,26 @@ out. Requests go through the ASGI app on the test's own event loop, so a test ca
 background write-up with the runner's drain()."""
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
 from api_support import ALEX, OUTSIDER, SARAH, TEAM, WORKER_TOKEN
 from pipeline_support import GatedLLM
 
-from brain.agent.pipeline import REPORT_STEPS
-from brain.api.deps import current_user, get_llm_factory, get_memory, get_settings
-from brain.llm import MockEmbedder, MockLLM
-from brain.memory import InMemoryMemoryStore, MeetingMemory
+from brain.agent.pipeline import NO_TRANSCRIPT, REPORT_STEPS, ReportPipeline
+from brain.api.deps import (
+    current_user,
+    get_llm_factory,
+    get_memory,
+    get_pipeline,
+    get_settings,
+)
+from brain.llm import LLMError, MockEmbedder, MockLLM
+from brain.memory import InMemoryMemoryStore, MeetingMemory, UnusableMemory
 from brain.report import ExtractedDecision, ExtractedTask, ReportExtraction
 from brain.report.decisions import DecisionVerdict, DecisionVerdicts
-from contracts import Decision, Person, Report
+from contracts import Decision, DecisionRelation, Person, Report, ReportProgress
 
 pytestmark = pytest.mark.anyio
 
@@ -192,6 +198,7 @@ async def test_ending_returns_at_once_and_the_meeting_is_written_up_for_review(a
     (decision,) = report["decisions"]
     assert (decision["made_by"], decision["quote"]) == (ALEX.name, LINES[2][1])
     done = await api.progress(meeting["id"])
+    assert done.pop("updated_at")
     assert done == {
         "meeting_id": meeting["id"],
         "steps": REPORT_STEPS,
@@ -234,16 +241,18 @@ async def test_the_report_is_written_from_the_meetings_title_date_members_and_tr
 
 
 async def test_final_segments_arriving_while_the_transcript_settles_are_written_up(
-    api, app, settings, llm
+    api, app, store, llm, memory
 ):
-    app.dependency_overrides[get_settings] = lambda: settings.model_copy(
-        update={"pipeline_settle_seconds": 0.3}
+    settled = asyncio.Event()
+    app.dependency_overrides[get_pipeline] = lambda: ReportPipeline(
+        store, lambda: llm, memory, settle=settled.wait
     )
     meeting = await api.create()
     await api.ingest(meeting["id"], LINES[:2])
 
     await api.end(meeting["id"])
     await api.ingest(meeting["id"], LINES[2:], first=3)  # the worker's last words, in flight
+    settled.set()
     await api.drain()
 
     (call,) = calls_for(llm, ReportExtraction)
@@ -406,22 +415,28 @@ async def test_a_failed_step_keeps_the_meeting_processing_with_the_error_and_sav
     assert await api.status(meeting["id"]) == "processing"
     progress = await api.progress(meeting["id"])
     assert (progress["current"], progress["done"]) == (1, False)
-    assert "no scripted response for ReportExtraction" in progress["error"]
+    assert "language model failed" in progress["error"]
+    assert "ReportExtraction" not in progress["error"]  # the raw exception stays in the log
     assert (await api.report(meeting["id"])).status_code == 404
     assert (await api.get("/tasks")).json() == []
     assert (await api.get("/decisions")).json() == []
     assert await memory.search(TEAM.id, "refund", k=20) == []
 
 
-async def test_a_meeting_without_a_transcript_fails_with_a_clear_error(api, llm):
+async def test_a_meeting_without_a_transcript_goes_to_review_with_an_empty_report(api, llm, memory):
     meeting = await api.create()
 
     await api.end(meeting["id"])
     await api.drain()
 
-    assert await api.status(meeting["id"]) == "processing"
-    assert "transcript" in (await api.progress(meeting["id"]))["error"]
+    assert await api.status(meeting["id"]) == "needs_review"
+    report = (await api.report(meeting["id"])).json()
+    assert report["summary"] == NO_TRANSCRIPT
+    assert report["tasks"] == report["decisions"] == report["topics"] == []
+    progress = await api.progress(meeting["id"])
+    assert (progress["done"], progress["error"]) == (True, None)
     assert llm.calls == []
+    assert await memory.search(TEAM.id, "anything", k=20) == []
 
 
 async def test_without_gemini_the_meeting_still_ends_and_the_write_up_says_why(api, app):
@@ -446,7 +461,9 @@ async def test_the_host_retries_a_failed_write_up(api, llm):
     response = await api.retry(meeting["id"])
 
     assert response.status_code == 202
-    assert response.json() == {
+    body = response.json()
+    assert body.pop("updated_at")
+    assert body == {
         "meeting_id": meeting["id"],
         "steps": REPORT_STEPS,
         "current": 0,
@@ -458,46 +475,335 @@ async def test_the_host_retries_a_failed_write_up(api, llm):
     assert (await api.report(meeting["id"])).json()["summary"] == EXTRACTION.summary
 
 
-async def test_retry_is_refused_unless_the_last_run_failed(api):
+async def test_retry_is_refused_unless_the_last_run_failed_or_stalled(api):
     gated = GatedLLM(structured={ReportExtraction: EXTRACTION})
     api.use_llm(gated)
     meeting = await api.create()
     await api.ingest(meeting["id"])
 
-    assert (await api.retry(meeting["id"])).status_code == 409  # still live
+    live = await api.retry(meeting["id"])
+    assert (live.status_code, live.json()["detail"]) == (
+        409,
+        "The meeting is live, not being written up",
+    )
     await api.end(meeting["id"])
     await gated.called.wait()
-    assert (await api.retry(meeting["id"])).status_code == 409  # still running
+    before = await api.progress(meeting["id"])
+    running = await api.retry(meeting["id"])
+    assert (running.status_code, running.json()["detail"]) == (
+        409,
+        "The write-up is still running",
+    )
+    assert await api.progress(meeting["id"]) == before  # a refused retry resets nothing
     gated.gate.set()
     await api.drain()
-    assert (await api.retry(meeting["id"])).status_code == 409  # written up
+    done = await api.retry(meeting["id"])
+    assert (done.status_code, done.json()["detail"]) == (
+        409,
+        "The meeting is needs_review, not being written up",
+    )
 
     assert len(calls_for(gated, ReportExtraction)) == 1
 
 
-async def test_a_retry_replaces_the_report_and_memory_instead_of_adding_to_them(
+async def stalled(api: Api, store, *, minutes_ago: float | None):
+    """A processing meeting whose write-up nobody in this process is running, as after a hard
+    crash: its last progress is `minutes_ago` old (None: no progress was ever saved)."""
+    meeting = await api.create()
+    await api.ingest(meeting["id"])
+    await store.transition_status(meeting["id"], {"live"}, "processing")
+    if minutes_ago is not None:
+        await store.save_report_progress(
+            ReportProgress(
+                meeting_id=meeting["id"],
+                steps=REPORT_STEPS,
+                current=1,
+                done=False,
+                updated_at=datetime.now(UTC) - timedelta(minutes=minutes_ago),
+            )
+        )
+    return meeting
+
+
+async def test_a_write_up_that_stopped_moving_can_be_retried(api, store):
+    meeting = await stalled(api, store, minutes_ago=11)
+
+    response = await api.retry(meeting["id"])
+    await api.drain()
+
+    assert response.status_code == 202
+    assert await api.status(meeting["id"]) == "needs_review"
+
+
+async def test_a_write_up_that_never_saved_progress_can_be_retried(api, store):
+    meeting = await stalled(api, store, minutes_ago=None)
+
+    assert (await api.retry(meeting["id"])).status_code == 202
+    await api.drain()
+    assert await api.status(meeting["id"]) == "needs_review"
+
+
+async def test_a_write_up_still_moving_elsewhere_is_not_retried(api, store, app, settings):
+    app.dependency_overrides[get_settings] = lambda: settings.model_copy(
+        update={"pipeline_stale_minutes": 30}
+    )
+    meeting = await stalled(api, store, minutes_ago=11)
+    before = await api.progress(meeting["id"])
+
+    response = await api.retry(meeting["id"])
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "The write-up is still in progress; it can be retried once it fails or makes no"
+        " progress for 30 minutes"
+    )
+    assert await api.progress(meeting["id"]) == before
+
+
+# what a failure leaves behind
+
+
+async def test_if_the_write_up_cannot_be_scheduled_the_end_still_succeeds_and_can_be_retried(
+    api, app, monkeypatch
+):
+    runner = app.state.pipeline_runner
+    start = runner.start
+
+    def broken(meeting_id, run):
+        monkeypatch.setattr(runner, "start", start)
+        raise RuntimeError("no event loop")
+
+    monkeypatch.setattr(runner, "start", broken)
+    meeting = await api.create()
+    await api.ingest(meeting["id"])
+
+    response = await api.end(meeting["id"])
+
+    assert (response.status_code, response.json()["status"]) == (200, "processing")
+    assert "could not be started" in (await api.progress(meeting["id"]))["error"]
+    assert (await api.retry(meeting["id"])).status_code == 202
+    await api.drain()
+    assert await api.status(meeting["id"]) == "needs_review"
+
+
+async def test_a_failed_first_progress_write_is_recorded_and_can_be_retried(
+    api, store, monkeypatch
+):
+    save = store.save_report_progress
+    calls = []
+
+    async def first_fails(progress):
+        calls.append(progress)
+        if len(calls) == 1:
+            raise RuntimeError("connection to server at 10.0.0.5, port 5432 failed")
+        return await save(progress)
+
+    monkeypatch.setattr(store, "save_report_progress", first_fails)
+    meeting = await api.create()
+    await api.ingest(meeting["id"])
+
+    response = await api.end(meeting["id"])
+    await api.drain()
+
+    assert response.status_code == 200
+    error = (await api.progress(meeting["id"]))["error"]
+    assert error and "10.0.0.5" not in error
+    assert (await api.retry(meeting["id"])).status_code == 202
+    await api.drain()
+    assert await api.status(meeting["id"]) == "needs_review"
+
+
+async def test_a_failed_link_step_leaves_only_the_error(api, store, memory):
+    send = past_decision("d-send", "Send the waitlist email as soon as the fix merges")
+    await past_meeting(store, "Launch planning", send)
+    api.use_llm(MockLLM(structured={ReportExtraction: EXTRACTION}))  # no verdicts scripted
+
+    meeting = await ended(api)
+
+    progress = await api.progress(meeting["id"])
+    linking = REPORT_STEPS.index("Checking against past decisions")
+    assert (progress["current"], progress["done"]) == (linking, False)
+    assert "language model failed" in progress["error"]
+    assert await api.status(meeting["id"]) == "processing"
+    assert (await api.report(meeting["id"])).status_code == 404
+    decisions = (await api.get("/decisions")).json()
+    assert [(d["id"], d["status"], d["relation"]) for d in decisions] == [
+        ("d-send", "active", None)
+    ]
+    assert await memory.search(TEAM.id, "refund", k=20) == []
+
+
+def contradicting(meeting_id: str) -> MockLLM:
+    return MockLLM(
+        structured={
+            ReportExtraction: EXTRACTION,
+            DecisionVerdicts: DecisionVerdicts(
+                verdicts=[
+                    DecisionVerdict(
+                        decision_id=f"{meeting_id}-decision-1",
+                        verdict="contradicts",
+                        past_decision_id="d-send",
+                        reason="Holding the email reverses sending it at once.",
+                        confidence=0.9,
+                    )
+                ]
+            ),
+        }
+    )
+
+
+async def test_a_failed_save_leaves_no_report_links_or_memory_and_a_retry_links_once(
     api, store, memory, monkeypatch
 ):
-    save = store.save_report
-    attempts = []
+    send = past_decision("d-send", "Send the waitlist email as soon as the fix merges")
+    await past_meeting(store, "Launch planning", send)
+    meeting = await api.create()
+    new_id = f"{meeting['id']}-decision-1"
+    api.use_llm(contradicting(meeting["id"]))
+    complete = store.complete_report
 
-    async def flaky(report):
-        attempts.append(report)
-        if len(attempts) == 1:
-            raise RuntimeError("the database went away")
-        await save(report)
+    async def fails_once(*args, **kwargs):
+        monkeypatch.setattr(store, "complete_report", complete)
+        raise RuntimeError("connection to server at 10.0.0.5, port 5432 failed")
 
-    monkeypatch.setattr(store, "save_report", flaky)
-    meeting = await ended(api)
-    failed = await api.progress(meeting["id"])
-    assert failed["error"] == "the database went away"
-    assert failed["current"] == len(REPORT_STEPS) - 1
-    indexed = await memory.search(TEAM.id, "refund", k=100)
+    monkeypatch.setattr(store, "complete_report", fails_once)
+    await api.ingest(meeting["id"])
+    await api.end(meeting["id"])
+    await api.drain()
+
+    progress = await api.progress(meeting["id"])
+    assert progress["current"] == REPORT_STEPS.index("Saving the report")
+    assert "Saving the report" in progress["error"] and "10.0.0.5" not in progress["error"]
+    assert await api.status(meeting["id"]) == "processing"
+    assert (await api.report(meeting["id"])).status_code == 404
+    assert [d["status"] for d in (await api.get("/decisions")).json()] == ["active"]
+    assert await memory.search(TEAM.id, "refund", k=20) == []
 
     assert (await api.retry(meeting["id"])).status_code == 202
     await api.drain()
 
     assert await api.status(meeting["id"]) == "needs_review"
-    assert len(await memory.search(TEAM.id, "refund", k=100)) == len(indexed)
+    decisions = {d["id"]: d for d in (await api.get("/decisions")).json()}
+    assert decisions["d-send"]["status"] == "superseded"
+    assert decisions["d-send"]["relation"] == {"type": "superseded_by", "decision_id": new_id}
+    assert decisions[new_id]["relation"] == {"type": "contradicts", "decision_id": "d-send"}
     assert len((await api.get("/tasks")).json()) == 1
-    assert len((await api.get("/decisions")).json()) == 1
+    mine = [h for h in await memory.search(TEAM.id, "refund", k=100)]
+    assert mine and all(h.chunk.meeting_id == meeting["id"] for h in mine)
+
+
+async def test_a_retry_indexes_memory_once(api, memory):
+    api.use_llm(MockLLM())
+    meeting = await ended(api)
+    api.use_llm(MockLLM(structured={ReportExtraction: EXTRACTION}))
+    await api.retry(meeting["id"])
+    await api.drain()
+    indexed = await memory.search(TEAM.id, "refund", k=100)
+
+    fresh = MeetingMemory(MockEmbedder(), InMemoryMemoryStore(dim=768))
+    api.use_memory(fresh)
+    await ended(api)
+
+    assert len(indexed) == len(await fresh.search(TEAM.id, "refund", k=100))
+
+
+async def half_saved_by_an_earlier_run(api, store) -> tuple[dict, str]:
+    """What the first version of the write-up could leave: the report saved, d-send retired
+    by this meeting's decision, and the meeting still processing with an error."""
+    send = past_decision("d-send", "Send the waitlist email as soon as the fix merges")
+    await past_meeting(store, "Launch planning", send)
+    meeting = await api.create()
+    await api.ingest(meeting["id"])
+    await store.transition_status(meeting["id"], {"live"}, "processing")
+    new_id = f"{meeting['id']}-decision-1"
+    held = Decision(
+        id=new_id,
+        meeting_id=meeting["id"],
+        text="Hold the waitlist email",
+        made_by=ALEX.name,
+        t=12,
+        quote=LINES[2][1],
+        relation=DecisionRelation(type="contradicts", decision_id="d-send"),
+    )
+    await store.save_report(Report(meeting_id=meeting["id"], summary="x", decisions=[held]))
+    (old,) = [d for d in await store.decisions(TEAM.id) if d.id == "d-send"]
+    retired = DecisionRelation(type="superseded_by", decision_id=new_id)
+    await store.update_decision(
+        old.model_copy(update={"status": "superseded", "relation": retired})
+    )
+    await store.save_report_progress(
+        ReportProgress(
+            meeting_id=meeting["id"], steps=REPORT_STEPS, current=3, done=False, error="failed"
+        )
+    )
+    return meeting, new_id
+
+
+async def test_a_retry_relinks_a_past_decision_an_earlier_partial_run_retired(api, store):
+    meeting, new_id = await half_saved_by_an_earlier_run(api, store)
+    api.use_llm(contradicting(meeting["id"]))
+
+    assert (await api.retry(meeting["id"])).status_code == 202
+    await api.drain()
+
+    decisions = {d["id"]: d for d in (await api.get("/decisions")).json()}
+    assert decisions["d-send"]["relation"] == {"type": "superseded_by", "decision_id": new_id}
+    assert decisions[new_id]["relation"] == {"type": "contradicts", "decision_id": "d-send"}
+
+
+async def test_a_retry_that_finds_no_decision_restores_the_retired_past_decision(api, store):
+    meeting, _ = await half_saved_by_an_earlier_run(api, store)
+    no_decisions = EXTRACTION.model_copy(update={"decisions": []})
+    api.use_llm(MockLLM(structured={ReportExtraction: no_decisions}))
+
+    assert (await api.retry(meeting["id"])).status_code == 202
+    await api.drain()
+
+    decisions = (await api.get("/decisions")).json()
+    assert [(d["id"], d["status"], d["relation"]) for d in decisions] == [
+        ("d-send", "active", None)
+    ]
+
+
+class FailingIndex(MeetingMemory):
+    async def index_meeting(self, *args, **kwargs):
+        raise LLMError("embedding service at 10.0.0.9 returned 500")
+
+
+async def test_a_failed_index_still_reaches_review_and_says_indexing_failed(api):
+    api.use_memory(FailingIndex(MockEmbedder(), InMemoryMemoryStore(dim=768)))
+
+    meeting = await ended(api)
+
+    assert await api.status(meeting["id"]) == "needs_review"
+    assert (await api.report(meeting["id"])).status_code == 200
+    progress = await api.progress(meeting["id"])
+    assert (progress["done"], progress["error"]) == (True, None)
+    (indexing,) = [s for s in progress["steps"] if s.startswith("Indexing for search")]
+    assert "failed" in indexing and "10.0.0.9" not in indexing
+
+
+async def test_unusable_memory_leaves_linking_to_lexical_candidates(api, store):
+    send = past_decision("d-send", "Send the waitlist email as soon as the fix merges")
+    await past_meeting(store, "Launch planning", send)
+    llm = MockLLM(structured={ReportExtraction: EXTRACTION, DecisionVerdicts: DecisionVerdicts()})
+    api.use_llm(llm)
+    api.use_memory(UnusableMemory("the embedder makes 1536-dimension vectors; the store holds 768"))
+
+    meeting = await ended(api)
+
+    assert await api.status(meeting["id"]) == "needs_review"
+    (call,) = calls_for(llm, DecisionVerdicts)
+    assert "d-send" in call.prompt  # shares "waitlist email" with the new decision
+
+
+async def test_misconfigured_memory_says_so_in_the_index_step(api):
+    api.use_memory(UnusableMemory("the embedder makes 1536-dimension vectors; the store holds 768"))
+
+    meeting = await ended(api)
+
+    assert await api.status(meeting["id"]) == "needs_review"
+    progress = await api.progress(meeting["id"])
+    (indexing,) = [s for s in progress["steps"] if s.startswith("Indexing for search")]
+    assert "misconfigured" in indexing and "1536" in indexing
+    assert "not configured" not in indexing

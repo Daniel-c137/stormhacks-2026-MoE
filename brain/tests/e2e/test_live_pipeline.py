@@ -1,8 +1,11 @@
 """Live: the standup ingested through the API and ended by its host; real Gemini writes it up
 (with the fallback chain) and real Gemini embeddings index it into an in-memory vector store.
+The meeting has an agenda with an item nobody discusses, and the team has an earlier decision
+the standup reverses, so the agenda block and past-decision linking both meet a real model.
 Needs GEMINI_API_KEY, GEMINI_MODEL, GEMINI_EMBEDDING_MODEL and GEMINI_EMBEDDING_DIM.
 Deselected unless pytest runs with `-m live`."""
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -15,7 +18,7 @@ from brain.main import create_app
 from brain.memory import InMemoryMemoryStore, MeetingMemory
 from brain.report import TranscriptInput
 from brain.store import InMemoryStore
-from contracts import AGENT_PARTICIPANT_ID, Report, Team
+from contracts import Decision, Report, Team
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 WORKER_TOKEN = "live-worker-token"
@@ -45,6 +48,32 @@ async def test_gemini_writes_up_the_ended_standup_and_indexes_it():
     embedder = make_embedder(settings)
     assert isinstance(llm, GeminiLLM) and isinstance(embedder, GeminiEmbedder)
     memory = MeetingMemory(embedder, InMemoryMemoryStore(dim=embedder.dim))
+    earlier = await store.create_meeting(team.id, "Launch planning", host.id)
+    earlier = await store.update_meeting(
+        earlier.model_copy(
+            update={
+                "status": "needs_review",
+                "started_at": datetime(2026, 9, 25, 9, 30, tzinfo=UTC),
+            }
+        )
+    )
+    send_now = "Send the waitlist email as soon as the email exploit fix is merged."
+    await store.save_report(
+        Report(
+            meeting_id=earlier.id,
+            summary="Launch planning.",
+            decisions=[
+                Decision(
+                    id="d-send-now",
+                    meeting_id=earlier.id,
+                    text="Send the waitlist email as soon as the exploit fix merges",
+                    made_by="Alice Moreau",
+                    t=120,
+                    quote=send_now,
+                )
+            ],
+        )
+    )
 
     app = create_app()
     app.dependency_overrides[get_store] = lambda: store
@@ -58,6 +87,17 @@ async def test_gemini_writes_up_the_ended_standup_and_indexes_it():
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://brain") as http:
         meeting = (await http.post("/meetings", json={"title": standup.title})).json()
+        agenda = await http.put(
+            f"/meetings/{meeting['id']}/agenda",
+            json={
+                "items": [
+                    {"title": "Double-charge refunds", "minutes": 5},
+                    {"title": "Waitlist email timing", "minutes": 5},
+                    {"title": "Office move logistics", "minutes": 10},
+                ]
+            },
+        )
+        assert agenda.status_code == 200, agenda.text
         segments = [
             s.model_copy(
                 update={"meeting_id": meeting["id"], "seg_id": f"{meeting['id']}-{s.seg_id}"}
@@ -82,17 +122,18 @@ async def test_gemini_writes_up_the_ended_standup_and_indexes_it():
         assert status == "needs_review"
         report = Report.model_validate((await http.get(f"/meetings/{meeting['id']}/report")).json())
 
-    transcript = {s.text for s in standup.segments}
-    members = {p.id for p in standup.members}
+    # Quotes and owners are checked by the grounding whatever the model says; these are not.
+    print(f"topics: {report.topics}")
+    print(f"decisions: {[(d.text, d.relation) for d in report.decisions]}")
     assert report.summary
-    assert report.tasks, "a standup with a stated refund commitment should yield a task"
-    for task in report.tasks:
-        assert task.quote in transcript
-        assert task.owner_id is None or task.owner_id in members
-        assert task.owner_id != AGENT_PARTICIPANT_ID
-    assert all(d.quote in transcript for d in report.decisions)
     refund = [t for t in report.tasks if "refund" in t.title.lower()]
     assert refund and refund[0].owner_id == "p-bob"
+    assert report.topics, "the standup covered several agenda items"
+    assert not any("office" in topic.lower() for topic in report.topics)
+    (past,) = [d for d in await store.decisions(team.id) if d.id == "d-send-now"]
+    print(f"past decision: {past.status} {past.relation}")
+    assert past.status == "superseded"
+    assert past.relation and past.relation.decision_id in {d.id for d in report.decisions}
 
     hits = await memory.search(team.id, "refund", k=10)
     for hit in hits:
