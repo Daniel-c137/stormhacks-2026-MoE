@@ -3,7 +3,7 @@
 import httpx
 import pytest
 
-from contracts import TranscriptSegment
+from contracts import Answer, Invocation, TranscriptSegment
 from realtime_worker.brain_client import (
     BrainRejected,
     BrainUnavailable,
@@ -33,7 +33,7 @@ def seg(meeting_id: str, n: int) -> TranscriptSegment:
 class Recorder:
     """httpx transport that answers with scripted statuses (or raises) and records requests."""
 
-    def __init__(self, *responses: int | Exception):
+    def __init__(self, *responses: int | httpx.Response | Exception):
         self.responses = list(responses)
         self.requests: list[httpx.Request] = []
 
@@ -42,7 +42,7 @@ class Recorder:
         outcome = self.responses.pop(0) if self.responses else 204
         if isinstance(outcome, Exception):
             raise outcome
-        return httpx.Response(outcome)
+        return outcome if isinstance(outcome, httpx.Response) else httpx.Response(outcome)
 
 
 def client(recorder: Recorder, attempts: int = 3) -> HttpBrainClient:
@@ -85,7 +85,7 @@ async def test_gives_up_after_the_last_attempt():
     assert len(recorder.requests) == 3
 
 
-@pytest.mark.parametrize("status", [401, 404, 422])
+@pytest.mark.parametrize("status", [401, 404, 409, 422, 501])
 async def test_a_rejection_is_not_retried(status):
     recorder = Recorder(status)
 
@@ -96,12 +96,83 @@ async def test_a_rejection_is_not_retried(status):
     assert len(recorder.requests) == 1
 
 
+@pytest.mark.parametrize("status", [408, 429])
+async def test_timeouts_and_rate_limits_are_retried(status):
+    recorder = Recorder(status, 204)
+
+    await client(recorder).ingest_segments("m-1", [seg("m-1", 1)])
+
+    assert len(recorder.requests) == 2
+
+
+async def test_a_rejection_never_carries_transcript_text_into_logs():
+    echo = httpx.Response(
+        422, json={"detail": [{"msg": "Field required", "input": {"text": "secret words"}}]}
+    )
+
+    with pytest.raises(BrainRejected) as caught:
+        await client(Recorder(echo)).ingest_segments("m-1", [seg("m-1", 1)])
+
+    assert "secret words" not in str(caught.value)
+    assert "422" in str(caught.value)
+
+
+async def test_a_plain_detail_is_kept_but_capped():
+    long = httpx.Response(409, json={"detail": "seg_id m-1-x was already saved " + "x" * 500})
+
+    with pytest.raises(BrainRejected) as caught:
+        await client(Recorder(long)).ingest_segments("m-1", [seg("m-1", 1)])
+
+    assert "already saved" in str(caught.value)
+    assert len(str(caught.value)) < 300
+
+
 async def test_nothing_to_send_makes_no_request():
     recorder = Recorder()
 
     await client(recorder).ingest_segments("m-1", [])
 
     assert recorder.requests == []
+
+
+# invoke
+
+
+def invocation() -> Invocation:
+    return Invocation(
+        id="inv-1",
+        meeting_id="m-1",
+        via="voice",
+        visibility="public",
+        asked_by_id="u-alex",
+        asked_by_name="Alex Chen",
+        question="what did we decide about Postgres?",
+        t=12.0,
+    )
+
+
+async def test_invoke_posts_the_question_with_recent_segments_and_returns_the_answer():
+    answer = Answer(id="a-1", invocation_id="inv-1", text="Keep Postgres (standup, 03:12).")
+    recorder = Recorder(httpx.Response(200, json={"answer": answer.model_dump(mode="json")}))
+
+    got = await client(recorder).invoke(invocation(), [seg("m-1", 1)])
+
+    assert got == answer
+    [request] = recorder.requests
+    assert str(request.url) == "http://brain.test/internal/meetings/m-1/invoke"
+    body = httpx.Response(200, content=request.content).json()
+    assert body["invocation"]["id"] == "inv-1"
+    assert [s["seg_id"] for s in body["recent_segments"]] == ["m-1-u-alex-1"]
+
+
+@pytest.mark.parametrize("failure", [503, httpx.ReadTimeout("slow")])
+async def test_invoke_is_never_retried_because_it_is_not_idempotent(failure):
+    recorder = Recorder(failure, 200)
+
+    with pytest.raises(BrainUnavailable):
+        await client(recorder).invoke(invocation(), [])
+
+    assert len(recorder.requests) == 1
 
 
 def test_missing_brain_settings_are_reported_not_guessed():
