@@ -17,21 +17,22 @@ NAME_ONLY_SECONDS = 15.0
 ASK_SECONDS = 30.0
 
 LEADING_PUNCTUATION = " \t,.:;!?-" + chr(0x2013) + chr(0x2014)  # en and em dash
-# Words people say before addressing someone: "Hey OmniMan", "OK so, OmniMan".
+# Words people say before addressing someone: "Hey Polaris", "OK so, Polaris".
 OPENERS = r"(?:(?:hey|hi|ok|okay|so|um|uh|alright|right|and)\W+)*"
 # While waiting for the question, shorter segments are filler ("Um,", "So...").
 MIN_QUESTION_WORDS = 2
 
 
 def default_aliases(agent_name: str) -> list[str]:
-    """The name as written, plus its words apart: "OmniMan" -> ["OmniMan", "Omni Man"]."""
+    """The name as written, plus its words apart when it has several: "Polaris" -> ["Polaris"],
+    "NorthStar" -> ["NorthStar", "North Star"]."""
     apart = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", agent_name)
     return [agent_name] if apart == agent_name else [agent_name, apart]
 
 
 def alias_pattern(aliases: list[str]) -> str:
-    """Any alias, with the words written together or apart ("omniman", "Omni Man", "Omni-Man").
-    Only spaces and hyphens may sit between the words, never a full stop."""
+    """Any alias, with the words written together or apart ("northstar", "North Star",
+    "North-Star"). Only spaces and hyphens may sit between the words, never a full stop."""
     variants = {
         tuple(w.casefold() for w in re.sub(r"(?<=[a-z])(?=[A-Z])", " ", a).split()) for a in aliases
     }
@@ -67,6 +68,15 @@ class WakeDetector:
         `at` is on the segments' clock: seconds from the meeting start, like t_start."""
         self._pending[speaker_id] = Pending("ask", at + ASK_SECONDS)
 
+    def cancel_ask(self, speaker_id: str) -> bool:
+        """Withdraw this speaker's Ask press. True if one was waiting; a name said alone is not
+        an Ask press and stays."""
+        pending = self._pending.get(speaker_id)
+        if pending is None or pending.via != "ask":
+            return False
+        del self._pending[speaker_id]
+        return True
+
     def on_segment(self, segment: TranscriptSegment) -> Invocation | None:
         if not segment.is_final or segment.speaker_id == AGENT_PARTICIPANT_ID:
             return None
@@ -90,7 +100,7 @@ class WakeDetector:
         return self._invocation(segment, "voice", question)
 
     def _addressed(self, text: str) -> tuple[bool, str]:
-        """(is the assistant addressed, the question). "OmniMan, X" and "X, OmniMan?" ask X;
+        """(is the assistant addressed, the question). "Polaris, X" and "X, Polaris?" ask X;
         a mid-sentence mention is talking about the assistant, not to it."""
         if opening := self._opening.search(text):
             if question := after(text, opening):

@@ -34,6 +34,7 @@ from .api import (
     PasswordChange,
     ProfileUpdate,
     SegmentsIngest,
+    WorkerMeetingResponse,
 )
 from .chat import ChatMessage
 from .events import TOPIC_PAYLOADS, AskSignal, StagePayload, Topic
@@ -112,5 +113,6 @@ __all__ = [
     "Topic",
     "TranscriptSegment",
     "Voice",
+    "WorkerMeetingResponse",
     "get_identity",
 ]

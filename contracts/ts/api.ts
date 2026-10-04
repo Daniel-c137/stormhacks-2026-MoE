@@ -129,3 +129,11 @@ export interface InvokeResponse {
 export interface KeytermsResponse {
   terms: string[];
 }
+
+/** realtime -> brain when the worker joins a meeting's room (named by the meeting id) and before
+ * it speaks. Segment times are seconds from meeting.started_at. voice_id is the team's chosen
+ * agent voice; null means the worker's default (ELEVENLABS_VOICE_ID). */
+export interface WorkerMeetingResponse {
+  meeting: Meeting;
+  voice_id?: string | null;
+}

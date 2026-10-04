@@ -296,7 +296,7 @@ async def make_agent(bus, brain, transcription, tts, speaker, chat):
 
 
 @pytest.fixture
-def agent(make_agent):
+async def agent(make_agent):
     return make_agent()
 
 

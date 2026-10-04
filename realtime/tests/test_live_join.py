@@ -2,9 +2,10 @@
 synthetic participant who says "Polaris, what is the refund window?" from a macOS `say` recording.
 
 Checks that captions reach the room, the final segment is saved in the brain, the invocation
-produces a shared response card, a Speak click makes Polaris publish audio, and the agenda tick
-publishes the agenda. Costs a few seconds of Scribe audio, one Gemini answer and at most
-SPOKEN_ANSWER_MAX_CHARS characters of ElevenLabs speech.
+produces a shared response card, a Speak click makes Polaris publish audio, the agenda tick
+publishes the agenda, and a public @mention in LiveKit chat is answered in chat with both messages
+saved. Costs a few seconds of Scribe audio, two Gemini answers and at most SPOKEN_MAX characters of
+ElevenLabs speech.
 
 Run against the LiveKit dev server (`docker run --rm -p 7880:7880 -p 7881:7881 -p 7882:7882/udp
 livekit/livekit-server --dev --bind 0.0.0.0`):
@@ -200,9 +201,14 @@ def world(pg_server, tmp_path_factory) -> Iterator[World]:  # noqa: F811
                     stderr=subprocess.STDOUT,
                 )
             try:
-                time.sleep(3)  # registers with LiveKit
-                if worker.poll() is not None:
-                    pytest.fail(f"the worker exited with {worker.returncode}; see {worker_log}")
+                # Automatic dispatch only reaches workers registered when the room is created.
+                deadline = time.monotonic() + 60
+                while "registered worker" not in worker_log.read_text():
+                    if worker.poll() is not None:
+                        pytest.fail(f"the worker exited with {worker.returncode}; see {worker_log}")
+                    if time.monotonic() > deadline:
+                        pytest.fail(f"the worker did not register within 60 s; see {worker_log}")
+                    time.sleep(0.3)
                 yield World(dsn, meeting_id, url, token, {"brain": brain_log, "worker": worker_log})
             finally:
                 stop(worker)
@@ -235,6 +241,7 @@ class Participant:
         self.agent_joined = asyncio.Event()
         self.agent_audio: list[tuple[float, int]] = []  # (time, peak) of each agent frame
         self._readers: list[asyncio.Task] = []
+        self.chat: list[tuple[str, str]] = []  # (sender identity, text) on LiveKit chat
         self.source = rtc.AudioSource(16000, 1)
 
     async def join(self, meeting_id: str) -> None:
@@ -265,6 +272,13 @@ class Participant:
             ):
                 self._readers.append(asyncio.create_task(self._listen(track)))
 
+        def on_chat(reader: rtc.TextStreamReader, sender: str) -> None:
+            async def read() -> None:
+                self.chat.append((sender, await reader.read_all()))
+
+            self._readers.append(asyncio.create_task(read()))
+
+        self.room.register_text_stream_handler("lk.chat", on_chat)
         await self.room.connect(settings.livekit_url, token)
         if any(p == AGENT_PARTICIPANT_ID for p in self.room.remote_participants):
             self.agent_joined.set()
@@ -312,6 +326,10 @@ async def eventually(condition, timeout: float, what: str):
     pytest.fail(f"timed out after {timeout:.0f} s waiting for {what}")
 
 
+def spoken_characters(log: Path) -> int:
+    return sum(int(n) for n in re.findall(r"Speaking card \S+: (\d+) characters", log.read_text()))
+
+
 def scribe_seconds(log: Path) -> float:
     return sum(
         float(s) for s in re.findall(r"Scribe stream closed after ([\d.]+) s", log.read_text())
@@ -327,7 +345,7 @@ async def test_polaris_joins_transcribes_answers_and_speaks_on_click(world, ques
     try:
         await asyncio.wait_for(alex.agent_joined.wait(), 30)
         agent = alex.room.remote_participants[AGENT_PARTICIPANT_ID]
-        assert agent.name == "Polaris"
+        await eventually(lambda: agent.name == "Polaris", 5, "the agent's display name")
 
         mic = await alex.speak(question_wav, silence_seconds=2.5)
 
@@ -379,6 +397,26 @@ async def test_polaris_joins_transcribes_answers_and_speaks_on_click(world, ques
 
         agenda = await eventually(lambda: alex.on(Topic.AGENDA), 15, "the agenda tick")
         assert agenda[-1]["items"][0]["title"] == "Refund window"
+
+        # a public @mention in LiveKit chat is answered in chat, and both messages are saved
+        await alex.room.local_participant.send_text(
+            "@Polaris who owns the refund window?", topic="lk.chat"
+        )
+        [(_, reply)] = await eventually(
+            lambda: [(who, text) for who, text in alex.chat if who == AGENT_PARTICIPANT_ID],
+            90,
+            "Polaris's chat answer",
+        )
+        chat = []
+        deadline = time.monotonic() + 15
+        while len(chat) < 2 and time.monotonic() < deadline:
+            chat = await store.public_chat(world.meeting_id)
+            await asyncio.sleep(0.3)
+        assert [(m.sender_id, m.is_agent) for m in chat] == [
+            (ALEX.id, False),
+            (AGENT_PARTICIPANT_ID, True),
+        ]
+        assert chat[1].text == reply
     finally:
         await alex.leave()
 
@@ -392,7 +430,9 @@ async def test_polaris_joins_transcribes_answers_and_speaks_on_click(world, ques
         f"\ncard answer ({len(card.answer.text)} chars): {card.answer.text[:300]!r}"
         f"\nspoken card: {spoken[0]['id'] == card.id}; audible agent frames: {len(loud)}"
         f"\nagenda: {[i['title'] for i in agenda[-1]['items']]}"
+        f"\nchat answer: {reply[:200]!r}; saved chat: {[m.sender_id for m in chat]}"
         f"\nScribe audio sent: {scribe_seconds(world.logs['worker']):.1f} s"
+        f"\nElevenLabs speech sent: {spoken_characters(world.logs['worker'])} characters"
         f"\nElevenLabs characters used this period: before {characters_before}, "
         f"after {characters_after}"
         f"\nlogs: {world.logs}"

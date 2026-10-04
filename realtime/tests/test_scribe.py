@@ -11,7 +11,7 @@ import pytest
 from livekit import rtc
 from websockets.exceptions import ConnectionClosedError
 
-from contracts import Invocation
+from contracts import Invocation, TranscriptSegment
 from realtime_worker.invocation import WakeDetector
 from realtime_worker.scribe import SCRIBE_SAMPLE_RATE, ScribeError, ScribeSTT, parse_event
 from realtime_worker.stt import SpeechPiece
@@ -157,6 +157,7 @@ async def test_opens_one_realtime_session_with_the_model_format_vad_and_keyterms
     assert query["commit_strategy"] == ["vad"]
     assert query["include_timestamps"] == ["true"]
     assert query["keyterms"] == ["Polaris", "DS-104", "refund window"]
+    assert query["language_code"] == ["en"]
     assert scribe.headers == {"xi-api-key": KEY}
     assert KEY not in scribe.url
     assert scribe.closed
@@ -383,6 +384,38 @@ async def test_failing_to_connect_raises():
     mic.end()
     with pytest.raises(OSError):
         await collect(stt(refuse).stream(mic), [])
+
+
+def test_full_width_punctuation_is_normalised_so_the_wake_phrase_is_found():
+    """Scribe has returned full-width commas and question marks for English speech."""
+    final = parse_event(
+        json.dumps(
+            {
+                "message_type": "committed_transcript_with_timestamps",
+                "text": "Polaris\uff0cwhat is the refund window\uff1f",
+                "words": words(("Polaris\uff0c", 0.0, 0.5), ("window\uff1f", 1.0, 1.5)),
+            }
+        )
+    )
+    partial = parse_event(
+        json.dumps({"message_type": "partial_transcript", "text": "Polaris\uff0c"})
+    )
+
+    assert final.text == "Polaris, what is the refund window?"
+    assert partial.text == "Polaris,"
+    inv = WakeDetector(["Polaris"]).on_segment(
+        TranscriptSegment(
+            seg_id="s",
+            meeting_id="m-1",
+            speaker_id="u-alex",
+            speaker_name="Alex Chen",
+            text=final.text,
+            is_final=True,
+            t_start=0.0,
+            t_end=1.5,
+        )
+    )
+    assert inv is not None and inv.question == "what is the refund window?"
 
 
 def test_events_are_parsed_by_message_type():

@@ -149,3 +149,12 @@ class KeytermsResponse(BaseModel):
     Scribe Realtime's limits (brain.keyterms)."""
 
     terms: list[str]
+
+
+class WorkerMeetingResponse(BaseModel):
+    """realtime -> brain when the worker joins a meeting's room (the room is named by the meeting
+    id) and before it speaks. Segment times are seconds from meeting.started_at. voice_id is the
+    team's chosen agent voice; None means the worker's default (ELEVENLABS_VOICE_ID)."""
+
+    meeting: Meeting
+    voice_id: str | None = None

@@ -20,6 +20,7 @@ from contracts import (
     KeytermsResponse,
     SegmentsIngest,
     TranscriptSegment,
+    WorkerMeetingResponse,
 )
 from contracts.meeting import MeetingStatus
 
@@ -42,7 +43,6 @@ from .deps import (
     get_orchestrator,
     get_settings,
     get_store,
-    not_implemented,
     require_internal,
 )
 
@@ -107,10 +107,49 @@ def segment_problem(segment: TranscriptSegment, meeting_id: str, speakers: set[s
     return None
 
 
+@router.get("/meetings/{meeting_id}")
+async def worker_meeting(
+    meeting_id: str, store: Store = Depends(get_store)
+) -> WorkerMeetingResponse:
+    """The worker reads this when it is dispatched to a room (named by the meeting id), to put
+    segment times on the meeting's clock and to leave rooms that are not live meetings, and again
+    before it speaks, for the team's chosen voice."""
+    try:
+        meeting = await store.meeting(meeting_id)
+    except NotFound:
+        raise HTTPException(status_code=404, detail="Meeting not found") from None
+    settings = await store.settings(meeting.team_id)
+    return WorkerMeetingResponse(meeting=meeting, voice_id=settings.voice)
+
+
 @router.post("/meetings/{meeting_id}/chat", status_code=204)
-async def ingest_public_chat(meeting_id: str, body: ChatMessage) -> None:
-    """Public chat only. Private chat never reaches storage."""
-    not_implemented()
+async def ingest_public_chat(
+    meeting_id: str, body: ChatMessage, store: Store = Depends(get_store)
+) -> None:
+    """Public chat only, from a participant or the agent; an identical resend (same id) is
+    ignored. Private chat never reaches storage: it is refused, never saved. Taken while segments
+    are, so the last messages land after the host ends the meeting."""
+    try:
+        meeting = await store.meeting(meeting_id)
+    except NotFound:
+        raise HTTPException(status_code=404, detail="Meeting not found") from None
+    if body.visibility != "public" or body.recipient_id is not None:
+        raise HTTPException(status_code=422, detail="Private chat is never stored")
+    if meeting.status not in ACCEPTING or meeting.transcript_deleted_at is not None:
+        raise HTTPException(
+            status_code=409, detail=f"This meeting is {meeting.status}; it takes no new chat"
+        )
+    if body.meeting_id != meeting_id:
+        raise HTTPException(status_code=422, detail="The message belongs to another meeting")
+    if body.sender_id not in {*meeting.participant_ids, AGENT_PARTICIPANT_ID}:
+        raise HTTPException(status_code=422, detail="The sender is not in this meeting")
+    if body.is_agent != (body.sender_id == AGENT_PARTICIPANT_ID):
+        raise HTTPException(status_code=422, detail="is_agent must match the sender")
+    if not body.text.strip():
+        raise HTTPException(status_code=422, detail="The message is blank")
+    if len(body.text) > MAX_TEXT:
+        raise HTTPException(status_code=422, detail=f"The message is over {MAX_TEXT} characters")
+    await store.add_public_chat(body)
 
 
 @router.post("/meetings/{meeting_id}/invoke")

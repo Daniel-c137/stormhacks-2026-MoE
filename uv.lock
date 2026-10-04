@@ -1021,7 +1021,9 @@ dependencies = [
     { name = "livekit-agents" },
     { name = "livekit-plugins-elevenlabs" },
     { name = "moe-contracts" },
+    { name = "numpy" },
     { name = "pydantic-settings" },
+    { name = "websockets" },
 ]
 
 [package.dev-dependencies]
@@ -1035,7 +1037,9 @@ requires-dist = [
     { name = "livekit-agents" },
     { name = "livekit-plugins-elevenlabs" },
     { name = "moe-contracts", editable = "contracts" },
+    { name = "numpy" },
     { name = "pydantic-settings" },
+    { name = "websockets" },
 ]
 
 [package.metadata.requires-dev]
