@@ -191,6 +191,7 @@ async def test_the_system_prompt_counts_work_the_team_says_needs_doing_as_a_task
     (call,) = llm.calls
     assert "needs doing" in call.system
     assert "even when nobody" in call.system
+    assert "never both a task and an open question" in call.system
 
 
 async def test_links_are_kept_only_when_the_transcript_mentions_them():
@@ -463,3 +464,66 @@ async def test_gemini_never_states_a_contradicted_claim_as_fact():
         flag in summary
         for flag in ("contradict", "after v0.9.3", "not in", "isn't in", "not yet", "github")
     )
+
+
+NOSQL = TranscriptInput(
+    meeting_id="mtg-db",
+    title="Database sync",
+    started_at=datetime(2026, 10, 4, 15, 25),
+    members=[
+        {"id": "p-danial", "name": "Danial", "short": "Danial", "initials": "D"},
+        {"id": "p-rey", "name": "Reyhaneh", "short": "Reyhaneh", "initials": "R"},
+    ],
+    segments=[
+        TranscriptSegment(
+            seg_id=f"db-{n}",
+            meeting_id="mtg-db",
+            speaker_id=speaker_id,
+            speaker_name=name,
+            text=text,
+            is_final=True,
+            t_start=n * 8.0,
+            t_end=n * 8.0 + 7,
+        )
+        for n, (speaker_id, name, text) in enumerate(
+            [
+                (
+                    "p-danial",
+                    "Danial",
+                    "I did a double-check for database availability. We have PostgreSQL and "
+                    "can use it easily for our project, so that's good.",
+                ),
+                ("p-rey", "Reyhaneh", "Okay, fine."),
+                (
+                    "p-danial",
+                    "Danial",
+                    "We also need to choose a NoSQL database for the next time.",
+                ),
+                (
+                    "p-danial",
+                    "Danial",
+                    "Because we have a lot of unstructured data that we need to store somewhere.",
+                ),
+            ]
+        )
+    ],
+)
+
+
+@pytest.mark.live
+@pytest.mark.skipif(
+    not (settings.gemini_api_key and settings.gemini_model),
+    reason="set GEMINI_API_KEY and GEMINI_MODEL to run against Gemini",
+)
+async def test_gemini_makes_work_the_team_needs_a_task_not_also_an_open_question():
+    """Meeting 036aeb86 on 2026-10-04: "we also need to choose a NoSQL database" was only an
+    open question, since nobody took it on."""
+    llm = make_llm(settings)
+
+    report = await build_report(llm, NOSQL)
+    print(f"answered by {llm.last_model}: tasks {[t.title for t in report.tasks]}")
+    print(f"open questions {report.open_questions}")
+
+    [nosql] = [t for t in report.tasks if "nosql" in t.title.casefold()]
+    assert nosql.owner_id is None and nosql.due is None
+    assert not any("nosql" in q.casefold() for q in report.open_questions)
