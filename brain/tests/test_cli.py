@@ -286,7 +286,7 @@ def test_purge_without_a_database_says_what_is_missing(monkeypatch):
     assert "DATABASE_URL is not configured" in str(exit_info.value.code)
 
 
-# add-team and add-user: accounts are made from the command line; there is no public sign-up
+# add-team and add-user: accounts are made from the command line (sign-up is invite-only)
 
 
 @pytest.fixture
