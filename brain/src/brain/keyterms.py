@@ -21,6 +21,8 @@ MAX_KEYTERM_CHARS = 20
 
 # Dropped from the end of a term cut at a word boundary, so a cut "Refunds," is "Refunds"
 TRAILING = ",;:-/&("
+# A greeting before a custom wake phrase only costs a slot: "Hey Atlas" is biased as "Atlas".
+GREETINGS = frozenset({"hey", "hi", "hello", "ok", "okay", "yo"})
 
 
 def fit(term: str) -> str | None:
@@ -35,6 +37,14 @@ def fit(term: str) -> str | None:
     if len(kept) < len(words):
         kept = " ".join(kept).rstrip(TRAILING).split()
     return " ".join(kept) or None
+
+
+def without_greeting(phrase: str) -> str:
+    """The wake phrase without the greetings it starts with."""
+    words = phrase.split()
+    while words and words[0].strip(",.!").casefold() in GREETINGS:
+        words.pop(0)
+    return " ".join(words)
 
 
 def select(candidates: Iterable[str]) -> list[str]:
@@ -54,14 +64,15 @@ def select(candidates: Iterable[str]) -> list[str]:
 
 
 async def meeting_keyterms(store: Store, settings: Settings, meeting: Meeting) -> list[str]:
-    """In order: the agent's name and the team's own wake phrase (whole, then word by word);
-    each member's full and first name; the repository's name and the Jira project key; the
-    agenda's titles; then the keys of the project's unfinished Jira issues while there is room.
-    A team without its own repository or project uses the deployment's, as the agent does."""
+    """In order: the agent's name and the team's own wake phrase (without a leading greeting,
+    whole, then word by word); each member's full and first name; the repository's name and the
+    Jira project key; the agenda's titles; then the keys of the project's unfinished Jira issues
+    while there is room. A team without its own repository or project uses the deployment's, as
+    the agent does."""
     team = await store.settings(meeting.team_id)
     candidates = [get_identity().agent_name]
-    if team.wake_phrase:
-        candidates += [team.wake_phrase, *team.wake_phrase.split()]
+    if phrase := without_greeting(team.wake_phrase or ""):
+        candidates += [phrase, *phrase.split()]
     for person in await store.members(meeting.team_id):
         candidates += [person.name, *person.name.split()[:1]]
     if repo := team.github.repo or settings.github_repo:

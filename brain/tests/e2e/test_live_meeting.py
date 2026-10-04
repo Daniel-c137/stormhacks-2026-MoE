@@ -343,7 +343,7 @@ class TestLiveMeeting:
             "asked_by_id": alice.id,
             "asked_by_name": alice.name,
             "t": 50,
-            "question": f"Hey {get_identity().agent_name}, what's the refund window in the code?",
+            "question": f"{get_identity().agent_name}, what's the refund window in the code?",
         }
         r = flow.client.post(
             f"/internal/meetings/{flow.mid}/invoke",
