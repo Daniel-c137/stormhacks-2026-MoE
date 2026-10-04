@@ -17,12 +17,15 @@ from contracts import (
     TranscriptSegment,
 )
 
+from ..agent.pipeline import PipelineRunner, PostMeetingPipeline
 from ..jira import ApprovalRequired, JiraPusher, JiraUnavailable, apply_results
 from ..report import ProcessedMeeting
 from ..store import Conflict, NotFound, Store
 from .deps import (
     current_user,
     get_jira_pusher,
+    get_pipeline,
+    get_runner,
     get_store,
     not_implemented,
     team_meeting,
@@ -64,6 +67,30 @@ async def get_report_progress(
     if progress is None:
         raise HTTPException(status_code=404, detail="The report has not been started")
     return progress
+
+
+@router.post("/meetings/{meeting_id}/report/retry", status_code=202)
+async def retry_report(
+    meeting_id: str,
+    user: Person = Depends(current_user),
+    store: Store = Depends(get_store),
+    pipeline: PostMeetingPipeline = Depends(get_pipeline),
+    runner: PipelineRunner = Depends(get_runner),
+) -> ReportProgress:
+    """Host only, once the last write-up failed. Starts it over; the report and the meeting's
+    memory are replaced, not added to."""
+    meeting = await team_meeting(store, user, meeting_id)
+    if meeting.host_id != user.id:
+        raise HTTPException(status_code=403, detail="Only the host can retry the write-up")
+    if meeting.status != "processing":
+        raise HTTPException(status_code=409, detail=f"The meeting is {meeting.status}")
+    progress = await store.report_progress(meeting.id)
+    if runner.running(meeting.id) or progress is None or progress.error is None:
+        raise HTTPException(status_code=409, detail="The write-up has not failed")
+    queued = await pipeline.queued(meeting.id)
+    if not runner.start(meeting.id, pipeline.run):
+        raise HTTPException(status_code=409, detail="The write-up is already running")
+    return queued
 
 
 @router.patch("/meetings/{meeting_id}/tasks/{task_id}")

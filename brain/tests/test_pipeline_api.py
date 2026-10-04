@@ -379,18 +379,21 @@ async def test_without_embeddings_the_write_up_finishes_and_says_indexing_was_sk
 # once only, failures and retries
 
 
-async def test_ending_twice_at_once_writes_up_once(api, llm):
+async def test_ending_twice_at_once_writes_up_once(api):
+    gated = GatedLLM(structured={ReportExtraction: EXTRACTION})
+    api.use_llm(gated)  # held, so both ends answer while the write-up is still running
     meeting = await api.create()
     await api.ingest(meeting["id"])
 
     first, second = await asyncio.gather(api.end(meeting["id"]), api.end(meeting["id"]))
+    gated.gate.set()
     await api.drain()
     again = await api.end(meeting["id"])
     await api.drain()
 
     assert [r.json()["status"] for r in (first, second)] == ["processing", "processing"]
     assert again.json()["status"] == "needs_review"
-    assert len(calls_for(llm, ReportExtraction)) == 1
+    assert len(calls_for(gated, ReportExtraction)) == 1
 
 
 async def test_a_failed_step_keeps_the_meeting_processing_with_the_error_and_saves_nothing(
