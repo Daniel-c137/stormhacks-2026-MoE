@@ -99,6 +99,12 @@ def api_error(code: int, status: str, message: str = "boom") -> genai_errors.API
     return genai_errors.APIError(code, body)
 
 
+@pytest.fixture(autouse=True)
+def forget_missing_models(monkeypatch):
+    """Each test starts as a fresh process that has not yet warned about any missing model."""
+    monkeypatch.setattr("brain.llm.gemini.warned_missing", set())
+
+
 @pytest.fixture
 def recorded_clients(monkeypatch) -> list[dict]:
     """Replaces genai.Client and records the arguments GeminiLLM builds it with."""
@@ -207,7 +213,7 @@ async def test_gemini_stops_at_the_first_model_that_answers():
 
 @pytest.mark.parametrize(
     ("code", "status"),
-    [(400, "INVALID_ARGUMENT"), (403, "PERMISSION_DENIED"), (404, "NOT_FOUND")],
+    [(400, "INVALID_ARGUMENT"), (401, "UNAUTHENTICATED"), (403, "PERMISSION_DENIED")],
 )
 async def test_gemini_does_not_fall_back_on_request_errors(code, status):
     models = FakeModels(by_model={"primary": api_error(code, status, "bad request")})
@@ -218,6 +224,65 @@ async def test_gemini_does_not_fall_back_on_request_errors(code, status):
 
     assert models.models_called == ["primary"]
     assert llm.last_model is None
+
+
+async def test_gemini_skips_a_model_that_does_not_exist_for_this_key():
+    models = FakeModels(
+        by_model={
+            "retired": api_error(404, "NOT_FOUND", "no longer available"),
+            "working": response("from the working model"),
+        }
+    )
+    llm = gemini(models, "retired", "working")
+
+    assert await llm.generate("q") == "from the working model"
+
+    assert models.models_called == ["retired", "working"]
+    assert llm.last_model == "working"
+
+
+async def test_gemini_error_names_every_missing_model():
+    models = FakeModels(error=api_error(404, "NOT_FOUND", "no longer available"))
+
+    with pytest.raises(LLMError, match="unavailable on every model tried") as info:
+        await gemini(models, "retired", "unknown").generate("q")
+
+    message = str(info.value)
+    assert "retired: 404 NOT_FOUND" in message
+    assert "unknown: 404 NOT_FOUND" in message
+    assert models.models_called == ["retired", "unknown"]
+
+
+async def test_gemini_stops_at_a_request_error_after_a_missing_model():
+    models = FakeModels(
+        by_model={
+            "retired": api_error(404, "NOT_FOUND"),
+            "second": api_error(400, "INVALID_ARGUMENT", "bad schema"),
+        }
+    )
+
+    with pytest.raises(LLMError, match="bad schema"):
+        await gemini(models, "retired", "second", "third").generate("q")
+
+    assert models.models_called == ["retired", "second"]
+
+
+async def test_gemini_warns_once_per_missing_model_without_the_request(caplog):
+    models = FakeModels(
+        by_model={"stale-model": api_error(404, "NOT_FOUND"), "working": response("ok")}
+    )
+    llm = gemini(models, "stale-model", "working")
+
+    with caplog.at_level("WARNING", logger="brain.llm.gemini"):
+        await llm.generate("secret meeting question", system="secret system prompt")
+        await llm.generate("secret meeting question")
+        await gemini(models, "stale-model", "working").generate("another question")
+
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1
+    assert "stale-model" in warnings[0]
+    assert "secret" not in warnings[0]
+    assert "question" not in warnings[0]
 
 
 async def test_gemini_does_not_fall_back_on_unusable_content():

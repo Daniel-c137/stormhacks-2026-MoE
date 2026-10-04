@@ -161,7 +161,12 @@ async def test_gemini_embedder_never_mixes_models_within_one_call():
     assert [v[0] for v in out.vectors] == [1, 2]
 
 
-@pytest.mark.parametrize(("code", "status"), [(400, "INVALID_ARGUMENT"), (404, "NOT_FOUND")])
+@pytest.fixture(autouse=True)
+def forget_missing_models(monkeypatch):
+    monkeypatch.setattr("brain.llm.gemini.warned_missing", set())
+
+
+@pytest.mark.parametrize(("code", "status"), [(400, "INVALID_ARGUMENT"), (401, "UNAUTHENTICATED")])
 async def test_gemini_embedder_does_not_fall_back_on_request_errors(code, status):
     models = FakeEmbedModels(by_model={"primary": api_error(code, status, "bad request")})
 
@@ -169,6 +174,34 @@ async def test_gemini_embedder_does_not_fall_back_on_request_errors(code, status
         await embedder(models, "primary", "backup").embed(["x"])
 
     assert models.models_called == ["primary"]
+
+
+async def test_gemini_embedder_skips_a_model_that_does_not_exist_for_this_key(caplog):
+    models = FakeEmbedModels(by_model={"retired": api_error(404, "NOT_FOUND")})
+    gemini_embedder = embedder(models, "retired", "working")
+
+    with caplog.at_level("WARNING", logger="brain.llm.gemini"):
+        out = await gemini_embedder.embed(["private words"])
+        await gemini_embedder.embed(["private words"])
+
+    assert out.model == "working"
+    assert models.models_called == ["retired", "working", "retired", "working"]
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1
+    assert "retired" in warnings[0]
+    assert "private" not in warnings[0]
+
+
+async def test_gemini_embedder_error_names_every_missing_model():
+    models = FakeEmbedModels(
+        by_model={"retired": api_error(404, "NOT_FOUND"), "unknown": api_error(404, "NOT_FOUND")}
+    )
+
+    with pytest.raises(LLMError) as info:
+        await embedder(models, "retired", "unknown").embed(["x"])
+
+    assert "retired: 404 NOT_FOUND" in str(info.value)
+    assert "unknown: 404 NOT_FOUND" in str(info.value)
 
 
 async def test_gemini_embedder_error_names_every_model_tried():
