@@ -780,6 +780,23 @@ async def test_a_seg_id_reused_with_different_content_is_a_conflict_and_saves_no
     assert await store.transcript(meeting.id) == [first]
 
 
+async def test_a_translated_segment_keeps_its_language_and_the_words_as_said(store):
+    team, alex, *_ = await two_teams(store)
+    meeting = await store.create_meeting(team.id, "Standup", alex.id)
+    translated = segment(meeting.id, 1, alex, t=10).model_copy(
+        update={
+            "text": "We keep Postgres for now.",
+            "language": "es",
+            "original_text": "Por ahora nos quedamos con Postgres.",
+        }
+    )
+    english = segment(meeting.id, 2, alex, t=20)
+
+    await store.add_segments(meeting.id, [translated, english])
+
+    assert await store.transcript(meeting.id) == [translated, english]
+
+
 async def test_segments_at_the_same_time_are_ordered_by_seg_id(store):
     team, alex, sarah, *_ = await two_teams(store)
     meeting = await store.create_meeting(team.id, "Standup", alex.id)

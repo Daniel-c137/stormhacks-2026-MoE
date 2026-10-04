@@ -309,3 +309,42 @@ def test_segments_starting_together_come_back_in_seg_id_order(worker, client_as)
     ingest(worker, meeting["id"], b, a)
 
     assert [s["seg_id"] for s in transcript(client_as(ALEX), meeting["id"]).json()] == ["a", "b"]
+
+
+# translated speech (#106)
+
+
+def test_a_translated_segment_is_saved_with_its_language_and_original(worker, client_as):
+    meeting = started(client_as)
+    said = segment(meeting["id"], 1) | {
+        "text": "We keep Postgres for now.",
+        "language": "es",
+        "original_text": "Por ahora nos quedamos con Postgres.",
+    }
+
+    assert ingest(worker, meeting["id"], said).status_code == 204
+
+    [saved] = transcript(client_as(SARAH), meeting["id"]).json()
+    assert (saved["text"], saved["language"], saved["original_text"]) == (
+        "We keep Postgres for now.",
+        "es",
+        "Por ahora nos quedamos con Postgres.",
+    )
+
+
+@pytest.mark.parametrize(
+    ("change", "why"),
+    [
+        ({"language": "es", "original_text": "   "}, "blank original"),
+        ({"language": "es", "original_text": "x" * 5001}, "original over 5000 characters"),
+        ({"language": "Spanish"}, "language is not an ISO code"),
+        ({"language": "ES"}, "language is not lowercase"),
+    ],
+)
+def test_a_bad_translation_field_rejects_the_batch(worker, client_as, change, why):
+    meeting = started(client_as)
+
+    response = ingest(worker, meeting["id"], segment(meeting["id"], 1, **change))
+
+    assert response.status_code == 422, why
+    assert transcript(client_as(ALEX), meeting["id"]).json() == []
