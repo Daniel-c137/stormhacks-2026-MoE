@@ -4,12 +4,14 @@ import pytest
 
 from brain.config import Settings
 from brain.llm import MockLLM, make_llm
+from brain.memory import Chunk, MemoryHit
 from brain.report.decisions import (
     MAX_CANDIDATES,
     DecisionVerdict,
     DecisionVerdicts,
     apply_links,
     link_decisions,
+    memory_candidates,
 )
 from brain.store import InMemoryStore
 from contracts import Decision, DecisionRelation, Report, Team
@@ -194,6 +196,93 @@ async def test_apply_links_saves_both_sides():
     assert saved["d-redis"].status == "superseded"
     assert saved["d-redis"].relation == DecisionRelation(type="superseded_by", decision_id=keep.id)
     assert saved["d-keep-pg"].relation == DecisionRelation(type="contradicts", decision_id=redis.id)
+
+
+# candidates from meeting memory
+
+
+class FakeMemory:
+    """Answers each search with the chunks scripted for that query, best first."""
+
+    def __init__(self, results: dict[str, list[Chunk]]):
+        self.results = results
+        self.searches: list[tuple[str, str, int]] = []
+
+    async def search(self, team_id: str, query: str, k: int = 8) -> list[MemoryHit]:
+        self.searches.append((team_id, query, k))
+        chunks = self.results.get(query, [])[:k]
+        return [MemoryHit(chunk=c, score=1 - i / 10) for i, c in enumerate(chunks)]
+
+
+def chunk(kind, ref_id: str | None = None, meeting_id: str = "m-sep") -> Chunk:
+    return Chunk(
+        id=f"{meeting_id}:{kind}:{ref_id}",
+        team_id="t",
+        meeting_id=meeting_id,
+        kind=kind,
+        text="...",
+        ref_id=ref_id,
+    )
+
+
+BETA = decision("d-beta", "m-sep", "Announce the beta to everyone on Monday")
+HIRE = decision("d-hire", "m-sep", "Hire a second designer")
+
+
+async def test_memory_hits_become_candidates_in_memory_order_mapped_by_ref_id():
+    memory = FakeMemory(
+        {
+            KEEP_PG.text: [
+                chunk("transcript", None),
+                chunk("decision", "d-hire"),
+                chunk("task", "d-beta"),  # a task chunk is never a decision candidate
+                chunk("decision", "d-unknown"),  # not one of the past decisions given
+                chunk("decision", "d-beta"),
+            ]
+        }
+    )
+
+    pick = await memory_candidates(memory, "t", [KEEP_PG], [REDIS, BETA, HIRE])
+
+    assert [d.id for d in pick(KEEP_PG, [REDIS, BETA, HIRE])][:2] == ["d-hire", "d-beta"]
+    (search,) = memory.searches
+    assert search[:2] == ("t", KEEP_PG.text)
+
+
+async def test_lexical_candidates_fill_in_after_the_memory_hits():
+    memory = FakeMemory({KEEP_PG.text: [chunk("decision", "d-hire")]})
+
+    pick = await memory_candidates(memory, "t", [KEEP_PG], [REDIS, HIRE, BETA])
+
+    # d-redis shares words with the new decision; d-beta shares none and memory missed it
+    assert [d.id for d in pick(KEEP_PG, [REDIS, HIRE, BETA])] == ["d-hire", "d-redis"]
+
+
+async def test_without_memory_hits_the_candidates_are_lexical():
+    pick = await memory_candidates(FakeMemory({}), "t", [KEEP_PG], [REDIS, BETA])
+
+    assert pick(KEEP_PG, [REDIS, BETA]) == [REDIS]
+
+
+async def test_memory_candidates_keep_to_the_eligible_decisions_and_the_limit():
+    many = [decision(f"d-{i}", "m-sep", f"Unrelated choice {i}") for i in range(MAX_CANDIDATES + 2)]
+    memory = FakeMemory({KEEP_PG.text: [chunk("decision", d.id) for d in [HIRE, *many]]})
+
+    pick = await memory_candidates(memory, "t", [KEEP_PG], [HIRE, *many])
+
+    shown = pick(KEEP_PG, many)  # d-hire is not eligible for this call
+    assert [d.id for d in shown] == [d.id for d in many[:MAX_CANDIDATES]]
+
+
+async def test_a_past_decision_found_only_in_memory_reaches_the_model():
+    memory = FakeMemory({KEEP_PG.text: [chunk("decision", "d-beta")]})
+    llm = verdicts()
+
+    pick = await memory_candidates(memory, "t", [KEEP_PG], [BETA])
+    await link_decisions(llm, [KEEP_PG], [BETA], candidates=pick)
+
+    (call,) = llm.calls
+    assert "d-beta" in call.prompt
 
 
 settings = Settings()

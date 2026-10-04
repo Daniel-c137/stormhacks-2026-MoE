@@ -1,3 +1,4 @@
+import logging
 import secrets
 from collections.abc import Callable
 from functools import cache
@@ -8,11 +9,15 @@ from fastapi import Depends, Header, HTTPException, Request
 
 from contracts import Meeting, Person, Team
 
+from ..agent.pipeline import PipelineRunner, PostMeetingPipeline, ReportPipeline
 from ..auth import AuthNotConfigured, InvalidToken, KeysUnavailable, TokenVerifier
 from ..config import Settings
 from ..jira import JiraPusher, jira_config
-from ..llm import LLM, LLMUnavailable, make_llm
+from ..llm import LLM, LLMUnavailable, make_embedder, make_llm
+from ..memory import MeetingMemory, PgMemoryStore
 from ..store import NotFound, Store
+
+logger = logging.getLogger(__name__)
 
 
 def not_implemented() -> NoReturn:
@@ -44,6 +49,46 @@ async def get_llm(settings: Settings = Depends(get_settings)) -> LLM:
         return make_llm(settings)
     except LLMUnavailable as e:
         raise HTTPException(status_code=503, detail=str(e)) from None
+
+
+def get_llm_factory(settings: Settings = Depends(get_settings)) -> Callable[[], LLM]:
+    """Makes the LLM when the write-up needs it, so ending a meeting never fails on an
+    unconfigured Gemini; the write-up step shows LLMUnavailable instead. Tests override it."""
+    return lambda: make_llm(settings)
+
+
+def get_memory(
+    request: Request, settings: Settings = Depends(get_settings)
+) -> MeetingMemory | None:
+    """Meeting memory in Postgres (the store's pool on app.state.db_pool) with Gemini embeddings,
+    or None when either is missing. Tests override it with an in-memory store."""
+    pool = getattr(request.app.state, "db_pool", None)
+    if pool is None:
+        return None
+    try:
+        return MeetingMemory(make_embedder(settings), PgMemoryStore(pool))
+    except LLMUnavailable:
+        return None
+    except ValueError as e:  # embedding dimensions the table cannot hold
+        logger.warning("meeting memory is unavailable: %s", e)
+        return None
+
+
+def get_pipeline(
+    store: Store = Depends(get_store),
+    settings: Settings = Depends(get_settings),
+    make_llm: Callable[[], LLM] = Depends(get_llm_factory),
+    memory: MeetingMemory | None = Depends(get_memory),
+) -> PostMeetingPipeline:
+    return ReportPipeline(store, make_llm, memory, settle_seconds=settings.pipeline_settle_seconds)
+
+
+def get_runner(request: Request) -> PipelineRunner:
+    """The app's background write-ups (created with the app)."""
+    state = request.app.state
+    if not hasattr(state, "pipeline_runner"):
+        state.pipeline_runner = PipelineRunner()
+    return state.pipeline_runner
 
 
 def get_verifier(request: Request, settings: Settings = Depends(get_settings)) -> TokenVerifier:

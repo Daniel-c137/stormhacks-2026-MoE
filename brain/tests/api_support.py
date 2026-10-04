@@ -37,6 +37,8 @@ def settings() -> Settings:
         livekit_api_key=KEY,
         livekit_api_secret=SECRET,
         brain_internal_token=WORKER_TOKEN,
+        gemini_api_key=None,  # never real Gemini; tests that need a model override get_llm*
+        pipeline_settle_seconds=0,
     )
 
 

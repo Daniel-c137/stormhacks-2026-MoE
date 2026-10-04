@@ -48,3 +48,6 @@ class Settings(BaseSettings):
     elevenlabs_api_url: str = "https://api.elevenlabs.io"
 
     brain_internal_token: str | None = None
+
+    # seconds the write-up waits after the host ends, so the worker's last final segments land
+    pipeline_settle_seconds: float = 8.0

@@ -1,10 +1,11 @@
 """What Gemini is asked for. The builder checks every answer against the transcript."""
 
+from collections.abc import Sequence
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from contracts import AGENT_PARTICIPANT_ID, Person, TranscriptSegment, get_identity
+from contracts import AGENT_PARTICIPANT_ID, AgendaItem, Person, TranscriptSegment, get_identity
 from contracts.agent import SourceKind
 
 EVIDENCE = "Ids of the transcript segments that support this, e.g. ['s4']."
@@ -82,6 +83,7 @@ def render_prompt(
     meeting_date: str | None,
     people: list[Person],
     labelled: dict[str, TranscriptSegment],
+    agenda: Sequence[AgendaItem] = (),
 ) -> str:
     agent = get_identity().agent_name
     participants = [f"- {p.id}: {p.name}" for p in people]
@@ -98,10 +100,28 @@ def render_prompt(
             "Participants (id: name):",
             *participants,
             "",
+            *agenda_lines(agenda),
             "Transcript ([segment time] speaker: text):",
             *lines,
         ]
     )
+
+
+def agenda_lines(agenda: Sequence[AgendaItem]) -> list[str]:
+    """The planned items in order, or nothing. Topics follow it only where the transcript does."""
+    if not agenda:
+        return []
+    items = [
+        f"{i}. {item.title}" + (f" ({item.minutes} min)" if item.minutes else "")
+        for i, item in enumerate(agenda, 1)
+    ]
+    return [
+        "Agenda (planned items, in order):",
+        *items,
+        "List the topics in agenda order, named after the agenda items the transcript discusses,",
+        "then any other topics discussed. Leave out agenda items the transcript never discusses.",
+        "",
+    ]
 
 
 def speaker(segment: TranscriptSegment, agent: str) -> str:

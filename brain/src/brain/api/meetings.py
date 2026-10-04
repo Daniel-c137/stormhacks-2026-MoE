@@ -15,11 +15,14 @@ from contracts import (
     Person,
 )
 
+from ..agent.pipeline import PipelineRunner, PostMeetingPipeline
 from ..config import Settings
 from ..livekit_tokens import participant_token
 from ..store import Conflict, NotFound, Store
 from .deps import (
     current_user,
+    get_pipeline,
+    get_runner,
     get_settings,
     get_store,
     not_implemented,
@@ -149,14 +152,20 @@ async def join_meeting(
 
 @router.post("/{meeting_id}/end")
 async def end_meeting(
-    meeting_id: str, user: Person = Depends(current_user), store: Store = Depends(get_store)
+    meeting_id: str,
+    user: Person = Depends(current_user),
+    store: Store = Depends(get_store),
+    pipeline: PostMeetingPipeline = Depends(get_pipeline),
+    runner: PipelineRunner = Depends(get_runner),
 ) -> Meeting:
-    """Host only. Starts the post-meeting pipeline."""
+    """Host only. Returns at once; the meeting is written up in the background."""
     meeting = await team_meeting(store, user, meeting_id)
     if meeting.host_id != user.id:
         raise HTTPException(status_code=403, detail="Only the host can end the meeting")
-    meeting, _ended = await end_live_meeting(store, meeting.id)
-    # The post-meeting pipeline starts here when _ended; only one end ever gets True.
+    meeting, ended = await end_live_meeting(store, meeting.id)
+    if ended:  # only one end ever gets here
+        await pipeline.queued(meeting.id)
+        runner.start(meeting.id, pipeline.run)
     return meeting
 
 

@@ -1,7 +1,7 @@
 """Post-meeting report: a transcript in, a grounded Report with task drafts out."""
 
 from .builder import build_report
-from .decisions import DecisionLinks, apply_links, link_decisions
+from .decisions import DecisionLinks, apply_links, link_decisions, memory_candidates
 from .extraction import (
     ExtractedDecision,
     ExtractedLink,
@@ -25,5 +25,6 @@ __all__ = [
     "build_report",
     "link_decisions",
     "load_transcript",
+    "memory_candidates",
     "parse_text_transcript",
 ]
