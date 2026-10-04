@@ -1,5 +1,4 @@
 import {
-  Archive,
   ArrowDown,
   ArrowLeft,
   ArrowRight,
@@ -80,7 +79,6 @@ function Github(props: SVGProps<SVGSVGElement>) {
 }
 
 const ICONS = {
-  archive: Archive,
   "arrow-down": ArrowDown,
   "arrow-left": ArrowLeft,
   "arrow-right": ArrowRight,

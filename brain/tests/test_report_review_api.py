@@ -1,4 +1,4 @@
-"""After the meeting: the report page, task review and approval, and the Decisions & tasks page."""
+"""After the meeting: the report page, task review and approval, and the decision and task lists."""
 
 import asyncio
 from datetime import date
@@ -363,7 +363,7 @@ def test_push_without_jira_configured_is_503(client_as, store):
     assert meeting_in_store(store, meeting["id"]).status == "needs_review"
 
 
-# the Decisions & tasks page
+# the decision and task lists
 
 
 def test_decisions_are_the_teams_newest_first_and_searchable(client_as, store):

@@ -19,6 +19,10 @@ const nextConfig: NextConfig = {
   // A self-contained server for the Docker image; tracing from the repo root includes contracts.
   output: "standalone",
   outputFileTracingRoot: repoRoot,
+  // The tasks page used to live at /memory, next to the decisions it no longer shows.
+  async redirects() {
+    return [{ source: "/memory", destination: "/tasks", permanent: true }];
+  },
   async rewrites() {
     if (!apiPath?.startsWith("/") || !brainUrl) return [];
     return [{ source: `${apiPath}/:path*`, destination: `${brainUrl}/:path*` }];
