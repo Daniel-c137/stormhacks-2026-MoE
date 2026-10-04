@@ -18,6 +18,7 @@ import type {
   InviteRequest,
   JoinMeetingResponse,
   Meeting,
+  MeetingPresence,
   PasswordChange,
   Person,
   ProfileUpdate,
@@ -119,6 +120,8 @@ export const createMeeting = (body: CreateMeetingRequest) => request<Meeting>("P
 export const listMeetings = () => get<Meeting[]>("/meetings");
 export const getMeeting = (meetingId: string) => get<Meeting>(`/meetings/${id(meetingId)}`);
 export const joinMeeting = (code: string) => request<JoinMeetingResponse>("POST", `/meetings/join/${id(code)}`);
+/** Who is in the room now, for the lobby; participant_ids is everyone who ever joined. */
+export const getPresence = (meetingId: string) => get<MeetingPresence>(`/meetings/${id(meetingId)}/presence`);
 export const endMeeting = (meetingId: string) => request<Meeting>("POST", `/meetings/${id(meetingId)}/end`);
 export const invite = (meetingId: string, body: InviteRequest) =>
   request<Meeting>("POST", `/meetings/${id(meetingId)}/invitees`, body);

@@ -100,6 +100,14 @@ class JoinMeetingResponse(BaseModel):
     token: str
 
 
+class MeetingPresence(BaseModel):
+    """GET /meetings/{id}/presence: who is connected to the meeting's room right now, in join
+    order, for the lobby. Meeting.participant_ids is everyone who ever joined. Empty unless the
+    meeting is live; the agent is never listed."""
+
+    person_ids: list[str]
+
+
 class InviteRequest(BaseModel):
     person_ids: list[str]
 

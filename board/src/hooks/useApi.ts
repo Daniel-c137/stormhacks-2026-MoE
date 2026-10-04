@@ -6,6 +6,7 @@ import type {
   ConnectorStatus,
   Decision,
   Meeting,
+  MeetingPresence,
   Person,
   Report,
   ReportProgress,
@@ -69,6 +70,8 @@ export function useQuery<T>(key: string | null, fetcher: () => Promise<T>, refre
 export const useMeetings = (refreshMs = 0): Query<Meeting[]> => useQuery("meetings", api.listMeetings, refreshMs);
 export const useMeeting = (meetingId: string, refreshMs = 0): Query<Meeting> =>
   useQuery(`meeting:${meetingId}`, () => api.getMeeting(meetingId), refreshMs);
+export const usePresence = (meetingId: string | null, refreshMs = 0): Query<MeetingPresence> =>
+  useQuery(meetingId && `presence:${meetingId}`, () => api.getPresence(meetingId ?? ""), refreshMs);
 export const useMe = (): Query<Person> => useQuery("me", api.getMe);
 export const useMembers = (): Query<Person[]> => useQuery("members", api.listMembers);
 export const useAgenda = (meetingId: string | null): Query<Agenda> =>
