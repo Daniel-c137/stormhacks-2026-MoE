@@ -23,8 +23,9 @@ AUDIO_ENDED = object()
 
 
 class FakeAudio:
-    """A participant's microphone track. Yields no frames; it just stays open, like a live
-    track, and can be read again by a restarted stream."""
+    """A participant's live microphone track: a frame every few milliseconds, forever, which a
+    reopened stream can keep reading. Each fake frame is the speaker's id so FakeSTT can tell
+    whose queue to read; the real transcriber never knows who is speaking."""
 
     def __init__(self, speaker_id: str):
         self.speaker_id = speaker_id
@@ -32,8 +33,9 @@ class FakeAudio:
     def __aiter__(self):
         return self
 
-    async def __anext__(self):
-        await asyncio.Event().wait()
+    async def __anext__(self) -> str:
+        await asyncio.sleep(0.002)
+        return self.speaker_id
 
 
 class FakeSTT:
@@ -58,8 +60,11 @@ class FakeSTT:
         for _ in range(times):
             self._queue(speaker_id).put_nowait(RuntimeError("Scribe connection dropped"))
 
-    async def stream(self, audio: FakeAudio):
-        speaker = audio.speaker_id
+    async def stream(self, audio):
+        try:
+            speaker = await anext(audio)
+        except StopAsyncIteration:
+            return
         self.started.append(speaker)
         queue = self._queue(speaker)
 
