@@ -104,3 +104,9 @@ export interface InvokeRequest {
 export interface InvokeResponse {
   answer: Answer;
 }
+
+/** Words the worker's Scribe streams are biased toward, most important first, already within
+ * Scribe Realtime's limits (brain.keyterms). */
+export interface KeytermsResponse {
+  terms: string[];
+}

@@ -28,6 +28,7 @@ from .api import (
     InvokeRequest,
     InvokeResponse,
     JoinMeetingResponse,
+    KeytermsResponse,
     ProfileUpdate,
     SegmentsIngest,
 )
@@ -82,6 +83,7 @@ __all__ = [
     "InvokeResponse",
     "JiraSettings",
     "JoinMeetingResponse",
+    "KeytermsResponse",
     "Meeting",
     "Participant",
     "Person",

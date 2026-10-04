@@ -1,10 +1,14 @@
 """The ElevenLabs voices a team can pick for the agent."""
 
+import logging
+
 import httpx
 
-from contracts import Voice
+from contracts import Voice, get_identity
 
 from .config import Settings
+
+logger = logging.getLogger(__name__)
 
 PAGE_SIZE = 100
 MAX_PAGES = 10
@@ -54,6 +58,26 @@ async def fetch_voices(
                 break
             params = {"page_size": PAGE_SIZE, "next_page_token": token}
     return voices
+
+
+def with_default(voices: list[Voice], default_id: str | None) -> list[Voice]:
+    """The agent's default voice (ELEVENLABS_VOICE_ID) first, labelled with the agent's name,
+    then the rest in the order given. A default the account does not have is logged and the list
+    is returned as it is. A team's own pick (TeamSettings.voice) is not a default."""
+    if not default_id:
+        return voices
+    found = next((v for v in voices if v.id == default_id), None)
+    if found is None:
+        logger.warning(
+            "ELEVENLABS_VOICE_ID %s is not among this ElevenLabs account's %d voices; "
+            "listing them with no default",
+            default_id,
+            len(voices),
+        )
+        return voices
+    label = f"{get_identity().agent_name}'s default voice"
+    default = found.model_copy(update={"default_label": label})
+    return [default, *(v for v in voices if v.id != default_id)]
 
 
 def to_voice(raw: dict) -> Voice:

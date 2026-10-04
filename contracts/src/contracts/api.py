@@ -120,3 +120,10 @@ class InvokeRequest(BaseModel):
 
 class InvokeResponse(BaseModel):
     answer: Answer
+
+
+class KeytermsResponse(BaseModel):
+    """Words the worker's Scribe streams are biased toward, most important first, already within
+    Scribe Realtime's limits (brain.keyterms)."""
+
+    terms: list[str]

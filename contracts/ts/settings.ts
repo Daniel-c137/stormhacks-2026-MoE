@@ -22,6 +22,7 @@ export interface Voice {
   name: string;
   desc: string;
   sample: string;
+  default_label?: string | null; // only on the agent's default voice, naming the agent
 }
 
 export interface TeamSettings {
