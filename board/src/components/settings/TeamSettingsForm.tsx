@@ -3,6 +3,7 @@
 import { type ConnectorName, type ConnectorStatus, type Sensitivity, type TeamSettings, identity } from "@moe/contracts";
 import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from "react";
 import { useTeam } from "@/components/AuthProvider";
+import { TeamAccounts } from "@/components/settings/TeamAccounts";
 import { Avatar } from "@/components/ui/Avatar";
 import { Icon, Spinner } from "@/components/ui/Icon";
 import { Mark } from "@/components/ui/Mark";
@@ -170,6 +171,7 @@ function PasswordForm() {
 export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
   const agent = identity.agent_name;
   const { me, email, setMe } = useTeam();
+  const admin = me.is_admin === true; // only an admin changes connectors and creates accounts
   const settings = useSettings();
   const voices = useVoices();
   const connectors = useConnectors();
@@ -351,6 +353,8 @@ export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
             </section>
           </div>
 
+          {admin && <TeamAccounts />}
+
           {!s && (
             <div className="sgroup" style={{ padding: 22 }}>
               {settings.error ? (
@@ -367,10 +371,12 @@ export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
             <>
               <div className="sgroup" role="group" aria-labelledby="g-conn">
                 <h2 id="g-conn">Connectors</h2>
+                {!admin && <p className="note admin-only">Only admins can change connectors.</p>}
                 <section className="srow" aria-labelledby="s-code">
                   <h3 id="s-code">Codebase</h3>
                   <div>
-                    <div className="two">
+                    {!admin && <p className="ro mono">{[s.github.repo, s.github.ref].filter(Boolean).join(" @ ") || "Not set"}</p>}
+                    {admin && <div className="two">
                       <label className="label">
                         GitHub repository
                         <input
@@ -389,7 +395,7 @@ export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
                           placeholder="main"
                         />
                       </label>
-                    </div>
+                    </div>}
                     <ConnectorState name="github" statuses={connectors} />
                     {githubStatus && <span className="note">{githubStatus}</span>}
                   </div>
@@ -397,7 +403,8 @@ export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
                 <section className="srow" aria-labelledby="s-jira">
                   <h3 id="s-jira">Jira</h3>
                   <div>
-                    <div className="two">
+                    {!admin && <p className="ro">{[s.jira.site, s.jira.project].filter(Boolean).join(" · ") || "Not set"}</p>}
+                    {admin && <div className="two">
                       <label className="label">
                         Site
                         <input
@@ -416,7 +423,7 @@ export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
                           style={{ textTransform: "uppercase" }}
                         />
                       </label>
-                    </div>
+                    </div>}
                     <ConnectorState name="jira" statuses={connectors} />
                   </div>
                 </section>

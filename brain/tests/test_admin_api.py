@@ -8,6 +8,7 @@ from api_support import ALEX, OUTSIDER, SARAH, TEAM
 from fastapi.testclient import TestClient
 from test_auth import bearer
 
+from brain.api.deps import current_user
 from brain.api.team import CONNECTOR_FIELDS, connectors_changed
 from brain.auth import hash_password, verify_password
 from brain.store import NotFound
@@ -93,7 +94,8 @@ def test_a_new_account_is_an_admin_only_when_asked(client_as):
 
 def test_the_new_account_signs_in_with_the_password_and_can_change_it(app, client_as):
     created = client_as(ALEX).post("/team/accounts", json=new_account()).json()
-    client = TestClient(app)  # real sessions: client_as overrides only the X-Test-User clients
+    del app.dependency_overrides[current_user]  # from here on, real sessions
+    client = TestClient(app)
 
     login = client.post(
         "/auth/login", json={"email": "Priya@Example.com", "password": created["password"]}

@@ -181,6 +181,17 @@ async def current_user(
         raise HTTPException(status_code=403, detail="not a workspace member") from None
 
 
+ADMIN_ONLY = "Only an admin can do this"
+
+
+async def require_admin(user: Person = Depends(current_user)) -> Person:
+    """The caller, if they are an admin. current_user reads the person from the store on every
+    request, so granting or revoking admin takes effect at once, whatever the session says."""
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail=ADMIN_ONLY)
+    return user
+
+
 def get_jira_pusher(settings: Settings = Depends(get_settings)) -> Callable[[], JiraPusher]:
     """Makes the pusher for an approved push; JiraUnavailable when Jira is not configured.
     A factory, so the route checks the team and the meeting before Jira's configuration.

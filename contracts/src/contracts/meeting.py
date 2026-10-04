@@ -17,6 +17,7 @@ class Person(BaseModel):
     title: str | None = None
     email: str | None = None
     photo_url: str | None = None
+    is_admin: bool = False  # only an admin changes the connectors and creates accounts
 
 
 class Team(BaseModel):

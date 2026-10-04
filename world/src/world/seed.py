@@ -10,7 +10,7 @@ meeting's decisions can supersede an earlier one's.
 Running it again changes nothing: a meeting already seeded is skipped, and one a failed run left
 part-way is finished. `--reset` first removes the seeded team and everything under it. Each
 person gets a login with their seeded email: WORLD_SEED_PASSWORD for everyone, or else a generated
-password each, printed once."""
+password each, printed once. Danial (ADMIN_EMAIL) is the team's admin."""
 
 import argparse
 import asyncio
@@ -25,6 +25,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from brain.accounts import set_admin
 from brain.agent.pipeline import INDEX, REPORT_STEPS, ReportPipeline
 from brain.auth import MAX_PASSWORD, MIN_PASSWORD, hash_password
 from brain.config import Settings as BrainSettings
@@ -63,6 +64,8 @@ EMAIL_DOMAIN = "dropsubs.example"
 JIRA_SITE = "https://dropsubs.atlassian.net"
 """The world's Jira site, as mock-data/jira records it; JIRA_BASE_URL wins when set."""
 TEAM_TIMEZONE = "America/Vancouver"
+ADMIN_EMAIL = f"danial@{EMAIL_DOMAIN}"
+"""The seeded team's one admin: the only account that changes connectors and creates accounts."""
 
 Outcome = Literal["seeded", "resumed", "skipped"]
 
@@ -122,6 +125,11 @@ async def seed_team(store: Store, people: Sequence[Person], *, jira_site: str = 
         )
         new = True
     for person in people:
+        try:  # who is an admin is the app's to change, like a login
+            saved = await store.person(person.id)
+            person = person.model_copy(update={"is_admin": saved.is_admin})
+        except NotFound:
+            pass
         await store.upsert_person(person, tid)
     if new:
         await store.save_settings(
@@ -140,11 +148,14 @@ async def seed_logins(
 ) -> list[tuple[Person, str | None]]:
     """A login for each person who has none, with their seeded email: `password` for everyone
     (WORLD_SEED_PASSWORD), or else a generated one each, returned so it can be shown once. A
-    login that exists, perhaps changed in the app since, is left alone."""
+    login that exists, perhaps changed in the app since, is left alone. The person with
+    ADMIN_EMAIL is made an admin; no one else is."""
     if password is not None and not MIN_PASSWORD <= len(password) <= MAX_PASSWORD:
         raise SeedError(f"WORLD_SEED_PASSWORD must be {MIN_PASSWORD} to {MAX_PASSWORD} characters")
     created: list[tuple[Person, str | None]] = []
     for person in people:
+        if person.email == ADMIN_EMAIL:
+            await set_admin(store, person.id, True)
         try:
             await store.login(person.id)
             continue

@@ -14,7 +14,8 @@ AskTurnRole = Literal["user", "agent"]
 
 
 class LoginRequest(BaseModel):
-    """POST /auth/login. There is no public sign-up; accounts come from `brain add-user`."""
+    """POST /auth/login. There is no public sign-up; accounts come from `brain add-user` or an
+    admin (POST /team/accounts)."""
 
     email: str
     password: str
@@ -33,6 +34,22 @@ class PasswordChange(BaseModel):
 
     current_password: str
     new_password: str
+
+
+class CreateAccountRequest(BaseModel):
+    """POST /team/accounts, admin only: a person on the admin's own team with an email login."""
+
+    name: str
+    email: str
+    title: str | None = None
+    is_admin: bool = False
+
+
+class CreateAccountResponse(BaseModel):
+    """The generated password is returned only this once; nothing is emailed."""
+
+    person: Person
+    password: str
 
 
 class CreateMeetingRequest(BaseModel):

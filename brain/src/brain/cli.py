@@ -2,20 +2,28 @@
 `brain push` creates Jira issues for the drafts a named person approved.
 `brain migrate` applies db/migrations to DATABASE_URL.
 `brain add-team` and `brain add-user` make teams and accounts; there is no public sign-up.
+`brain set-admin` grants or revokes admin: only an admin changes connectors and creates accounts.
 `brain purge-transcripts` deletes transcripts older than TRANSCRIPT_RETENTION_DAYS."""
 
 import argparse
 import asyncio
-import re
-import secrets
 import sys
-import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
 from psycopg import errors as pg_errors
 from pydantic import ValidationError
 
+from brain.accounts import (
+    InvalidAccount,
+    LastAdmin,
+    clean_email,
+    clean_name,
+    existing_person,
+    generate_password,
+    save_account,
+    set_admin,
+)
 from brain.auth import MAX_PASSWORD, MIN_PASSWORD, hash_password
 from brain.config import Settings
 from brain.db import migrate
@@ -31,7 +39,7 @@ from brain.retention import (
     transcripts_due,
 )
 from brain.store import Conflict, NotFound, Store
-from contracts import Meeting, Person, TaskPushRequest, Team
+from contracts import Meeting, TaskPushRequest, Team
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -83,7 +91,17 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="read the password from stdin instead of generating one",
     )
+    add_user.add_argument(
+        "--admin", action="store_true", help="make them an admin (an existing admin stays one)"
+    )
     add_user.set_defaults(run=run_add_user)
+
+    admin = commands.add_parser(
+        "set-admin", help="make the person who signs in with an email an admin, or revoke it"
+    )
+    admin.add_argument("--email", required=True)
+    admin.add_argument("--revoke", action="store_true", help="revoke admin instead")
+    admin.set_defaults(run=run_set_admin)
 
     purge = commands.add_parser(
         "purge-transcripts", help="delete transcripts older than TRANSCRIPT_RETENTION_DAYS"
@@ -171,9 +189,6 @@ def run_migrate(args: argparse.Namespace) -> int:
     return 0
 
 
-EMAIL = re.compile(r"[^@\s]+@[^@\s]+")
-
-
 def account_store(command: str) -> Store:
     dsn = Settings().database_url
     if not dsn:
@@ -208,12 +223,11 @@ def run_add_team(args: argparse.Namespace) -> int:
 
 def run_add_user(args: argparse.Namespace) -> int:
     store = account_store("add-user")
-    name = " ".join(args.name.split())
-    email = args.email.strip()
-    if not name:
-        sys.exit("brain add-user: --name must not be blank")
-    if not EMAIL.fullmatch(email):
-        sys.exit(f"brain add-user: {email!r} is not an email address")
+    try:
+        name = clean_name(args.name)
+        email = clean_email(args.email)
+    except InvalidAccount as e:
+        sys.exit(f"brain add-user: {e}")
     if args.password_stdin:
         password = sys.stdin.read().rstrip("\r\n")
         if not MIN_PASSWORD <= len(password) <= MAX_PASSWORD:
@@ -222,7 +236,7 @@ def run_add_user(args: argparse.Namespace) -> int:
             )
         generated = None
     else:
-        password = generated = secrets.token_urlsafe(18)
+        password = generated = generate_password()
 
     async def add() -> int:
         try:
@@ -232,20 +246,20 @@ def run_add_user(args: argparse.Namespace) -> int:
                 f"brain add-user: there is no team {args.team_id};"
                 f" create it with `brain add-team --id {args.team_id} --name ...`"
             )
-        person = await existing_person(store, team, email)
-        words = name.split()
-        initials = (words[0][0] + (words[-1][0] if len(words) > 1 else "")).upper()
-        person = await store.upsert_person(
-            person.model_copy(
-                update={"name": name, "short": words[0], "initials": initials, "email": email}
-            ),
-            team.id,
-        )
         try:
-            await store.set_login(person.id, email, hash_password(password))
+            person = await save_account(
+                store,
+                team,
+                name=name,
+                email=email,
+                password_hash=hash_password(password),
+                person=await existing_person(store, team, email),
+                is_admin=True if args.admin else None,
+            )
         except Conflict:
             sys.exit(f"brain add-user: another person already signs in with {email}")
-        print(f"{person.name} ({person.id}) is on team {team.id} and signs in as {email}.")
+        role = " as an admin" if person.is_admin else ""
+        print(f"{person.name} ({person.id}) is on team {team.id}{role} and signs in as {email}.")
         if generated:
             print(f"One-time password, shown only now: {generated}")
         return 0
@@ -253,17 +267,22 @@ def run_add_user(args: argparse.Namespace) -> int:
     return run_account_command("add-user", add())
 
 
-async def existing_person(store: Store, team: Team, email: str) -> Person:
-    """Whoever already signs in with the email, else the team's member with that email, else a
-    new person."""
-    try:
-        return await store.person((await store.login_by_email(email)).person_id)
-    except NotFound:
-        pass
-    for member in await store.members(team.id):
-        if member.email and member.email.lower() == email.lower():
-            return member
-    return Person(id=str(uuid.uuid4()), name=email, short=email, initials="?")
+def run_set_admin(args: argparse.Namespace) -> int:
+    store = account_store("set-admin")
+    email = args.email.strip()
+
+    async def change() -> int:
+        try:
+            login = await store.login_by_email(email)
+            person = await set_admin(store, login.person_id, not args.revoke)
+        except NotFound:
+            sys.exit(f"brain set-admin: no one signs in with {email}")
+        except LastAdmin as e:
+            sys.exit(f"brain set-admin: {e}; make someone else an admin first")
+        print(f"{person.name} ({email}) is {'an' if person.is_admin else 'not an'} admin.")
+        return 0
+
+    return run_account_command("set-admin", change())
 
 
 def run_purge_transcripts(args: argparse.Namespace) -> int:
