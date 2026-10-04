@@ -257,12 +257,14 @@ def test_approval_pushes_records_keys_and_marks_the_meeting_pushed(client_as, st
             "key": "DS-117",
             "url": "https://dropsubs.atlassian.net/browse/DS-117",
             "error": None,
+            "warning": None,
         },
         {
             "task_id": two.id,
             "key": "DS-118",
             "url": "https://dropsubs.atlassian.net/browse/DS-118",
             "error": None,
+            "warning": None,
         },
     ]
     tasks = asyncio.run(store.report(meeting["id"])).tasks
