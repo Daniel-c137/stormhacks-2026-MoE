@@ -184,6 +184,15 @@ async def test_the_system_prompt_asks_for_the_chain_behind_each_decision():
     assert "single step" in call.system
 
 
+async def test_the_system_prompt_counts_work_the_team_says_needs_doing_as_a_task():
+    """ "We also need to choose a NoSQL database" is a task even though nobody took it on."""
+    _, llm = await report_for()
+
+    (call,) = llm.calls
+    assert "needs doing" in call.system
+    assert "even when nobody" in call.system
+
+
 async def test_links_are_kept_only_when_the_transcript_mentions_them():
     report, _ = await report_for()
 

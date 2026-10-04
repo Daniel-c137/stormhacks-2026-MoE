@@ -178,7 +178,7 @@ def test_jev_is_asked_about_each_new_line_and_each_pending_item(worker, client_a
     assert sorted(k for k in questions if k.startswith("about_")) == ["about_1", "about_2"]
     for key in ("about_1", "about_2"):
         assert questions[key]["type"] == "choice"
-        assert set(questions[key]["criteria"]) == {"a1", "a2", "a3", "none"}
+        assert set(questions[key]["criteria"]) == {"a1", "a2", "a3", "other", "none"}
     assert "Waitlist email" in questions["about_1"]["criteria"]["a1"]
     assert sorted(k for k in questions if k.startswith("closed_")) == ["closed_a1", "closed_a2"]
     assert questions["closed_a1"]["type"] == "noul"
@@ -268,6 +268,22 @@ def test_small_talk_after_an_item_does_not_tick_it(worker, client_as, store, jev
     body = tracked(worker, meeting, now=50)
 
     assert by_id(body["agenda"])[waitlist]["status"] == "pending"
+
+
+def test_moving_on_to_work_off_the_agenda_ticks_the_item(worker, client_as, store, jev):
+    """Off-agenda work is not small talk: leaving an item for it finishes the item."""
+    meeting, (waitlist, *_) = standup(store, client_as)
+    ingest(worker, meeting, said(meeting, 1, "The waitlist email draft is ready", 0, 30))
+    jev.says("a1")
+    tracked(worker, meeting, now=40)
+    ingest(worker, meeting, said(meeting, 2, "Also, we need to pick a NoSQL database", 41, 44))
+    jev.says("other", closed={"a1": 0.75})
+
+    body = tracked(worker, meeting, now=50)
+
+    items = by_id(body["agenda"])
+    assert covered_by(items[waitlist]) == (AGENT_PARTICIPANT_ID, 30)
+    assert body["agenda"]["current_item_id"] is None  # nothing on the agenda is being discussed
 
 
 def test_small_talk_after_an_item_does_not_tick_it_with_gemini_either(
