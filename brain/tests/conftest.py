@@ -8,6 +8,8 @@ import uvicorn
 from api_support import app, client_as, settings, store, worker  # noqa: F401  (shared fixtures)
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from memory_support import memory_pool  # noqa: F401  (shared fixtures)
+from pg_support import pg_dsn, pg_server  # noqa: F401  (shared fixtures)
 
 
 @pytest.fixture
