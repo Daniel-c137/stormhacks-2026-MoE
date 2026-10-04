@@ -3,7 +3,7 @@ from datetime import date
 import pytest
 
 from brain.config import Settings
-from brain.llm import MockLLM, make_llm
+from brain.llm import LLMError, MockLLM, make_llm
 from brain.memory import Chunk, MemoryHit
 from brain.report.decisions import (
     MAX_CANDIDATES,
@@ -272,6 +272,18 @@ async def test_memory_candidates_keep_to_the_eligible_decisions_and_the_limit():
 
     shown = pick(KEEP_PG, many)  # d-hire is not eligible for this call
     assert [d.id for d in shown] == [d.id for d in many[:MAX_CANDIDATES]]
+
+
+class BrokenMemory:
+    async def search(self, team_id: str, query: str, k: int = 8) -> list[MemoryHit]:
+        raise LLMError("Gemini embeddings are unavailable on every model tried")
+
+
+async def test_a_memory_search_failure_falls_back_to_lexical_candidates(caplog):
+    pick = await memory_candidates(BrokenMemory(), "t", [KEEP_PG], [REDIS, BETA])
+
+    assert pick(KEEP_PG, [REDIS, BETA]) == [REDIS]
+    assert "lexical" in caplog.text
 
 
 async def test_a_past_decision_found_only_in_memory_reaches_the_model():

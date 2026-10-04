@@ -176,6 +176,15 @@ class Store(Protocol):
         """Replaces the meeting's report, tasks and decisions."""
         ...
 
+    async def complete_report(self, report: Report, superseded: Sequence[Decision] = ()) -> Meeting:
+        """The write-up's final save, all or nothing: undoes the links this meeting's earlier
+        decisions made (past decisions they retired become active again), replaces the report,
+        tasks and decisions as save_report does, saves `superseded` (other meetings' decisions
+        retired by this report's), and moves processing -> needs_review. Conflict unless the
+        meeting is processing; NotFound for a missing meeting or a superseded decision that is
+        not another meeting's."""
+        ...
+
     async def report(self, meeting_id: str) -> Report:
         """With the tasks and decisions as they are now, edits included."""
         ...
@@ -466,8 +475,33 @@ class InMemoryStore:
     # reports, tasks and decisions
 
     async def save_report(self, report: Report) -> None:
+        self._meeting(report.meeting_id)
+        self._write_report(report)
+
+    async def complete_report(self, report: Report, superseded: Sequence[Decision] = ()) -> Meeting:
+        # Every check comes before the first write, and nothing awaits in between.
+        meeting = self._meeting(report.meeting_id)
+        if meeting.status != "processing":
+            raise Conflict(f"meeting {meeting.id} is {meeting.status}")
+        for decision in superseded:
+            saved = self._decisions.get(decision.id)
+            if saved is None or saved.meeting_id == meeting.id:
+                raise NotFound(f"decision {decision.id} of another meeting")
+        earlier = {i for i, d in self._decisions.items() if d.meeting_id == meeting.id}
+        for i, d in list(self._decisions.items()):
+            if (
+                d.meeting_id != meeting.id
+                and d.relation is not None
+                and d.relation.type == "superseded_by"
+                and d.relation.decision_id in earlier
+            ):
+                self._decisions[i] = d.model_copy(update={"status": "active", "relation": None})
+        self._write_report(report)
+        self._decisions.update((d.id, _copy(d)) for d in superseded)
+        return self._save_meeting(meeting, status="needs_review")
+
+    def _write_report(self, report: Report) -> None:
         meeting_id = report.meeting_id
-        self._meeting(meeting_id)
         for rows in (self._tasks, self._decisions):
             for row_id in [i for i, row in rows.items() if row.meeting_id == meeting_id]:
                 del rows[row_id]

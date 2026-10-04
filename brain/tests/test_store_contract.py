@@ -35,6 +35,7 @@ from contracts import (
     AgendaItem,
     ChatMessage,
     Decision,
+    DecisionRelation,
     GitHubSettings,
     JiraSettings,
     Person,
@@ -936,6 +937,94 @@ async def test_saving_a_report_again_replaces_its_tasks_and_decisions(store):
         await store.task(team.id, f"{meeting.id}-task-2")
 
 
+def superseded_by(past: Decision, new: Decision) -> Decision:
+    relation = DecisionRelation(type="superseded_by", decision_id=new.id)
+    return past.model_copy(update={"status": "superseded", "relation": relation})
+
+
+async def linked_meetings(store: Store):
+    """(team, alex, an earlier meeting's report with one decision, a processing meeting)"""
+    team, alex, *_ = await two_teams(store)
+    earlier = await ended_meeting(store, team, alex, "Planning", at(0))
+    past = report_for(earlier.id, owner=alex, decisions=["Use Redis for jobs"], tasks=[])
+    await store.save_report(past)
+    meeting = await ended_meeting(store, team, alex, "Review", at(120))
+    return team, alex, past, meeting
+
+
+async def test_completing_a_report_saves_it_applies_its_links_and_moves_it_to_review(store):
+    team, alex, past, meeting = await linked_meetings(store)
+    report = report_for(meeting.id, owner=alex, decisions=["Keep Postgres for jobs"], tasks=["X"])
+    (old,), (new,) = past.decisions, report.decisions
+    contradicts = DecisionRelation(type="contradicts", decision_id=old.id)
+    report.decisions[0] = new = new.model_copy(update={"relation": contradicts})
+
+    completed = await store.complete_report(report, [superseded_by(old, new)])
+
+    assert completed.status == "needs_review"
+    assert await store.meeting(meeting.id) == completed
+    assert await store.report(meeting.id) == report
+    assert {d.id: d for d in await store.decisions(team.id)} == {
+        old.id: superseded_by(old, new),
+        new.id: new,
+    }
+
+
+async def test_completing_a_report_is_all_or_nothing(store):
+    team, alex, past, meeting = await linked_meetings(store)
+    report = report_for(meeting.id, owner=alex, decisions=["Keep Postgres"], tasks=["X"])
+    (old,), (new,) = past.decisions, report.decisions
+    missing = superseded_by(old.model_copy(update={"id": new_id()}), new)
+
+    with pytest.raises(NotFound):
+        await store.complete_report(report, [superseded_by(old, new), missing])
+
+    assert (await store.meeting(meeting.id)).status == "processing"
+    with pytest.raises(NotFound):
+        await store.report(meeting.id)
+    assert await store.decisions(team.id) == [old]
+    assert await store.tasks(team.id) == []
+
+
+async def test_only_a_meeting_being_written_up_can_be_completed(store):
+    team, alex, *_ = await two_teams(store)
+    live = await store.create_meeting(team.id, "Live", alex.id)
+    report = report_for(live.id, owner=alex, decisions=["A"], tasks=[])
+
+    with pytest.raises(Conflict):
+        await store.complete_report(report)
+    assert (await store.meeting(live.id)).status == "live"
+    with pytest.raises(NotFound):
+        await store.report(live.id)
+
+    meeting = await ended_meeting(store, team, alex, "Review", at(0))
+    await store.complete_report(report_for(meeting.id, owner=alex, decisions=[], tasks=[]))
+    with pytest.raises(Conflict):
+        await store.complete_report(report_for(meeting.id, owner=alex, decisions=["B"], tasks=[]))
+    with pytest.raises(NotFound):
+        await store.complete_report(report.model_copy(update={"meeting_id": new_id()}))
+
+
+async def test_completing_again_undoes_the_links_of_the_meetings_earlier_decisions(store):
+    team, alex, past, meeting = await linked_meetings(store)
+    other = await ended_meeting(store, team, alex, "Other", at(60))
+    theirs = report_for(other.id, owner=alex, decisions=["Use Kafka"], tasks=[])
+    await store.save_report(theirs)
+    (old,) = past.decisions
+    # An earlier, interrupted save left this meeting's decision retiring the past one.
+    earlier = report_for(meeting.id, owner=alex, decisions=["Keep Postgres"], tasks=[])
+    await store.save_report(earlier)
+    await store.update_decision(superseded_by(old, earlier.decisions[0]))
+    # A decision retired by another meeting's decision is not this meeting's to undo.
+    await store.update_decision(superseded_by(theirs.decisions[0], old))
+
+    await store.complete_report(report_for(meeting.id, owner=alex, decisions=[], tasks=[]))
+
+    saved = {d.id: d for d in await store.decisions(team.id)}
+    assert saved[old.id] == old
+    assert saved[theirs.decisions[0].id] == superseded_by(theirs.decisions[0], old)
+
+
 async def test_report_progress_is_none_until_saved_and_keeps_its_error(store):
     team, alex, *_ = await two_teams(store)
     meeting = await ended_meeting(store, team, alex, "Standup", at(0))
@@ -946,7 +1035,9 @@ async def test_report_progress_is_none_until_saved_and_keeps_its_error(store):
     await store.save_report_progress(running)
     assert await store.report_progress(meeting.id) == running
 
-    failed = running.model_copy(update={"current": 2, "error": "Gemini is unavailable"})
+    failed = running.model_copy(
+        update={"current": 2, "error": "Gemini is unavailable", "updated_at": at(31)}
+    )
     await store.save_report_progress(failed)
     assert await store.report_progress(meeting.id) == failed
 

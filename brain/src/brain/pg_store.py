@@ -526,33 +526,74 @@ class PostgresStore:
     # reports, tasks and decisions
 
     async def save_report(self, report: Report) -> None:
+        async with self._tx() as cur:
+            await self._write_report(cur, report)
+
+    async def complete_report(self, report: Report, superseded: Sequence[Decision] = ()) -> Meeting:
+        meeting_id = report.meeting_id
+        async with self._tx() as cur:
+            row = await self._one(
+                cur, "select status from meetings where id = %s for update", [meeting_id]
+            )
+            if row is None:
+                raise NotFound(f"meeting {meeting_id}")
+            if row["status"] != "processing":
+                raise Conflict(f"meeting {meeting_id} is {row['status']}")
+            # Undo what this meeting's earlier decisions retired, before they are replaced.
+            await cur.execute(
+                "update decisions set status = 'active', relation_type = null,"
+                " relation_decision_id = null"
+                " where meeting_id <> %(m)s and relation_type = 'superseded_by'"
+                " and relation_decision_id in (select id from decisions where meeting_id = %(m)s)",
+                {"m": meeting_id},
+            )
+            await self._write_report(cur, report)
+            for decision in superseded:
+                found = await self._one(
+                    cur,
+                    "update decisions set status = %(status)s, relation_type = %(relation_type)s,"
+                    " relation_decision_id = %(relation_decision_id)s"
+                    " where id = %(id)s and meeting_id <> %(meeting)s returning id",
+                    self._decision_values(decision) | {"meeting": meeting_id},
+                )
+                if found is None:
+                    raise NotFound(f"decision {decision.id} of another meeting")
+            row = await self._one(
+                cur,
+                f"update meetings set status = 'needs_review' where id = %s returning {MEETING}",
+                [meeting_id],
+            )
+        assert row is not None  # the row is locked above, so it is still there
+        return _meeting(row)
+
+    async def _write_report(self, cur: Cursor, report: Report) -> None:
+        """Replaces the meeting's report, tasks and decisions, in the caller's transaction."""
         meeting_id = report.meeting_id
         sections = report.model_dump(mode="json", exclude=set(REPORT_ROWS))
-        async with self._tx() as cur:
-            await cur.execute(
-                "insert into reports (meeting_id, summary, sections) values (%s, %s, %s)"
-                " on conflict (meeting_id) do update set summary = excluded.summary,"
-                " sections = excluded.sections",
-                [meeting_id, report.summary, Jsonb(sections)],
+        await cur.execute(
+            "insert into reports (meeting_id, summary, sections) values (%s, %s, %s)"
+            " on conflict (meeting_id) do update set summary = excluded.summary,"
+            " sections = excluded.sections",
+            [meeting_id, report.summary, Jsonb(sections)],
+        )
+        await cur.execute("delete from task_drafts where meeting_id = %s", [meeting_id])
+        await cur.execute("delete from decisions where meeting_id = %s", [meeting_id])
+        if report.tasks:
+            await cur.executemany(
+                f"insert into task_drafts ({TASK}, ord)"
+                " values (%(id)s, %(meeting_id)s, %(title)s, %(description)s, %(owner_id)s,"
+                " %(due)s, %(t)s, %(quote)s, %(include)s, %(key)s, %(jira_status)s, %(ord)s)"
+                f" on conflict (id) do update set {_from_excluded(TASK, 'ord')}",
+                [t.model_dump() | {"ord": i} for i, t in enumerate(report.tasks)],
             )
-            await cur.execute("delete from task_drafts where meeting_id = %s", [meeting_id])
-            await cur.execute("delete from decisions where meeting_id = %s", [meeting_id])
-            if report.tasks:
-                await cur.executemany(
-                    f"insert into task_drafts ({TASK}, ord)"
-                    " values (%(id)s, %(meeting_id)s, %(title)s, %(description)s, %(owner_id)s,"
-                    " %(due)s, %(t)s, %(quote)s, %(include)s, %(key)s, %(jira_status)s, %(ord)s)"
-                    f" on conflict (id) do update set {_from_excluded(TASK, 'ord')}",
-                    [t.model_dump() | {"ord": i} for i, t in enumerate(report.tasks)],
-                )
-            if report.decisions:
-                await cur.executemany(
-                    f"insert into decisions ({DECISION}, ord)"
-                    " values (%(id)s, %(meeting_id)s, %(text)s, %(made_by)s, %(t)s, %(quote)s,"
-                    " %(status)s, %(relation_type)s, %(relation_decision_id)s, %(ord)s)"
-                    f" on conflict (id) do update set {_from_excluded(DECISION, 'ord')}",
-                    [self._decision_values(d) | {"ord": i} for i, d in enumerate(report.decisions)],
-                )
+        if report.decisions:
+            await cur.executemany(
+                f"insert into decisions ({DECISION}, ord)"
+                " values (%(id)s, %(meeting_id)s, %(text)s, %(made_by)s, %(t)s, %(quote)s,"
+                " %(status)s, %(relation_type)s, %(relation_decision_id)s, %(ord)s)"
+                f" on conflict (id) do update set {_from_excluded(DECISION, 'ord')}",
+                [self._decision_values(d) | {"ord": i} for i, d in enumerate(report.decisions)],
+            )
 
     async def report(self, meeting_id: str) -> Report:
         async with self._tx() as cur:
@@ -584,17 +625,19 @@ class PostgresStore:
     async def save_report_progress(self, progress: ReportProgress) -> ReportProgress:
         async with self._tx() as cur:
             await cur.execute(
-                "insert into report_progress (meeting_id, steps, current_step, done, error)"
-                " values (%s, %s, %s, %s, %s)"
+                "insert into report_progress"
+                " (meeting_id, steps, current_step, done, error, updated_at)"
+                " values (%s, %s, %s, %s, %s, %s)"
                 " on conflict (meeting_id) do update set steps = excluded.steps,"
                 " current_step = excluded.current_step, done = excluded.done,"
-                " error = excluded.error",
+                " error = excluded.error, updated_at = excluded.updated_at",
                 [
                     progress.meeting_id,
                     Jsonb(progress.steps),
                     progress.current,
                     progress.done,
                     progress.error,
+                    progress.updated_at,
                 ],
             )
         return progress.model_copy(deep=True)
@@ -603,7 +646,7 @@ class PostgresStore:
         async with self._tx() as cur:
             row = await self._one(
                 cur,
-                "select meeting_id, steps, current_step as current, done, error"
+                "select meeting_id, steps, current_step as current, done, error, updated_at"
                 " from report_progress where meeting_id = %s",
                 [meeting_id],
             )

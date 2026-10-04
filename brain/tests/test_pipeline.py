@@ -14,7 +14,7 @@ from brain.api.deps import get_llm, get_memory, get_pipeline
 from brain.config import Settings
 from brain.llm import GeminiEmbedder
 from brain.main import create_app
-from brain.memory import PgMemoryStore
+from brain.memory import MemoryMisconfigured, PgMemoryStore, UnusableMemory
 from brain.report import ReportExtraction
 from brain.store import InMemoryStore
 from contracts import TranscriptSegment
@@ -60,6 +60,7 @@ async def test_a_failed_write_up_is_logged_and_drain_still_returns(caplog):
         await runner.drain()
 
     assert "m1" in caplog.text and "model fell over" in caplog.text
+    assert "Traceback" in caplog.text
     assert not runner.running("m1")
 
 
@@ -154,12 +155,17 @@ def test_memory_needs_both_the_database_pool_and_embeddings():
     assert get_memory(request, Settings(_env_file=None, gemini_api_key=None)) is None
 
 
-def test_memory_with_vectors_the_database_cannot_hold_is_unavailable():
+async def test_memory_with_vectors_the_database_cannot_hold_is_misconfigured():
     app = create_app()
     app.state.db_pool = object()
     wrong = Settings(_env_file=None, **{**EMBEDDINGS, "gemini_embedding_dim": 1536})
 
-    assert get_memory(request_for(app), wrong) is None
+    memory = get_memory(request_for(app), wrong)
+
+    assert isinstance(memory, UnusableMemory)
+    for call in (memory.index_meeting("t", "m", []), memory.search("t", "refunds")):
+        with pytest.raises(MemoryMisconfigured, match=r"1536.*768"):
+            await call
 
 
 async def test_get_llm_is_a_503_when_gemini_is_not_configured():

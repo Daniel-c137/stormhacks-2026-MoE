@@ -4,6 +4,7 @@ A library step for the post-meeting pipeline. The model only judges candidate pa
 a relation is set only for a confident verdict on one of those pairs, never otherwise.
 """
 
+import logging
 import re
 from collections.abc import Callable, Mapping, Sequence
 from datetime import date
@@ -15,6 +16,8 @@ from brain.llm import LLM
 from brain.memory import MemoryHit
 from brain.store import Store
 from contracts import Decision, DecisionRelation
+
+logger = logging.getLogger(__name__)
 
 MAX_CANDIDATES = 5
 """Past decisions shown to the model per new decision, so the prompt stays small."""
@@ -127,11 +130,20 @@ async def memory_candidates(
     """A candidate source that offers the past decisions meeting memory finds closest to each new
     decision, mapped from decision chunks to `past` by ref_id, then lexical candidates to fill
     the rest. Memory is searched here, once per new decision, because candidate sources are
-    synchronous."""
+    synchronous. A failed search leaves that decision with lexical candidates only."""
     known = {p.id for p in past}
     found: dict[str, list[str]] = {}
     for decision in new:
-        hits = await memory.search(team_id, decision.text, k=k)
+        try:
+            hits = await memory.search(team_id, decision.text, k=k)
+        except Exception:
+            # Memory only ranks candidates; without it the lexical ones still go to the model.
+            logger.warning(
+                "memory search failed for decision %s; using lexical candidates",
+                decision.id,
+                exc_info=True,
+            )
+            hits = []
         refs = [h.chunk.ref_id for h in hits if h.chunk.kind == "decision"]
         found[decision.id] = list(dict.fromkeys(r for r in refs if r in known))
 
