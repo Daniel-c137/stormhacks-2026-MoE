@@ -973,10 +973,12 @@ source = { editable = "brain" }
 dependencies = [
     { name = "fastapi" },
     { name = "google-genai" },
+    { name = "httpx" },
     { name = "livekit-api" },
     { name = "mcp" },
     { name = "moe-contracts" },
     { name = "pydantic-settings" },
+    { name = "pyjwt", extra = ["crypto"] },
     { name = "supabase" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -985,10 +987,12 @@ dependencies = [
 requires-dist = [
     { name = "fastapi" },
     { name = "google-genai" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "livekit-api" },
     { name = "mcp" },
     { name = "moe-contracts", editable = "contracts" },
     { name = "pydantic-settings" },
+    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.15.1" },
     { name = "supabase" },
     { name = "uvicorn", extras = ["standard"] },
 ]
