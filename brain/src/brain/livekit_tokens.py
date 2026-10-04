@@ -22,6 +22,7 @@ def participant_token(
         can_publish=True,
         can_subscribe=True,
         can_publish_data=True,
+        can_update_own_metadata=True,  # the board raises a hand with the participant's attributes
     )
     token = (
         AccessToken(api_key, api_secret)
