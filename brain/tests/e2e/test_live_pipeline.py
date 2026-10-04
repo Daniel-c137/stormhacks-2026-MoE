@@ -22,7 +22,7 @@ from contracts import Decision, Report, Team
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 WORKER_TOKEN = "live-worker-token"
-settings = Settings()
+settings = Settings(openrouter_models=None)  # Gemini alone, never the fallback
 
 pytestmark = [
     pytest.mark.live,

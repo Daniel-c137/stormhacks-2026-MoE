@@ -55,7 +55,8 @@ async def get_store(request: Request) -> Store:
 
 
 async def get_llm(settings: Settings = Depends(get_settings)) -> LLM:
-    """Gemini. Unconfigured is a clear 503, never a silent mock; tests override this."""
+    """Gemini, then OpenRouter when Gemini is out of capacity (make_llm). Neither configured is
+    a clear 503, never a silent mock; tests override this."""
     try:
         return make_llm(settings)
     except LLMUnavailable as e:
@@ -64,7 +65,7 @@ async def get_llm(settings: Settings = Depends(get_settings)) -> LLM:
 
 def get_llm_factory(settings: Settings = Depends(get_settings)) -> Callable[[], LLM]:
     """Makes the LLM when the write-up needs it, so ending a meeting never fails on an
-    unconfigured Gemini; the write-up step shows LLMUnavailable instead. Tests override it."""
+    unconfigured model; the write-up step shows LLMUnavailable instead. Tests override it."""
     return lambda: make_llm(settings)
 
 

@@ -6,7 +6,7 @@ from google import genai
 from google.genai import errors, types
 from pydantic import BaseModel, ValidationError
 
-from .base import Embeddings, EmbedTask, LLMError
+from .base import Embeddings, EmbedTask, LLMError, LLMOutOfCapacity
 
 # Overload and transient server errors: retried briefly on the same model, then the next model.
 RETRYABLE_CODES = (429, 500, 502, 503, 504)
@@ -123,7 +123,7 @@ class GeminiLLM:
                 continue
             self.last_model = model
             return response
-        raise LLMError(
+        raise LLMOutOfCapacity(
             f"Gemini is unavailable on every model tried: {'; '.join(tried)}"
         ) from last_error
 

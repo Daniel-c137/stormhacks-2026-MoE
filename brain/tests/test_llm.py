@@ -1,13 +1,16 @@
+import json
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from google.genai import errors as genai_errors
 from pydantic import BaseModel
 
 from brain.config import Settings
-from brain.llm import LLMError, LLMUnavailable, make_llm
+from brain.llm import FallbackLLM, LLMError, LLMOutOfCapacity, LLMUnavailable, make_llm
 from brain.llm.gemini import GeminiLLM
 from brain.llm.mock import MockLLM
+from brain.llm.openrouter import OpenRouterLLM
 
 pytestmark = pytest.mark.anyio
 
@@ -339,6 +342,8 @@ def test_gemini_client_tries_each_model_twice_by_default(recorded_clients):
 
 
 def settings(**values) -> Settings:
+    """Only the given values: no .env, and no OpenRouter unless asked for."""
+    values = {"openrouter_api_key": None, "openrouter_models": None} | values
     return Settings(_env_file=None, **values)
 
 
@@ -351,11 +356,15 @@ def settings(**values) -> Settings:
     ],
 )
 def test_make_llm_is_unavailable_without_key_and_model(monkeypatch, values):
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    monkeypatch.delenv("GEMINI_MODEL", raising=False)
+    for name in ("GEMINI_API_KEY", "GEMINI_MODEL", "OPENROUTER_API_KEY", "OPENROUTER_MODELS"):
+        monkeypatch.delenv(name, raising=False)
 
-    with pytest.raises(LLMUnavailable, match="GEMINI_"):
+    with pytest.raises(LLMUnavailable, match="GEMINI_") as info:
         make_llm(settings(**values))
+
+    message = str(info.value)
+    for name in ("GEMINI_API_KEY", "GEMINI_MODEL", "OPENROUTER_API_KEY", "OPENROUTER_MODELS"):
+        assert name in message
 
 
 def test_make_llm_builds_gemini_from_config():
@@ -402,3 +411,239 @@ async def test_mock_reports_itself_as_the_model():
     await llm.generate("hi")
 
     assert llm.last_model == "mock"
+
+
+# out of capacity: what lets the provider chain move on
+
+
+async def test_gemini_with_every_model_overloaded_or_missing_is_out_of_capacity():
+    models = FakeModels(
+        by_model={"primary": api_error(429, "RESOURCE_EXHAUSTED"), "retired": api_error(404, "X")}
+    )
+
+    with pytest.raises(LLMOutOfCapacity):
+        await gemini(models, "primary", "retired").generate("q")
+
+
+@pytest.mark.parametrize("code", [400, 401, 403])
+async def test_gemini_request_error_is_not_out_of_capacity(code):
+    models = FakeModels(error=api_error(code, "INVALID_ARGUMENT"))
+
+    with pytest.raises(LLMError) as info:
+        await gemini(models, "primary", "backup").generate("q")
+
+    assert not isinstance(info.value, LLMOutOfCapacity)
+
+
+async def test_gemini_unusable_content_is_not_out_of_capacity():
+    models = FakeModels(response('{"answer": "no"}'))
+
+    with pytest.raises(LLMError) as info:
+        await gemini(models).generate_structured("q", Verdict)
+
+    assert not isinstance(info.value, LLMOutOfCapacity)
+
+
+# the provider chain: Gemini, then OpenRouter
+
+
+class FakeRouter:
+    """OpenRouter answering every model with `outcome`: a JSON body or an error status."""
+
+    def __init__(self, outcome: dict | int):
+        self.outcome = outcome
+        self.models_called: list[str] = []
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        self.models_called.append(json.loads(request.content)["model"])
+        if isinstance(self.outcome, int):
+            return httpx.Response(self.outcome, json={"error": {"code": self.outcome}})
+        return httpx.Response(200, json=self.outcome)
+
+
+def routed(content: str) -> dict:
+    return {"choices": [{"finish_reason": "stop", "message": {"content": content}}]}
+
+
+def openrouter(router: FakeRouter, *names: str) -> OpenRouterLLM:
+    return OpenRouterLLM(
+        list(names or ["vendor/model"]),
+        api_key="k",
+        base_url="https://router.test/api/v1",
+        transport=httpx.MockTransport(router.handle),
+    )
+
+
+ROUTED_VERDICT = routed('{"answer": "from openrouter", "confidence": 1}')
+GEMINI_VERDICT = response('{"answer": "from gemini", "confidence": 1}')
+
+
+async def test_chain_uses_gemini_while_it_answers():
+    models, router = FakeModels(GEMINI_VERDICT), FakeRouter(ROUTED_VERDICT)
+    llm = FallbackLLM([gemini(models, "g"), openrouter(router, "vendor/model")])
+
+    out = await llm.generate_structured("q", Verdict)
+
+    assert out.answer == "from gemini"
+    assert router.models_called == []
+    assert llm.last_model == "g"
+
+
+@pytest.mark.parametrize(
+    ("code", "status"), [(429, "RESOURCE_EXHAUSTED"), (503, "UNAVAILABLE"), (404, "NOT_FOUND")]
+)
+async def test_chain_falls_through_to_openrouter_when_gemini_is_out_of_capacity(code, status):
+    models = FakeModels(error=api_error(code, status))
+    router = FakeRouter(ROUTED_VERDICT)
+    llm = FallbackLLM([gemini(models, "g1", "g2"), openrouter(router, "vendor/model")])
+
+    out = await llm.generate_structured("q", Verdict)
+
+    assert out.answer == "from openrouter"
+    assert models.models_called == ["g1", "g2"]
+    assert router.models_called == ["vendor/model"]
+    assert llm.last_model == "openrouter:vendor/model"
+
+
+async def test_chain_falls_through_for_text_too():
+    models = FakeModels(error=api_error(429, "RESOURCE_EXHAUSTED"))
+    llm = FallbackLLM([gemini(models), openrouter(FakeRouter(routed("plain")))])
+
+    assert await llm.generate("q") == "plain"
+
+
+@pytest.mark.parametrize(("code", "status"), [(400, "INVALID_ARGUMENT"), (401, "UNAUTHENTICATED")])
+async def test_chain_does_not_fall_through_on_a_gemini_request_error(code, status):
+    models = FakeModels(error=api_error(code, status, "bad request"))
+    router = FakeRouter(ROUTED_VERDICT)
+    llm = FallbackLLM([gemini(models), openrouter(router)])
+
+    with pytest.raises(LLMError, match="bad request"):
+        await llm.generate_structured("q", Verdict)
+
+    assert router.models_called == []
+    assert llm.last_model is None
+
+
+async def test_chain_does_not_fall_through_on_unusable_gemini_content():
+    router = FakeRouter(ROUTED_VERDICT)
+    llm = FallbackLLM([gemini(FakeModels(response('{"answer": 1}'))), openrouter(router)])
+
+    with pytest.raises(LLMError, match="Verdict"):
+        await llm.generate_structured("q", Verdict)
+
+    assert router.models_called == []
+
+
+async def test_chain_with_every_provider_out_of_capacity_names_both():
+    models = FakeModels(error=api_error(429, "RESOURCE_EXHAUSTED"))
+    llm = FallbackLLM([gemini(models, "g"), openrouter(FakeRouter(503), "vendor/model")])
+
+    with pytest.raises(LLMOutOfCapacity) as info:
+        await llm.generate("q")
+
+    message = str(info.value)
+    assert "g: 429" in message
+    assert "vendor/model: 503" in message
+    assert llm.last_model is None
+
+
+async def test_chain_resets_the_answering_model_on_each_call():
+    gemini_models = FakeModels(GEMINI_VERDICT)
+    llm = FallbackLLM([gemini(gemini_models, "g"), openrouter(FakeRouter(ROUTED_VERDICT))])
+    await llm.generate_structured("q", Verdict)
+    gemini_models.default = api_error(429, "RESOURCE_EXHAUSTED")
+
+    await llm.generate_structured("q", Verdict)
+
+    assert llm.last_model == "openrouter:vendor/model"
+
+
+async def test_chain_logs_the_fall_through_without_the_prompt(caplog):
+    models = FakeModels(error=api_error(429, "RESOURCE_EXHAUSTED"))
+    llm = FallbackLLM([gemini(models), openrouter(FakeRouter(ROUTED_VERDICT))])
+
+    with caplog.at_level("DEBUG"):
+        await llm.generate_structured("secret meeting question", Verdict, system="secret rules")
+
+    logged = [r.getMessage() for r in caplog.records]
+    assert any("429" in m for m in logged)
+    assert not any("secret" in m for m in logged)
+
+
+def test_chain_needs_a_provider():
+    with pytest.raises(ValueError):
+        FallbackLLM([])
+
+
+# make_llm with OpenRouter
+
+
+OPENROUTER = {
+    "openrouter_api_key": "or-key",
+    "openrouter_models": " vendor/first, ,vendor/second,vendor/first ",
+}
+
+
+def test_make_llm_chains_gemini_then_openrouter():
+    llm = make_llm(settings(gemini_api_key="k", gemini_model="g", **OPENROUTER))
+
+    assert isinstance(llm, FallbackLLM)
+    first, second = llm.providers
+    assert isinstance(first, GeminiLLM) and first.models == ("g",)
+    assert isinstance(second, OpenRouterLLM)
+    assert second.models == ("vendor/first", "vendor/second")
+
+
+def test_make_llm_with_only_openrouter_uses_it():
+    llm = make_llm(settings(**OPENROUTER))
+
+    assert isinstance(llm, OpenRouterLLM)
+    assert llm.models == ("vendor/first", "vendor/second")
+    assert llm.endpoint == "https://openrouter.ai/api/v1/chat/completions"
+
+
+def test_make_llm_with_a_gemini_key_only_for_embeddings_uses_openrouter():
+    llm = make_llm(settings(gemini_api_key="k", **OPENROUTER))
+
+    assert isinstance(llm, OpenRouterLLM)
+
+
+def test_make_llm_uses_the_configured_openrouter_url():
+    llm = make_llm(settings(openrouter_url="https://proxy.test/v1", **OPENROUTER))
+
+    assert isinstance(llm, OpenRouterLLM)
+    assert llm.endpoint == "https://proxy.test/v1/chat/completions"
+
+
+@pytest.mark.parametrize(
+    "values",
+    [{"openrouter_api_key": "or-key"}, {"openrouter_models": "vendor/model"}],
+)
+def test_make_llm_with_only_gemini_complete_uses_gemini(values):
+    llm = make_llm(settings(gemini_api_key="k", gemini_model="g", **values))
+
+    assert isinstance(llm, GeminiLLM)
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"openrouter_api_key": "or-key"},
+        {"openrouter_models": "vendor/model"},
+        {"openrouter_api_key": "or-key", "openrouter_models": " , "},
+    ],
+)
+def test_make_llm_with_half_an_openrouter_config_is_unavailable(values):
+    with pytest.raises(LLMUnavailable, match="OPENROUTER_MODELS"):
+        make_llm(settings(**values))
+
+
+def test_openrouter_settings_default_to_the_public_api_and_no_models(monkeypatch):
+    for name in ("OPENROUTER_API_KEY", "OPENROUTER_MODELS", "OPENROUTER_URL"):
+        monkeypatch.delenv(name, raising=False)
+
+    s = Settings(_env_file=None)
+
+    assert s.openrouter_url == "https://openrouter.ai/api/v1"
+    assert s.openrouter_api_key is None and s.openrouter_models is None

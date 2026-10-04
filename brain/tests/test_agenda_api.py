@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from brain.agent.agenda import AgendaRewrite, AgendaSuggestionDraft, SuggestedItem
 from brain.api.deps import get_llm, get_settings
-from brain.llm import MockLLM
+from brain.llm import FallbackLLM, LLMOutOfCapacity, MockLLM
 from contracts import (
     Agenda,
     AgendaItem,
@@ -273,6 +273,33 @@ def test_a_blank_or_huge_topic_is_rejected_without_asking_the_model(app, client_
 
 def test_a_failing_model_is_reported_not_papered_over(app, client_as):
     use_llm(app, MockLLM())
+
+    response = client_as(ALEX).post("/agenda/rewrite", json={"text": "rate limit"})
+
+    assert response.status_code == 502
+
+
+class OutOfCapacity:
+    """A provider whose every model is rate-limited."""
+
+    last_model = None
+
+    async def generate_structured(self, prompt, schema, *, system=None):
+        raise LLMOutOfCapacity("every model tried: m: 429 RESOURCE_EXHAUSTED")
+
+
+def test_the_rewrite_falls_back_to_the_next_provider_when_one_is_out_of_capacity(app, client_as):
+    spare = MockLLM(structured={AgendaRewrite: AgendaRewrite(title="Rate limits")})
+    use_llm(app, FallbackLLM([OutOfCapacity(), spare]))
+
+    response = client_as(ALEX).post("/agenda/rewrite", json={"text": "rate limit"})
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"text": "Rate limits"}
+
+
+def test_every_provider_out_of_capacity_is_a_502(app, client_as):
+    use_llm(app, FallbackLLM([OutOfCapacity(), OutOfCapacity()]))
 
     response = client_as(ALEX).post("/agenda/rewrite", json={"text": "rate limit"})
 

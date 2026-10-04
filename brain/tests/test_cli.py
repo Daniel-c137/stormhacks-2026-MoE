@@ -45,7 +45,7 @@ def test_report_writes_a_review_file_with_the_mock_llm(tmp_path, capsys):
     assert "2 task drafts" in printed
 
 
-def test_report_names_the_gemini_model_that_answered(monkeypatch, tmp_path, capsys):
+def test_report_names_the_model_that_answered(monkeypatch, tmp_path, capsys):
     extraction = (FIXTURES / "standup.extraction.json").read_text()
 
     class Models:
@@ -61,7 +61,7 @@ def test_report_names_the_gemini_model_that_answered(monkeypatch, tmp_path, caps
     code = main(["report", str(FIXTURES / "standup.json"), "--out", str(tmp_path / "r.json")])
 
     assert code == 0
-    assert "Gemini spare-model" in capsys.readouterr().out
+    assert "from model spare-model" in capsys.readouterr().out
 
 
 def test_report_without_gemini_config_says_what_is_missing(monkeypatch, tmp_path):

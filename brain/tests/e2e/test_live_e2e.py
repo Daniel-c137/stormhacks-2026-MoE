@@ -13,7 +13,7 @@ from brain.report import ProcessedMeeting, TranscriptInput, build_report
 from contracts import AGENT_PARTICIPANT_ID
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
-settings = Settings()
+settings = Settings(openrouter_models=None)  # Gemini alone, never the fallback
 
 pytestmark = [
     pytest.mark.live,

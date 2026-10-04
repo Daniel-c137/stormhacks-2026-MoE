@@ -88,7 +88,7 @@ def run_report(args: argparse.Namespace) -> int:
         report = asyncio.run(build_report(llm, meeting))
     except (LLMError, ValueError) as e:
         sys.exit(f"brain report: {e}")
-    source = source or f"Gemini {llm.last_model}"
+    source = source or f"model {llm.last_model}"
 
     out = args.out or args.transcript.with_suffix(".review.json")
     review = ProcessedMeeting(

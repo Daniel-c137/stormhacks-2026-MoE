@@ -15,7 +15,7 @@ from brain.store import InMemoryStore
 from contracts import AskTurn, Team, get_identity
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
-settings = Settings()
+settings = Settings(openrouter_models=None)  # Gemini alone, never the fallback
 
 pytestmark = [
     pytest.mark.live,
