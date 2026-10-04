@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from brain.speakers import by_agent
 from brain.text import one_line
 from contracts import AGENT_PARTICIPANT_ID, AgendaItem, Person, TranscriptSegment, get_identity
 from contracts.agent import SourceKind
@@ -125,11 +126,6 @@ def agenda_lines(agenda: Sequence[AgendaItem]) -> list[str]:
         "then any other topics discussed. Leave out agenda items the transcript never discusses.",
         "",
     ]
-
-
-def by_agent(segment: TranscriptSegment) -> bool:
-    """Whether the agent spoke this segment. Its own words are never a claim or a source."""
-    return segment.speaker_id == AGENT_PARTICIPANT_ID
 
 
 def speaker(segment: TranscriptSegment, agent: str) -> str:

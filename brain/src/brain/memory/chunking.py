@@ -1,7 +1,9 @@
-"""Final transcripts and reports into chunks. Private chat has no way in."""
+"""Final transcripts and reports into chunks. Private chat has no way in, and neither do the
+agent's own words: they are never evidence."""
 
 from collections.abc import Iterable
 
+from brain.speakers import by_agent
 from contracts import Report, TranscriptSegment
 
 from .models import Chunk
@@ -17,7 +19,8 @@ def chunk_transcript(
     max_chars: int = MAX_CHUNK_CHARS,
 ) -> list[Chunk]:
     """One chunk per run of consecutive final segments by the same speaker, split when it would
-    grow past `max_chars`. A single segment longer than that stays whole."""
+    grow past `max_chars`. A single segment longer than that stays whole. The agent's turns
+    are left out."""
     final = final_segments(meeting_id, segments)
     runs: list[list[TranscriptSegment]] = []
     for segment in final:
@@ -43,6 +46,7 @@ def chunk_transcript(
             t_end=run[-1].t_end,
         )
         for run in runs
+        if not by_agent(run[0])
     ]
 
 
