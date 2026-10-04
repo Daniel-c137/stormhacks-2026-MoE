@@ -163,7 +163,7 @@ async def test_gemini_embedder_never_mixes_models_within_one_call():
 
 @pytest.fixture(autouse=True)
 def forget_missing_models(monkeypatch):
-    monkeypatch.setattr("brain.llm.gemini.warned_missing", set(), raising=False)
+    monkeypatch.setattr("brain.llm.gemini.warned_missing", set())
 
 
 @pytest.mark.parametrize(("code", "status"), [(400, "INVALID_ARGUMENT"), (401, "UNAUTHENTICATED")])

@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     gemini_api_key: str | None = None
     gemini_model: str | None = None
-    gemini_fallback_models: str | None = None  # comma-separated, tried in order on overload
+    gemini_fallback_models: str | None = None  # comma-separated, tried in order on overload or 404
     gemini_attempts: int = 2  # per model, including the first try
     gemini_max_delay: float = 4.0  # seconds between retries on the same model
     gemini_embedding_model: str | None = None

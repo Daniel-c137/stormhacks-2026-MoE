@@ -102,7 +102,7 @@ def api_error(code: int, status: str, message: str = "boom") -> genai_errors.API
 @pytest.fixture(autouse=True)
 def forget_missing_models(monkeypatch):
     """Each test starts as a fresh process that has not yet warned about any missing model."""
-    monkeypatch.setattr("brain.llm.gemini.warned_missing", set(), raising=False)
+    monkeypatch.setattr("brain.llm.gemini.warned_missing", set())
 
 
 @pytest.fixture
