@@ -1,6 +1,7 @@
 """A two-team world and an app wired to it, for HTTP tests of the brain's API.
 
-Auth is overridden by client_as; test_auth.py covers real Supabase sessions. The store is the real
+Auth is overridden: each client_as client sends X-Test-User, so several clients can act as
+different people at once; test_auth.py covers real Supabase sessions. The store is the real
 in-memory store, or with BRAIN_TEST_STORE=postgres a PostgresStore on a fresh pgserver database
 with the migrations applied. LiveKit tokens are really signed.
 """
@@ -9,9 +10,10 @@ import asyncio
 import os
 
 import pytest
+from fastapi import Header, Request
 from fastapi.testclient import TestClient
 
-from brain.api.deps import current_user, get_settings, get_store
+from brain.api.deps import current_user, get_rooms, get_settings, get_store
 from brain.config import Settings
 from brain.main import create_app
 from brain.store import InMemoryStore, Store
@@ -20,13 +22,37 @@ from contracts import Person, Team
 KEY = "test-key"
 SECRET = "test-secret-that-is-long-enough-for-hs256"
 LIVEKIT_URL = "wss://omniroom-test.livekit.cloud"
-WORKER_TOKEN = "worker-shared-secret"
+WORKER_TOKEN = "worker-shared-secret-0123456789abcdef"
 
 ALEX = Person(id="u-alex", name="Alex Chen", short="Alex", initials="AC")
 SARAH = Person(id="u-sarah", name="Sarah Kim", short="Sarah", initials="SK")
 OUTSIDER = Person(id="u-olga", name="Olga Petrova", short="Olga", initials="OP")
+NOBODY = Person(id="u-nobody", name="No Team", short="No", initials="NT")  # on no team
 TEAM = Team(id="t-1", name="Checkout", member_ids=[ALEX.id, SARAH.id])
 OTHER_TEAM = Team(id="t-2", name="Elsewhere", member_ids=[OUTSIDER.id])
+
+
+def user_from_test_header(request: Request, x_test_user: str = Header()) -> Person:
+    """The person the requesting client_as client was made for."""
+    return request.app.state.test_people[x_test_user]
+
+
+class FakeRooms:
+    """Records LiveKit rooms closed; fail=True makes closing raise like an unreachable LiveKit."""
+
+    def __init__(self, fail: bool = False):
+        self.fail = fail
+        self.closed: list[str] = []
+
+    async def close(self, room: str) -> None:
+        if self.fail:
+            raise RuntimeError("LiveKit unreachable")
+        self.closed.append(room)
+
+
+@pytest.fixture
+def rooms() -> FakeRooms:
+    return FakeRooms()
 
 
 @pytest.fixture
@@ -64,20 +90,25 @@ async def postgres_world(dsn: str) -> Store:
 
 
 @pytest.fixture
-def app(store, settings):
+def app(store, settings, rooms):
     app = create_app()
     app.dependency_overrides[get_store] = lambda: store
     app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_rooms] = lambda: rooms
     return app
 
 
 @pytest.fixture
 def client_as(app):
-    """client_as(person) -> a TestClient whose requests are made as that person."""
+    """client_as(person) -> a TestClient whose requests are made as that person. Each client
+    carries its own identity, so several can be held at once."""
+
+    app.state.test_people = {}
+    app.dependency_overrides[current_user] = user_from_test_header
 
     def make(person: Person) -> TestClient:
-        app.dependency_overrides[current_user] = lambda: person
-        return TestClient(app)
+        app.state.test_people[person.id] = person
+        return TestClient(app, headers={"X-Test-User": person.id})
 
     return make
 

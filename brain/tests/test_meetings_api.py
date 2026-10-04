@@ -1,19 +1,34 @@
 """Meeting lifecycle over HTTP: create, list, get, join by link, end."""
 
+import jwt
+import pytest
 from api_support import (
     ALEX,
     KEY,
     LIVEKIT_URL,
+    NOBODY,
     OUTSIDER,
     SARAH,
     SECRET,
     TEAM,
+    FakeRooms,
     create,
 )
 from livekit.api import TokenVerifier
 
-from brain.api.deps import get_settings
+from brain.api.deps import get_rooms, get_settings
 from brain.config import Settings
+
+# test harness
+
+
+def test_two_clients_held_at_once_keep_their_own_identity(client_as):
+    alex = client_as(ALEX)
+    meeting = create(alex)
+    client_as(OUTSIDER)
+
+    assert alex.get(f"/meetings/{meeting['id']}").status_code == 200
+
 
 # create
 
@@ -44,6 +59,27 @@ def test_blank_title_is_rejected(client_as):
     assert response.status_code == 422
 
 
+def test_title_is_capped_at_200_characters(client_as):
+    alex = client_as(ALEX)
+
+    assert alex.post("/meetings", json={"title": "x" * 200}).status_code == 200
+    assert alex.post("/meetings", json={"title": "x" * 201}).status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [("post", "/meetings"), ("get", "/meetings"), ("post", "/meetings/join/any-code")],
+)
+def test_someone_on_no_team_is_refused(client_as, method, path):
+    meeting = create(client_as(ALEX))
+    if "join" in path:
+        path = f"/meetings/join/{meeting['code']}"
+
+    response = client_as(NOBODY).request(method.upper(), path, json={"title": "Mine"})
+
+    assert response.status_code == 403
+
+
 # list and get
 
 
@@ -54,6 +90,15 @@ def test_list_shows_only_my_teams_meetings(client_as):
     listed = client_as(SARAH).get("/meetings").json()
 
     assert [m["id"] for m in listed] == [mine["id"]]
+
+
+def test_list_is_newest_first(client_as):
+    alex = client_as(ALEX)
+    ids = [create(alex, f"Meeting {n}")["id"] for n in range(3)]
+
+    listed = [m["id"] for m in alex.get("/meetings").json()]
+
+    assert listed == list(reversed(ids))
 
 
 def test_teammate_can_get_a_meeting(client_as):
@@ -90,6 +135,15 @@ def test_teammate_joins_by_code_and_gets_a_livekit_token_for_that_room(client_as
     assert claims.name == SARAH.name
     assert claims.video.room == meeting["id"]
     assert not claims.video.room_admin
+
+
+def test_join_token_is_short_lived(client_as):
+    meeting = create(client_as(ALEX))
+
+    token = client_as(SARAH).post(f"/meetings/join/{meeting['code']}").json()["token"]
+
+    claims = jwt.decode(token, SECRET, algorithms=["HS256"], options={"verify_aud": False})
+    assert claims["exp"] - claims["nbf"] == 600
 
 
 def test_host_joining_gets_room_admin(client_as):
@@ -177,3 +231,43 @@ def test_ending_twice_is_harmless(client_as):
 
     assert response.status_code == 200
     assert response.json()["status"] == "processing"
+
+
+def test_ending_records_when_the_meeting_ended(client_as):
+    alex = client_as(ALEX)
+    meeting = create(alex)
+
+    ended = alex.post(f"/meetings/{meeting['id']}/end").json()
+
+    assert ended["ended_at"] is not None
+
+
+def test_ending_closes_the_livekit_room_once(client_as, rooms):
+    alex = client_as(ALEX)
+    meeting = create(alex)
+
+    alex.post(f"/meetings/{meeting['id']}/end")
+    alex.post(f"/meetings/{meeting['id']}/end")
+
+    assert rooms.closed == [meeting["id"]]
+
+
+def test_meeting_still_ends_when_livekit_cannot_close_the_room(app, client_as):
+    app.dependency_overrides[get_rooms] = lambda: FakeRooms(fail=True)
+    alex = client_as(ALEX)
+    meeting = create(alex)
+
+    response = alex.post(f"/meetings/{meeting['id']}/end")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "processing"
+
+
+def test_another_team_cannot_end_the_meeting(client_as, rooms):
+    meeting = create(client_as(ALEX))
+
+    response = client_as(OUTSIDER).post(f"/meetings/{meeting['id']}/end")
+
+    assert response.status_code == 404
+    assert client_as(ALEX).get(f"/meetings/{meeting['id']}").json()["status"] == "live"
+    assert rooms.closed == []

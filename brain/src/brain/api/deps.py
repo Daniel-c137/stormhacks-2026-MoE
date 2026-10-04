@@ -20,6 +20,7 @@ from ..agent.pipeline import PipelineRunner, PostMeetingPipeline, ReportPipeline
 from ..auth import AuthNotConfigured, InvalidToken, KeysUnavailable, TokenVerifier
 from ..config import Settings
 from ..jira import JiraPusher, jira_config
+from ..livekit_rooms import Rooms, rooms_from_settings
 from ..llm import LLM, LLMError, LLMUnavailable, make_embedder, make_llm
 from ..memory import MeetingMemory, PgMemoryStore
 from ..store import NotFound, Store
@@ -106,6 +107,11 @@ def get_runner(request: Request) -> PipelineRunner:
     if not hasattr(state, "pipeline_runner"):
         state.pipeline_runner = PipelineRunner()
     return state.pipeline_runner
+
+
+def get_rooms(settings: Settings = Depends(get_settings)) -> Rooms:
+    """LiveKit's room service, to close a meeting's room when it ends."""
+    return rooms_from_settings(settings)
 
 
 def get_verifier(request: Request, settings: Settings = Depends(get_settings)) -> TokenVerifier:
