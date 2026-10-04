@@ -17,7 +17,8 @@ agent never speaks on its own.
 
 A stretch of only small talk never covers an item. The model is Gemini, or Jev when JEV_MODEL is
 set (agenda_jev): fast and cheap enough to be asked as soon as anything new has settled, so with
-it the worker checks after every caption and a tick asks about a single short line too.
+it the worker checks after every caption and a tick asks about a single short line too. Jev also
+tells the team's work off the agenda from small talk, so moving on to it can cover an item.
 """
 
 import math
@@ -180,6 +181,7 @@ class Labelled:
     about: tuple[str | None, ...]  # per segment: its item's id, or None (no item, or no label)
     current: str | None  # the item of the last labelled segment
     covered: frozenset[str]
+    work: bool  # some segment is about the team's work, on the agenda or off it: not small talk
 
 
 async def classify(
@@ -198,12 +200,14 @@ async def classify(
     if jev is not None:
         current = next((lb for lb, i in labels.items() if i.id == agenda.current_item_id), NO_ITEM)
         about, over = await jev_labels(jev, labels, current, segments, earlier)
+        work = any(label != NO_ITEM for label in about)
         draft = AgendaTrackDraft(
             topics=[TopicRun(first=n, last=n, item=label) for n, label in enumerate(about, 1)],
             covered=sorted(over),
         )
     else:
         assert llm is not None
+        work = None  # Gemini's "none" is small talk and off-agenda work alike
         draft = await llm.generate_structured(
             render_track_prompt(agenda, labels, segments, earlier),
             AgendaTrackDraft,
@@ -221,10 +225,12 @@ async def classify(
             continue
         for n in range(max(run.first, 1), min(run.last, len(segments)) + 1):
             marks[n] = about
+    about = tuple(marks.get(n) for n in range(1, len(segments) + 1))
     return Labelled(
-        about=tuple(marks.get(n) for n in range(1, len(segments) + 1)),
+        about=about,
         current=marks[max(marks)] if marks else None,
         covered=frozenset(i for i in map(item_id, draft.covered) if i),
+        work=any(i is not None for i in about) if work is None else work,
     )
 
 
@@ -487,9 +493,7 @@ async def track_agenda(
                     seconds=split_talk(spans, batch, said.about, agenda.current_item_id),
                     last=last,
                     # small talk alone never finishes an item, whatever the model says
-                    said_covered=(
-                        said.covered if any(i is not None for i in said.about) else frozenset()
-                    ),
+                    said_covered=said.covered if said.work else frozenset(),
                     ends_on=next((i for i in reversed(said.about) if i is not None), None),
                 )
 

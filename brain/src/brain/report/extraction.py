@@ -90,7 +90,8 @@ def system_prompt() -> str:
 Rules:
 - Use only the transcript. Never add facts, names, dates or links it does not contain.
 - Every decision, task and risk lists the ids of the segments that support it.
-- Tasks are concrete follow-up work someone agreed to do or was asked to do.
+- Tasks are concrete follow-up work: what someone agreed to do or was asked to do, and work the
+  team says needs doing ("we need to choose a NoSQL database"), even when nobody took it on.
 - A task's owner is a participant id, only when the transcript states or clearly implies who
   will do it ("I'll take it" means the speaker). Otherwise null. {agent} is the meeting
   assistant and is never an owner.
