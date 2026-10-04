@@ -1,5 +1,6 @@
 """Accounts: a person on a team with an email and password login, and who is an admin. Shared by
-`brain add-user`, `brain set-admin` and POST /team/accounts; there is no public sign-up."""
+`brain add-user`, `brain set-admin`, POST /team/accounts and invite-only sign-up (#128). An
+invited person is on a team with an email and no login yet, until they sign up (#143)."""
 
 import re
 import secrets
@@ -20,6 +21,10 @@ class InvalidAccount(ValueError):
 
 class LastAdmin(Exception):
     """Revoking would leave the team without an admin."""
+
+
+class InvitedTwice(Exception):
+    """More than one team invited the email, so whose account it is isn't clear."""
 
 
 def clean_name(name: str) -> str:
@@ -64,6 +69,61 @@ async def existing_person(store: Store, team: Team, email: str) -> Person | None
     return None
 
 
+async def invited_person(store: Store, email: str) -> tuple[Person, Team] | None:
+    """The person an admin invited with this email (ignoring case), and the team they join: on
+    a team with no login yet. None for anyone else, including someone who already signs in.
+    Raises InvitedTwice when several teams invited the email."""
+    found = await store.invited_people(email)
+    if not found:
+        return None
+    if len(found) > 1:
+        raise InvitedTwice(email)
+    try:
+        return found[0], await store.team_for_user(found[0].id)
+    except NotFound:  # only a race with the team's removal gets here
+        return None
+
+
+async def invite_person(
+    store: Store,
+    team: Team,
+    *,
+    name: str,
+    email: str,
+    title: str | None = None,
+    is_admin: bool = False,
+) -> Person:
+    """A new person on the team with the name and email and no login: they create it themselves
+    with sign-up or Google."""
+    person = Person(
+        id=str(uuid.uuid4()), **name_fields(name), email=email, title=title, is_admin=is_admin
+    )
+    return await store.upsert_person(person, team.id)
+
+
+async def accept_invite(
+    store: Store, person: Person, password_hash: str, *, name: str | None = None
+) -> Person:
+    """Gives the invited person their first login, with the email they were invited with, and
+    the name they chose (if given). Raises Conflict, changing nothing, when they or the email
+    have a login already: another sign-up or Google got there first."""
+    assert person.email, "an invited person has an email"
+    await store.add_login(person.id, person.email, password_hash)
+    if name is None:
+        return await store.person(person.id)
+    current = await store.person(person.id)
+    return await store.update_person(current.model_copy(update=name_fields(name)))
+
+
+async def signs_in(store: Store, person_id: str) -> bool:
+    """Whether the person has a login (an invited person has none until they sign up)."""
+    try:
+        await store.login(person_id)
+    except NotFound:
+        return False
+    return True
+
+
 async def save_account(
     store: Store,
     team: Team,
@@ -98,8 +158,11 @@ async def set_admin(store: Store, person_id: str, is_admin: bool) -> Person:
             team = await store.team_for_user(person.id)
         except NotFound:
             team = None
-        if team and not any(m.is_admin for m in await store.members(team.id) if m.id != person.id):
-            raise LastAdmin(f"{person.name} is the last admin of team {team.id}")
+        if team is not None:
+            # an invited admin can't sign in yet, so they don't count
+            others = [m for m in await store.members(team.id) if m.is_admin and m.id != person.id]
+            if not [m for m in others if await signs_in(store, m.id)]:
+                raise LastAdmin(f"{person.name} is the last admin of team {team.id}")
     if person.is_admin == is_admin:
         return person
     return await store.update_person(person.model_copy(update={"is_admin": is_admin}))

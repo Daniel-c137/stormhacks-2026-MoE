@@ -20,6 +20,7 @@ from contracts import (
     Voice,
 )
 
+from ..accounts import signs_in
 from ..auth import NOT_CONFIGURED, signing_secret
 from ..config import Settings
 from ..connectors import connector_statuses
@@ -148,8 +149,13 @@ async def get_team(user: Person = Depends(current_user), store: Store = Depends(
 async def list_members(
     user: Person = Depends(current_user), store: Store = Depends(get_store)
 ) -> list[Person]:
+    """The team's people; `invited` marks those an admin invited who haven't signed up yet (an
+    email and no login)."""
     team = await user_team(store, user)
-    return await store.members(team.id)
+    return [
+        p.model_copy(update={"invited": bool(p.email) and not await signs_in(store, p.id)})
+        for p in await store.members(team.id)
+    ]
 
 
 # workspace settings

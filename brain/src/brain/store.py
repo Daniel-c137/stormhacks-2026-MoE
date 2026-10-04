@@ -146,12 +146,23 @@ class Store(Protocol):
         email (ignoring case); NotFound when the person is missing."""
         ...
 
+    async def add_login(self, person_id: str, email: str, password_hash: str) -> Login:
+        """Inserts the person's first login and never replaces one: Conflict when the person
+        already has a login or another login has the email (ignoring case); NotFound when the
+        person is missing. Sign-up and Google claim an invited person's login with it."""
+        ...
+
     async def login_by_email(self, email: str) -> Login:
         """Ignores case; NotFound when no login has the email."""
         ...
 
     async def login(self, person_id: str) -> Login:
         """NotFound when the person has no login."""
+        ...
+
+    async def invited_people(self, email: str) -> list[Person]:
+        """People an admin invited with this email (ignoring case): on a team, with that email,
+        and no login yet. Several when several teams invited it; the API refuses those."""
         ...
 
     # meetings
@@ -514,6 +525,12 @@ class InMemoryStore:
         self._logins[person_id] = login
         return _copy(login)
 
+    async def add_login(self, person_id: str, email: str, password_hash: str) -> Login:
+        self._person(person_id)
+        if person_id in self._logins:
+            raise Conflict("the person has a login already")
+        return await self.set_login(person_id, email, password_hash)
+
     async def login_by_email(self, email: str) -> Login:
         for login in self._logins.values():
             if login.email.lower() == email.lower():
@@ -525,6 +542,17 @@ class InMemoryStore:
         if saved is None:
             raise NotFound(f"login for person {person_id}")
         return _copy(saved)
+
+    async def invited_people(self, email: str) -> list[Person]:
+        wanted = email.strip().lower()
+        on_a_team = {i for team in self._teams.values() for i in team.member_ids}
+        return [
+            _copy(p)
+            for p in self._people.values()
+            if p.id in on_a_team
+            and p.id not in self._logins
+            and (p.email or "").strip().lower() == wanted
+        ]
 
     # meetings
 

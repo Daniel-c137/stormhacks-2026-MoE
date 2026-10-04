@@ -591,11 +591,74 @@ async def test_an_email_used_by_another_person_is_a_conflict(store):
     assert await store.login_by_email("alex@example.com") == recased
 
 
+async def test_adding_a_login_never_replaces_one(store):
+    """Sign-up and Google claim an invited person's login with add_login, so two of them racing
+    for one person can't both win, and the loser can't replace the winner's password."""
+    _, alex, sarah, *_ = await two_teams(store)
+
+    saved = await store.add_login(alex.id, "Alex@Example.com", "hash-1")
+
+    assert (saved.person_id, saved.email, saved.password_hash) == (
+        alex.id,
+        "Alex@Example.com",
+        "hash-1",
+    )
+    with pytest.raises(Conflict):
+        await store.add_login(alex.id, "alex@example.com", "hash-2")  # has one already
+    with pytest.raises(Conflict):
+        await store.add_login(sarah.id, "ALEX@example.com", "hash-3")  # another's email
+    assert (await store.login(alex.id)).password_hash == "hash-1"
+    with pytest.raises(NotFound):
+        await store.login(sarah.id)
+    with pytest.raises(NotFound):
+        await store.add_login(new_id(), "ghost@example.com", "hash-4")
+
+
 async def test_a_login_needs_an_existing_person(store):
     with pytest.raises(NotFound):
         await store.set_login(new_id(), "ghost@example.com", "hash-1")
     with pytest.raises(NotFound):
         await store.login_by_email("ghost@example.com")
+
+
+# invitations: a person an admin added with an email and no login yet (#143)
+
+
+async def test_an_invited_person_is_found_by_email_ignoring_case_until_they_have_a_login(store):
+    _, alex, sarah, other, _ = await two_teams(store)
+    priya = person("Priya Shah", email="Priya.Shah@Example.com")
+    await store.upsert_person(priya, other.id)
+    await store.set_login(alex.id, "alex@example.com", "hash-1")
+
+    assert [p.id for p in await store.invited_people("priya.shah@example.com")] == [priya.id]
+    assert [p.id for p in await store.invited_people("PRIYA.SHAH@EXAMPLE.COM")] == [priya.id]
+    assert [p.id for p in await store.invited_people("sarah@example.com")] == [sarah.id]
+    assert await store.invited_people("alex@example.com") == []  # signs in already
+    assert await store.invited_people("nobody@example.com") == []
+
+    await store.set_login(priya.id, "priya.shah@example.com", "hash-2")
+    assert await store.invited_people("priya.shah@example.com") == []
+
+
+async def test_the_same_email_invited_by_two_teams_finds_both(store):
+    team, *_, other, _ = await two_teams(store)
+    first = person("Sam Lee", email="sam@example.com")
+    second = person("Sam Lee", email="SAM@example.com")
+    await store.upsert_person(first, team.id)
+    await store.upsert_person(second, other.id)
+
+    found = await store.invited_people("sam@example.com")
+
+    assert sorted(p.id for p in found) == sorted([first.id, second.id])
+    assert all(isinstance(p, Person) and not p.invited for p in found)
+
+
+async def test_someone_on_no_team_is_not_invited(store):
+    team = await team_with(store, person("Sam Lee", email="sam@example.com"))
+
+    await store.delete_team(team.id)  # people stay, their membership goes
+
+    assert await store.invited_people("sam@example.com") == []
 
 
 # meetings

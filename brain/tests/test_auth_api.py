@@ -1,5 +1,6 @@
 """Sign-in through the brain: POST /auth/login and POST /auth/password, with real sessions (no
-auth override). There is no public sign-up; accounts come from `brain add-user`."""
+auth override). Accounts come from `brain add-user`, an admin, or an invited email signing up
+(test_signup_api.py)."""
 
 import asyncio
 from datetime import UTC, datetime, timedelta
@@ -191,8 +192,13 @@ def test_a_malformed_login_is_422(client, body):
     assert client.post("/auth/login", json=body).status_code == 422
 
 
-def test_there_is_no_public_sign_up(client):
-    for path in ("/auth/signup", "/auth/register", "/auth/users"):
+def test_there_is_no_open_sign_up(client):
+    """Only invited emails create accounts (#128, test_signup_api.py); nothing else does."""
+    response = client.post(
+        "/auth/signup", json={"name": "New", "email": "new@example.com", "password": "x" * 12}
+    )
+    assert response.status_code in (403, 503)
+    for path in ("/auth/register", "/auth/users"):
         response = client.post(path, json={"email": "new@example.com", "password": "x" * 12})
         assert response.status_code in (404, 405), path
 

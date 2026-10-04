@@ -21,6 +21,7 @@ from ..agent.factcheck import FactChecker
 from ..agent.pipeline import PipelineRunner, PostMeetingPipeline, ReportPipeline
 from ..auth import NOT_CONFIGURED, AuthNotConfigured, InvalidToken, LoginLimiter, TokenVerifier
 from ..config import Settings
+from ..google_auth import GoogleKeys, OneTimeCodes
 from ..jira import JiraPusher, jira_config
 from ..livekit_rooms import Rooms, rooms_from_settings
 from ..llm import LLM, LLMError, LLMUnavailable, make_embedder, make_llm, make_translation_llm
@@ -155,6 +156,22 @@ def get_rooms(settings: Settings = Depends(get_settings)) -> Rooms:
 
 def get_verifier(settings: Settings = Depends(get_settings)) -> TokenVerifier:
     return TokenVerifier.from_settings(settings)
+
+
+def get_google_keys(request: Request) -> GoogleKeys:
+    """Google's published signing keys, cached by the app."""
+    state = request.app.state
+    if not hasattr(state, "google_keys"):
+        state.google_keys = GoogleKeys()
+    return state.google_keys
+
+
+def get_one_time_codes(request: Request) -> OneTimeCodes:
+    """Sessions from Google sign-in waiting for the board to collect them (in process)."""
+    state = request.app.state
+    if not hasattr(state, "google_codes"):
+        state.google_codes = OneTimeCodes()
+    return state.google_codes
 
 
 def get_login_limiter(request: Request) -> LoginLimiter:
