@@ -5,7 +5,7 @@ import socket
 from collections.abc import Iterator
 
 import pytest
-from api_support import ADMIN, ALEX
+from api_support import ALEX
 from conftest import serve_mcp
 from mcp.server.mcpserver import MCPServer
 
@@ -69,7 +69,7 @@ def linked(client_as):
         "gitlab": [{"path": "acme/infra"}],
         "jira": {"site": "acme.atlassian.net", "project": "DS"},
     }
-    response = client_as(ADMIN).put("/settings/connectors", json=body)
+    response = client_as(ALEX).put("/settings/connectors", json=body)
     assert response.status_code == 200, response.text
 
 

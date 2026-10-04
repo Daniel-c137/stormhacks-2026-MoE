@@ -1,7 +1,7 @@
 """Profile, team and workspace settings over HTTP."""
 
 import pytest
-from api_support import ADMIN, ALEX, OUTSIDER, SARAH, TEAM
+from api_support import ALEX, OUTSIDER, SARAH, TEAM
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
 JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 64
@@ -188,14 +188,14 @@ def test_settings_keep_the_connectors_whatever_the_body_says(client_as):
         "gitlab": [{"path": "acme/infra"}],
         "jira": {"site": "acme.atlassian.net", "project": "DS"},
     }
-    assert client_as(ADMIN).put("/settings/connectors", json=connectors).status_code == 200
+    assert client_as(ALEX).put("/settings/connectors", json=connectors).status_code == 200
     body = settings_body(
         github={"repos": [{"path": "evil/repo", "connected": True, "files": 9000}]},
         gitlab={"projects": []},
         jira={"site": "evil.example", "project": "EV", "connected": True},
     )
 
-    saved = client_as(SARAH).put("/settings", json=body).json()
+    saved = client_as(ALEX).put("/settings", json=body).json()
 
     assert [r["path"] for r in saved["github"]["repos"]] == ["acme/checkout"]
     assert saved["github"]["repos"][0]["connected"] is False
@@ -207,8 +207,8 @@ def test_settings_keep_the_connectors_whatever_the_body_says(client_as):
 def test_settings_may_leave_the_connectors_out_or_send_the_old_shape(client_as):
     without = {k: v for k, v in settings_body().items() if k not in ("github", "jira")}
 
-    assert client_as(SARAH).put("/settings", json=without).status_code == 200
-    assert client_as(SARAH).put("/settings", json=settings_body()).status_code == 200
+    assert client_as(ALEX).put("/settings", json=without).status_code == 200
+    assert client_as(ALEX).put("/settings", json=settings_body()).status_code == 200
 
 
 def test_blank_text_settings_are_cleared(client_as):
