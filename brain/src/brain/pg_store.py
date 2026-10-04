@@ -49,6 +49,7 @@ from teams t
 """
 TASK = "id, meeting_id, title, description, owner_id, due, t, quote, include, key, jira_status"
 DECISION = "id, meeting_id, text, made_by, t, quote, status, relation_type, relation_decision_id"
+AGENDA = "generated_at, updated_at, current_item_id, tracked_until, revision"
 SEGMENT = "seg_id, meeting_id, speaker_id, speaker_name, text, is_final, t_start, t_end"
 # Newest first by started_at, or scheduled_start before it starts; ties in creation order.
 NEWEST_MEETING_FIRST = "coalesce(m.started_at, m.scheduled_start) desc nulls last, m.seq"
@@ -457,8 +458,7 @@ class PostgresStore:
         async with self._tx() as cur:
             row = await self._one(
                 cur,
-                "select meeting_id, generated_at, updated_at, current_item_id, tracked_until"
-                " from agendas where meeting_id = %s",
+                f"select meeting_id, {AGENDA} from agendas where meeting_id = %s",
                 [meeting_id],
             )
             if row is None:
@@ -473,40 +473,44 @@ class PostgresStore:
 
     async def save_agenda(self, agenda: Agenda) -> Agenda:
         async with self._tx() as cur:
-            await cur.execute(
-                "insert into agendas"
-                " (meeting_id, generated_at, updated_at, current_item_id, tracked_until)"
-                " values (%(meeting_id)s, %(generated_at)s, %(updated_at)s, %(current_item_id)s,"
-                " %(tracked_until)s)"
+            # One upsert: overlapping saves queue on the row lock and each bumps the revision.
+            row = await self._one(
+                cur,
+                "insert into agendas (meeting_id, generated_at, updated_at, current_item_id,"
+                " tracked_until, revision) values (%(meeting_id)s, %(generated_at)s,"
+                " %(updated_at)s, %(current_item_id)s, %(tracked_until)s, 1)"
                 " on conflict (meeting_id) do update set generated_at = excluded.generated_at,"
                 " updated_at = excluded.updated_at, current_item_id = excluded.current_item_id,"
-                " tracked_until = excluded.tracked_until",
+                " tracked_until = excluded.tracked_until, revision = agendas.revision + 1"
+                " returning revision",
                 agenda.model_dump(exclude={"items"}),
             )
             await self._replace_agenda_items(cur, agenda)
-        return agenda.model_copy(deep=True)
+        return agenda.model_copy(deep=True, update={"revision": row["revision"]})
 
-    async def save_agenda_if(self, agenda: Agenda, *, tracked_until: float | None) -> Agenda:
-        async with self._tx() as cur:
-            # The row lock makes an overlapping save wait, then find tracked_until moved.
-            row = await self._one(
-                cur,
-                "update agendas set generated_at = %(generated_at)s, updated_at = %(updated_at)s,"
-                " current_item_id = %(current_item_id)s, tracked_until = %(tracked_until)s"
-                " where meeting_id = %(meeting_id)s"
-                " and tracked_until is not distinct from %(expected)s::double precision"
-                " returning meeting_id",
-                agenda.model_dump(exclude={"items"}) | {"expected": tracked_until},
+    async def save_agenda_if(self, agenda: Agenda) -> Agenda:
+        if agenda.revision == 0:  # none saved yet: create it, unless someone just did
+            sql = (
+                "insert into agendas (meeting_id, generated_at, updated_at, current_item_id,"
+                " tracked_until, revision) values (%(meeting_id)s, %(generated_at)s,"
+                " %(updated_at)s, %(current_item_id)s, %(tracked_until)s, 1)"
+                " on conflict (meeting_id) do nothing returning revision"
             )
+        else:  # the row lock makes an overlapping save wait, then miss the old revision
+            sql = (
+                "update agendas set generated_at = %(generated_at)s,"
+                " updated_at = %(updated_at)s, current_item_id = %(current_item_id)s,"
+                " tracked_until = %(tracked_until)s, revision = revision + 1"
+                " where meeting_id = %(meeting_id)s and revision = %(revision)s"
+                " returning revision"
+            )
+        async with self._tx() as cur:
+            row = await self._one(cur, sql, agenda.model_dump(exclude={"items"}))
             if row is None:
-                saved = await self._one(
-                    cur, "select 1 from agendas where meeting_id = %s", [agenda.meeting_id]
-                )
-                if saved is None:
-                    raise NotFound(f"agenda for meeting {agenda.meeting_id}")
-                raise Conflict(f"agenda for meeting {agenda.meeting_id} was tracked meanwhile")
+                await self._meeting(cur, agenda.meeting_id)  # NotFound when it is missing
+                raise Conflict(f"agenda for meeting {agenda.meeting_id} changed meanwhile")
             await self._replace_agenda_items(cur, agenda)
-        return agenda.model_copy(deep=True)
+        return agenda.model_copy(deep=True, update={"revision": row["revision"]})
 
     async def _replace_agenda_items(self, cur: Cursor, agenda: Agenda) -> None:
         await cur.execute("delete from agenda_items where meeting_id = %s", [agenda.meeting_id])
@@ -526,33 +530,74 @@ class PostgresStore:
     # reports, tasks and decisions
 
     async def save_report(self, report: Report) -> None:
+        async with self._tx() as cur:
+            await self._write_report(cur, report)
+
+    async def complete_report(self, report: Report, superseded: Sequence[Decision] = ()) -> Meeting:
+        meeting_id = report.meeting_id
+        async with self._tx() as cur:
+            row = await self._one(
+                cur, "select status from meetings where id = %s for update", [meeting_id]
+            )
+            if row is None:
+                raise NotFound(f"meeting {meeting_id}")
+            if row["status"] != "processing":
+                raise Conflict(f"meeting {meeting_id} is {row['status']}")
+            # Undo what this meeting's earlier decisions retired, before they are replaced.
+            await cur.execute(
+                "update decisions set status = 'active', relation_type = null,"
+                " relation_decision_id = null"
+                " where meeting_id <> %(m)s and relation_type = 'superseded_by'"
+                " and relation_decision_id in (select id from decisions where meeting_id = %(m)s)",
+                {"m": meeting_id},
+            )
+            await self._write_report(cur, report)
+            for decision in superseded:
+                found = await self._one(
+                    cur,
+                    "update decisions set status = %(status)s, relation_type = %(relation_type)s,"
+                    " relation_decision_id = %(relation_decision_id)s"
+                    " where id = %(id)s and meeting_id <> %(meeting)s returning id",
+                    self._decision_values(decision) | {"meeting": meeting_id},
+                )
+                if found is None:
+                    raise NotFound(f"decision {decision.id} of another meeting")
+            row = await self._one(
+                cur,
+                f"update meetings set status = 'needs_review' where id = %s returning {MEETING}",
+                [meeting_id],
+            )
+        assert row is not None  # the row is locked above, so it is still there
+        return _meeting(row)
+
+    async def _write_report(self, cur: Cursor, report: Report) -> None:
+        """Replaces the meeting's report, tasks and decisions, in the caller's transaction."""
         meeting_id = report.meeting_id
         sections = report.model_dump(mode="json", exclude=set(REPORT_ROWS))
-        async with self._tx() as cur:
-            await cur.execute(
-                "insert into reports (meeting_id, summary, sections) values (%s, %s, %s)"
-                " on conflict (meeting_id) do update set summary = excluded.summary,"
-                " sections = excluded.sections",
-                [meeting_id, report.summary, Jsonb(sections)],
+        await cur.execute(
+            "insert into reports (meeting_id, summary, sections) values (%s, %s, %s)"
+            " on conflict (meeting_id) do update set summary = excluded.summary,"
+            " sections = excluded.sections",
+            [meeting_id, report.summary, Jsonb(sections)],
+        )
+        await cur.execute("delete from task_drafts where meeting_id = %s", [meeting_id])
+        await cur.execute("delete from decisions where meeting_id = %s", [meeting_id])
+        if report.tasks:
+            await cur.executemany(
+                f"insert into task_drafts ({TASK}, ord)"
+                " values (%(id)s, %(meeting_id)s, %(title)s, %(description)s, %(owner_id)s,"
+                " %(due)s, %(t)s, %(quote)s, %(include)s, %(key)s, %(jira_status)s, %(ord)s)"
+                f" on conflict (id) do update set {_from_excluded(TASK, 'ord')}",
+                [t.model_dump() | {"ord": i} for i, t in enumerate(report.tasks)],
             )
-            await cur.execute("delete from task_drafts where meeting_id = %s", [meeting_id])
-            await cur.execute("delete from decisions where meeting_id = %s", [meeting_id])
-            if report.tasks:
-                await cur.executemany(
-                    f"insert into task_drafts ({TASK}, ord)"
-                    " values (%(id)s, %(meeting_id)s, %(title)s, %(description)s, %(owner_id)s,"
-                    " %(due)s, %(t)s, %(quote)s, %(include)s, %(key)s, %(jira_status)s, %(ord)s)"
-                    f" on conflict (id) do update set {_from_excluded(TASK, 'ord')}",
-                    [t.model_dump() | {"ord": i} for i, t in enumerate(report.tasks)],
-                )
-            if report.decisions:
-                await cur.executemany(
-                    f"insert into decisions ({DECISION}, ord)"
-                    " values (%(id)s, %(meeting_id)s, %(text)s, %(made_by)s, %(t)s, %(quote)s,"
-                    " %(status)s, %(relation_type)s, %(relation_decision_id)s, %(ord)s)"
-                    f" on conflict (id) do update set {_from_excluded(DECISION, 'ord')}",
-                    [self._decision_values(d) | {"ord": i} for i, d in enumerate(report.decisions)],
-                )
+        if report.decisions:
+            await cur.executemany(
+                f"insert into decisions ({DECISION}, ord)"
+                " values (%(id)s, %(meeting_id)s, %(text)s, %(made_by)s, %(t)s, %(quote)s,"
+                " %(status)s, %(relation_type)s, %(relation_decision_id)s, %(ord)s)"
+                f" on conflict (id) do update set {_from_excluded(DECISION, 'ord')}",
+                [self._decision_values(d) | {"ord": i} for i, d in enumerate(report.decisions)],
+            )
 
     async def report(self, meeting_id: str) -> Report:
         async with self._tx() as cur:
@@ -584,17 +629,19 @@ class PostgresStore:
     async def save_report_progress(self, progress: ReportProgress) -> ReportProgress:
         async with self._tx() as cur:
             await cur.execute(
-                "insert into report_progress (meeting_id, steps, current_step, done, error)"
-                " values (%s, %s, %s, %s, %s)"
+                "insert into report_progress"
+                " (meeting_id, steps, current_step, done, error, updated_at)"
+                " values (%s, %s, %s, %s, %s, %s)"
                 " on conflict (meeting_id) do update set steps = excluded.steps,"
                 " current_step = excluded.current_step, done = excluded.done,"
-                " error = excluded.error",
+                " error = excluded.error, updated_at = excluded.updated_at",
                 [
                     progress.meeting_id,
                     Jsonb(progress.steps),
                     progress.current,
                     progress.done,
                     progress.error,
+                    progress.updated_at,
                 ],
             )
         return progress.model_copy(deep=True)
@@ -603,7 +650,7 @@ class PostgresStore:
         async with self._tx() as cur:
             row = await self._one(
                 cur,
-                "select meeting_id, steps, current_step as current, done, error"
+                "select meeting_id, steps, current_step as current, done, error, updated_at"
                 " from report_progress where meeting_id = %s",
                 [meeting_id],
             )

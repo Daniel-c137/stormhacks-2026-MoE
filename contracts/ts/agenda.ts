@@ -23,6 +23,7 @@ export interface Agenda {
   updated_at?: string | null; // ISO 8601; last human edit
   current_item_id?: string | null; // being discussed now; null when off the agenda
   tracked_until?: number | null; // transcript seconds tracked so far; null before any
+  revision?: number; // bumped by every save; 0 until first saved
 }
 
 /** Proposed items, not saved; a person adds the ones they want. */
