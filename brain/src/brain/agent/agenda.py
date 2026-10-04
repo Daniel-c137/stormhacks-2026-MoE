@@ -3,6 +3,7 @@
 Both are suggestions only; a person decides what goes on the agenda.
 """
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, tzinfo
@@ -29,6 +30,8 @@ TITLE_MAX = 200
 TOPIC_MAX = 1000
 MINUTES_MIN, MINUTES_MAX = 1, 240
 MAX_SUGGESTIONS = 6
+# Suggested timeboxes, in minutes; a meeting's length caps their total.
+TIMEBOX_MIN, TIMEBOX_MAX, TIMEBOX_DEFAULT = 5, 30, 10
 RECENT_REPORTS = 5
 MAX_TASKS = 15
 
@@ -93,12 +96,55 @@ class SuggestionInput:
 class SuggestedItem(BaseModel):
     title: str = Field(description="A short, clear agenda item, at most about ten words.")
     why: str = Field(description="One sentence on why it is worth discussing, from the inputs.")
-    minutes: int | None = Field(default=None, description="Suggested timebox, 5 to 30, or null.")
+    minutes: int | None = Field(
+        default=None, description=f"Timebox in minutes, {TIMEBOX_MIN} to {TIMEBOX_MAX}."
+    )
     source_ids: list[str] = Field(description="Ids of the inputs this is based on, e.g. ['i3'].")
 
 
 class AgendaSuggestionDraft(BaseModel):
     items: list[SuggestedItem] = []
+
+
+def title_key(title: str) -> str:
+    """A title as compared for duplicates: without case, punctuation or extra spaces."""
+    return " ".join(re.sub(r"[\W_]+", " ", title.casefold()).split())
+
+
+TRAILING_NOTE = re.compile(r"\s*[(\[]([^()\[\]]*)[)\]]\s*$")
+
+
+def without_source(title: str, cited: Sequence[SuggestionInput]) -> str:
+    """The title without a trailing "(DS-117)" or "[Checkout sync]" naming one of its sources,
+    which are attached to the item anyway."""
+    note = TRAILING_NOTE.search(title)
+    rest = title[: note.start()].rstrip() if note else ""
+    if not note or not rest:
+        return title
+    named = title_key(note.group(1))
+    labels = {title_key(i.source.label) for i in cited}
+    labels |= {title_key(TRAILING_NOTE.sub("", i.source.label)) for i in cited}
+    return rest if len(named) > 2 and any(named in label for label in labels if label) else title
+
+
+def fit_timeboxes(wanted: Sequence[int], budget: int | None) -> list[int | None]:
+    """Timeboxes whose total fits `budget` minutes (None: no limit). They shrink toward
+    TIMEBOX_MIN in proportion; items that do not fit even at the minimum get none."""
+    if budget is None or sum(wanted) <= budget:
+        return list(wanted)
+    head = list(wanted[: max(budget, 0) // TIMEBOX_MIN])
+    total = sum(head)
+    if total > budget:
+        spare, extra = budget - TIMEBOX_MIN * len(head), total - TIMEBOX_MIN * len(head)
+        head = [TIMEBOX_MIN + (m - TIMEBOX_MIN) * spare // extra for m in head]
+    return [*head, *[None] * (len(wanted) - len(head))]
+
+
+def time_left(meeting: Meeting, existing: Sequence[AgendaItem]) -> int | None:
+    """Minutes of the meeting not yet given to an agenda item, or None without a length."""
+    if meeting.duration_min is None:
+        return None
+    return max(meeting.duration_min - sum(i.minutes or 0 for i in existing), 0)
 
 
 def meeting_label(meeting: Meeting, zone: tzinfo = UTC) -> str:
@@ -183,61 +229,81 @@ open or overdue tasks, and unfinished Jira issues.
 
 Rules:
 - Propose at most {MAX_SUGGESTIONS} items, the ones most worth the team's time. Fewer is fine.
+- Most important first.
+- Never propose a topic that is already on the agenda, even in other words.
 - Use only the inputs. Never add facts, names, dates, numbers or issue keys they do not contain.
 - Every item lists the ids of the inputs it is based on. Merge inputs about the same topic.
-- Titles are short and clear, like "Job queue: stay on Postgres or move to Redis".
+- Titles are short and clear, like "Job queue: stay on Postgres or move to Redis". A title names
+  the topic, not where it came from: no issue key, meeting name or date in the title, since the
+  sources are attached separately, unless the title would be unclear without the issue key.
 - "why" is one plain sentence saying what is unfinished, from the inputs.
+- Give every item a timebox of {TIMEBOX_MIN} to {TIMEBOX_MAX} minutes, sized to the topic. When the
+  time left is given, keep the total within it, proposing fewer items if needed.
 - Leave the list empty when nothing is worth discussing."""
 
 
-def render_suggest_prompt(meeting: Meeting, today: date, labelled: dict[str, SuggestionInput]):
+def render_suggest_prompt(
+    meeting: Meeting,
+    today: date,
+    labelled: dict[str, SuggestionInput],
+    existing: Sequence[AgendaItem] = (),
+) -> str:
     lines = [f"[{label}] {i.kind} ({i.source.label}): {i.text}" for label, i in labelled.items()]
-    return "\n".join(
-        [
-            f"Next meeting: {meeting.title}",
-            f"Today: {today.isoformat()}",
-            "",
-            "Inputs ([id] kind (source): text):",
-            *lines,
+    head = [f"Next meeting: {meeting.title}", f"Today: {today.isoformat()}"]
+    left = time_left(meeting, existing)
+    if left is not None:
+        head += [
+            f"Meeting length: {meeting.duration_min} min",
+            f"Time left for new items: {left} min",
         ]
-    )
+    if existing:
+        head += ["", "Already on the agenda:", *(f"- {i.title}" for i in existing)]
+    return "\n".join([*head, "", "Inputs ([id] kind (source): text):", *lines])
 
 
 async def suggest_items(
-    llm: LLM, meeting: Meeting, inputs: Sequence[SuggestionInput], today: date
+    llm: LLM,
+    meeting: Meeting,
+    inputs: Sequence[SuggestionInput],
+    today: date,
+    existing: Sequence[AgendaItem] = (),
 ) -> list[AgendaItem]:
-    """At most MAX_SUGGESTIONS proposed items. Each cites at least one input; any item that
-    does not is dropped. Without inputs the model is not asked."""
+    """At most MAX_SUGGESTIONS items, ready to add to the agenda after `existing`. Each cites at
+    least one input; any item that does not, or repeats a title already on the agenda or earlier
+    in the list (ignoring case and punctuation), is dropped. Every item gets a timebox, and their
+    total fits the meeting's time left. Without inputs the model is not asked."""
     if not inputs:
         return []
     labelled = {f"i{n}": item for n, item in enumerate(inputs, 1)}
     draft = await llm.generate_structured(
-        render_suggest_prompt(meeting, today, labelled),
+        render_suggest_prompt(meeting, today, labelled, existing),
         AgendaSuggestionDraft,
         system=suggest_system(),
     )
     items: list[AgendaItem] = []
-    titles: set[str] = set()
+    titles = {title_key(i.title) for i in existing}
     for suggested in draft.items:
-        title = one_line(suggested.title)[:TITLE_MAX].rstrip()
         cited = [
             labelled[i]
             for i in dict.fromkeys(s.strip() for s in suggested.source_ids)
             if i in labelled
         ]
-        if not title or not cited or title.casefold() in titles:
+        title = without_source(one_line(suggested.title), cited)[:TITLE_MAX].rstrip()
+        if not title or not cited or title_key(title) in titles:
             continue
-        titles.add(title.casefold())
+        titles.add(title_key(title))
         sources = list({tuple(s.source.model_dump().values()): s.source for s in cited}.values())
+        minutes = suggested.minutes or TIMEBOX_DEFAULT
         items.append(
             AgendaItem(
                 id=uuid4().hex,
                 title=title,
                 why=one_line(suggested.why) or f"{cited[0].kind}: {cited[0].text}",
                 sources=sources,
-                minutes=suggested.minutes if valid_minutes(suggested.minutes) else None,
+                minutes=min(max(minutes, TIMEBOX_MIN), TIMEBOX_MAX),
             )
         )
         if len(items) == MAX_SUGGESTIONS:
             break
-    return items
+    timeboxes = fit_timeboxes([i.minutes or 0 for i in items], time_left(meeting, existing))
+    return [i.model_copy(update={"minutes": m}) for i, m in zip(items, timeboxes, strict=True)]
