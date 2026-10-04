@@ -131,7 +131,10 @@ export function Lobby({ code, meeting, lookupError, joining, error, onJoin }: Lo
   const isHost = meeting ? hostOrAdmin(meeting, me) : false;
   const hostOnly = settings.data?.who_can_allow === "host";
   const wake = settings.data?.wake_phrase || wakePhrase();
-  const github = settings.data?.github;
+  const repos = [
+    ...(settings.data?.github.repos ?? []).map((r) => ({ ...r, host: "github" as const })),
+    ...(settings.data?.gitlab.projects ?? []).map((r) => ({ ...r, host: "gitlab" as const })),
+  ];
 
   return (
     <main className="lobby">
@@ -203,15 +206,20 @@ export function Lobby({ code, meeting, lookupError, joining, error, onJoin }: Lo
                   <span>Drafts a summary, decisions and tasks afterwards. Nothing is sent to Jira until someone approves it.</span>
                 </li>
               </ul>
-              {isHost && github?.repo && (
+              {isHost && repos.length > 0 && (
                 <div className="consent-repo">
-                  <Icon name="github" />
+                  <Icon name={repos[0].host} />
                   <span>
                     Uses{" "}
-                    <b>
-                      {github.repo}
-                      {github.ref ? ` @ ${github.ref}` : ""}
-                    </b>
+                    {repos.map((r, i) => (
+                      <span key={`${r.host}:${r.path}`}>
+                        {i > 0 && ", "}
+                        <b>
+                          {r.path}
+                          {r.ref ? ` @ ${r.ref}` : ""}
+                        </b>
+                      </span>
+                    ))}
                   </span>
                   {me.is_admin && (
                     <Link className="link" href="/settings">

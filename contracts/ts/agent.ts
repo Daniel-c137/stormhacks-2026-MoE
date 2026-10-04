@@ -2,7 +2,17 @@ export type AgentStateName = "idle" | "capturing" | "working" | "hand_raised" | 
 export type HandUrgency = "normal" | "critical";
 export type Visibility = "public" | "private";
 export type InvocationVia = "voice" | "follow_up" | "chat" | "ask" | "private";
-export type SourceKind = "meeting" | "github_issue" | "github_pr" | "github_code" | "github_release" | "jira_issue";
+export type SourceKind =
+  | "meeting"
+  | "github_issue"
+  | "github_pr"
+  | "github_code"
+  | "github_release"
+  | "gitlab_issue"
+  | "gitlab_mr"
+  | "gitlab_code"
+  | "gitlab_release"
+  | "jira_issue";
 export type Verdict = "supported" | "contradicted" | "unknown";
 export type Severity = "low" | "high";
 
@@ -25,7 +35,8 @@ export interface Invocation {
   t?: number | null;
 }
 
-/** Evidence behind an answer: a meeting moment, a GitHub item or a Jira key. */
+/** Evidence behind an answer: a meeting moment, a GitHub or GitLab item or a Jira key. A
+ * repository's items name it: dropsubs/web#41, group/project!12 (a GitLab merge request). */
 export interface Source {
   kind: SourceKind;
   label: string;
@@ -41,8 +52,9 @@ export interface CodeSnippet {
   end_line: number;
   language: string;
   code: string;
-  github_url: string;
+  github_url: string; // the lines on their code host: GitHub, or GitLab for a GitLab project
   caption: string;
+  repo?: string | null; // owner/name on GitHub, the project path on GitLab
   highlight?: [number, number] | null; // UI-only
 }
 

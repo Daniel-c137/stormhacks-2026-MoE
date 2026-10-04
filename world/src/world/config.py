@@ -22,9 +22,18 @@ class SnapshotSpec(BaseModel):
 
 class WorldSpec(BaseModel):
     company: str
-    github_repo: str
+    github_repo: str  # the main repository: mock-data/github/*.json, snapshots/<name>/repo/
+    # more repositories: mock-data/github/<owner>/<name>/, snapshots/<name>/repos/github/...
+    extra_github_repos: list[str] = []
+    # mock-data/gitlab/<group>/<project>/, snapshots/<name>/repos/gitlab/<group>/<project>/
+    gitlab_projects: list[str] = []
     jira_project: str
     snapshots: dict[SnapshotName, SnapshotSpec]
+
+    @property
+    def github_repos(self) -> list[str]:
+        """Every repository of the world, the main one first."""
+        return [self.github_repo, *self.extra_github_repos]
 
 
 class Settings(BaseSettings):
@@ -36,6 +45,7 @@ class Settings(BaseSettings):
     world_mcp_host: str = "127.0.0.1"
     world_github_mcp_port: int = 8101
     world_jira_mcp_port: int = 8102
+    world_gitlab_mcp_port: int = 8103
     world_overlay_dir: Path = OVERLAY_DIR
     # world-seed: at most this many texts embedded a minute (Gemini's free tier allows 100)
     world_seed_embeds_per_minute: int | None = Field(default=None, ge=1)

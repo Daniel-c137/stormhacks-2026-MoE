@@ -1,10 +1,11 @@
-"""Whether GitHub and Jira can be read right now, checked against their MCP servers."""
+"""Whether GitHub, GitLab and Jira can be read right now, checked against their MCP servers."""
 
 import anyio
 from mcp import Client
 
 from contracts import ConnectorStatus, TeamSettings
 
+from .agent.team_tools import code_repos
 from .config import Settings
 from .integrations import McpServerName
 from .jira import root_cause
@@ -12,14 +13,19 @@ from .jira import root_cause
 # The read tools answers depend on. A server without them is reachable but not usable.
 CORE_READ_TOOLS: dict[McpServerName, tuple[str, ...]] = {
     "github": ("issue_read", "search_issues", "list_pull_requests", "pull_request_read"),
+    "gitlab": ("search", "get_work_item", "get_merge_request"),
     "jira": ("getJiraIssue", "searchJiraIssuesUsingJql"),
 }
 
 
 async def connector_statuses(config: Settings, team: TeamSettings) -> list[ConnectorStatus]:
-    """GitHub then Jira, checked at the same time."""
+    """GitHub, GitLab then Jira, checked at the same time. One check covers a connector's
+    every repository: they share its MCP server."""
+    repos = ", ".join(r.path for r in code_repos(team, config)) or None
+    projects = ", ".join(p.path for p in team.gitlab.projects) or None
     targets: dict[McpServerName, tuple[str | None, str, str | None, str]] = {
-        "github": (config.github_mcp_url, "GITHUB_MCP_URL", team.github.repo, "repository"),
+        "github": (config.github_mcp_url, "GITHUB_MCP_URL", repos, "repository"),
+        "gitlab": (config.gitlab_mcp_url, "GITLAB_MCP_URL", projects, "GitLab project"),
         "jira": (config.jira_mcp_url, "JIRA_MCP_URL", team.jira.project, "Jira project"),
     }
     found: dict[McpServerName, ConnectorStatus] = {}

@@ -1,0 +1,18 @@
+[
+  {
+    "issue_number": 5,
+    "issue_url": "https://api.github.com/repos/dropsubs/website/issues/5",
+    "id": 47760000001,
+    "user": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "body": "App Store submission moved to Wed Oct 7 for account deletion, so the badge waits for the review after that.",
+    "created_at": "2026-10-02T17:40:00Z",
+    "updated_at": "2026-10-02T17:40:00Z",
+    "html_url": "https://github.com/dropsubs/website/issues/5#issuecomment-47760000001",
+    "author_association": "MEMBER"
+  }
+]

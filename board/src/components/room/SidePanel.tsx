@@ -17,6 +17,7 @@ import { Mark } from "@/components/ui/Mark";
 import { Sources, Unavailable } from "@/components/ui/Sources";
 import { useDismiss } from "@/hooks/useDismiss";
 import { fmtClock, initialsOf } from "@/lib/format";
+import { CODE_HOST_NAME, codeHost } from "@/lib/links";
 
 /** A chat message plus what an agent answer carries with it. */
 export interface PanelMessage extends ChatMessage {
@@ -49,7 +50,7 @@ function ChatSnippet({ snippet }: { snippet: CodeSnippet }) {
     <div className="code">
       <div className="code-head">
         <Icon name="file-code" />
-        <span className="path">{snippet.path}</span>
+        <span className="path">{snippet.repo ? `${snippet.repo}: ${snippet.path}` : snippet.path}</span>
         <span className="rng">
           L{snippet.start_line}–{snippet.end_line}
         </span>
@@ -61,8 +62,8 @@ function ChatSnippet({ snippet }: { snippet: CodeSnippet }) {
           {expanded ? "Show less" : `Show all ${lines.length} lines`}
         </button>
         <a href={snippet.github_url} target="_blank" rel="noopener noreferrer">
-          <Icon name="github" />
-          GitHub
+          <Icon name={codeHost(snippet.github_url)} />
+          {CODE_HOST_NAME[codeHost(snippet.github_url)]}
         </a>
       </div>
     </div>

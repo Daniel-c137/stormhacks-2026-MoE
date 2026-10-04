@@ -1,12 +1,27 @@
 """Profile, team, members and workspace settings (board -> brain)."""
 
+import re
+from collections.abc import Callable
+
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile
 
-from contracts import ConnectorStatus, Person, ProfileUpdate, Team, TeamSettings, Voice
+from contracts import (
+    CodeRepo,
+    CodeRepoChoice,
+    ConnectorStatus,
+    ConnectorsUpdate,
+    Person,
+    ProfileUpdate,
+    Team,
+    TeamSettings,
+    Voice,
+)
 
 from ..config import Settings
 from ..connectors import connector_statuses
+from ..gitlab import valid_project
+from ..jira import site_host
 from ..store import NotFound, Store
 from ..voices import VoicesFailed, VoicesUnavailable, fetch_voices, with_default
 from ..zones import is_zone
@@ -140,8 +155,8 @@ async def read_team_settings(
 async def write_team_settings(
     body: TeamSettings, user: Person = Depends(require_admin), store: Store = Depends(get_store)
 ) -> TeamSettings:
-    """Admin only. Always the caller's own team; connection and index state belong to the server
-    and are kept as they are."""
+    """Admin only. Always the caller's own team. The connectors are kept as saved, whatever the
+    body says: they change only at PUT /settings/connectors."""
     if body.interrupt_minutes not in INTERRUPT_MINUTES:
         raise HTTPException(
             status_code=422,
@@ -155,18 +170,13 @@ async def write_team_settings(
         )
     team = await user_team(store, user)
     current = await store.settings(team.id)
-    github = current.github.model_copy(
-        update={"repo": text(body.github.repo), "ref": text(body.github.ref)}
-    )
-    jira = current.jira.model_copy(
-        update={"site": text(body.jira.site), "project": text(body.jira.project)}
-    )
     return await store.save_settings(
         body.model_copy(
             update={
                 "team_id": team.id,
-                "github": github,
-                "jira": jira,
+                "github": current.github,
+                "gitlab": current.gitlab,
+                "jira": current.jira,
                 "voice": text(body.voice),
                 "wake_phrase": text(body.wake_phrase),
                 "timezone": timezone,
@@ -175,13 +185,91 @@ async def write_team_settings(
     )
 
 
+@router.put("/settings/connectors")
+async def write_connectors(
+    body: ConnectorsUpdate, user: Person = Depends(require_admin), store: Store = Depends(get_store)
+) -> TeamSettings:
+    """The team's GitHub repositories, GitLab projects and Jira site and project, replacing
+    the saved ones; admins only. A repository that stays keeps its connection and index state
+    (a new branch or tag drops its index). Paths are checked and repeats refused."""
+    team = await user_team(store, user)
+    current = await store.settings(team.id)
+    github = repos(body.github, current.github.repos, "GitHub repository", github_path)
+    gitlab = repos(body.gitlab, current.gitlab.projects, "GitLab project", gitlab_path)
+    jira = current.jira.model_copy(
+        update={"site": site_host(text(body.jira.site)), "project": jira_key(body.jira.project)}
+    )
+    return await store.save_settings(
+        current.model_copy(
+            update={
+                "github": current.github.model_copy(update={"repos": github}),
+                "gitlab": current.gitlab.model_copy(update={"projects": gitlab}),
+                "jira": jira,
+            }
+        )
+    )
+
+
+def repos(
+    chosen: list[CodeRepoChoice], saved: list[CodeRepo], noun: str, clean: Callable[[str], str]
+) -> list[CodeRepo]:
+    by_path = {repo.path.casefold(): repo for repo in saved}
+    found: list[CodeRepo] = []
+    for choice in chosen:
+        try:
+            path = clean(choice.path)
+        except ValueError:
+            raise HTTPException(
+                status_code=422, detail=f"{choice.path.strip()!r} is not a {noun} path"
+            ) from None
+        if any(repo.path.casefold() == path.casefold() for repo in found):
+            raise HTTPException(status_code=422, detail=f"{path} is listed twice")
+        ref = text(choice.ref)
+        kept = by_path.get(path.casefold())
+        if kept is not None and kept.ref == ref:
+            found.append(kept.model_copy(update={"path": path}))
+        else:
+            found.append(CodeRepo(path=path, ref=ref))
+    return found
+
+
+GITHUB_PATH = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9._-]{1,100}")
+
+
+def github_path(path: str) -> str:
+    """owner/name, as GitHub allows them; a pasted github.com link is accepted."""
+    clean = re.sub(r"^(?:https?://)?(?:www\.)?github\.com/", "", path.strip()).strip("/")
+    clean = clean.removesuffix(".git")
+    if not GITHUB_PATH.fullmatch(clean) or clean.split("/")[1] in (".", ".."):
+        raise ValueError(path)
+    return clean
+
+
+def gitlab_path(path: str) -> str:
+    """group/project, subgroups included; a pasted link to the project is accepted."""
+    clean = re.sub(r"^https?://[^/]+/", "", path.strip()).strip("/").removesuffix(".git")
+    if len(clean) > MAX_TEXT_SETTING:
+        raise ValueError(path)
+    return valid_project(clean)
+
+
+def jira_key(project: str | None) -> str | None:
+    key = text(project)
+    if key is None:
+        return None
+    key = key.upper()
+    if not re.fullmatch(r"[A-Z][A-Z0-9_]{1,9}", key):
+        raise HTTPException(status_code=422, detail=f"{key!r} is not a Jira project key")
+    return key
+
+
 @router.get("/settings/connectors")
 async def list_connectors(
     user: Person = Depends(current_user),
     store: Store = Depends(get_store),
     config: Settings = Depends(get_settings),
 ) -> list[ConnectorStatus]:
-    """GitHub and Jira, each connected, not configured or failing, checked live."""
+    """GitHub, GitLab and Jira, each connected, not configured or failing, checked live."""
     team = await user_team(store, user)
     return await connector_statuses(config, await store.settings(team.id))
 

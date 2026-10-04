@@ -332,6 +332,16 @@ def text_of(result: CallToolResult) -> str:
     return "\n".join(c.text for c in result.content if isinstance(c, TextContent))
 
 
+def site_host(site: str | None) -> str | None:
+    """A Jira site as the board links to it, https://<site>/browse/KEY: the host and any path,
+    without a scheme or trailing slash ("https://acme.atlassian.net/" is acme.atlassian.net).
+    Blank is None."""
+    if site is None:
+        return None
+    clean = re.sub(r"^[a-z][a-z0-9+.-]*://", "", site.strip(), flags=re.IGNORECASE).rstrip("/")
+    return clean or None
+
+
 def root_cause(error: BaseException) -> str:
     while isinstance(error, BaseExceptionGroup) and error.exceptions:
         error = error.exceptions[0]

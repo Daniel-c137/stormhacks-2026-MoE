@@ -33,7 +33,6 @@ import anyio
 from pydantic import BaseModel, Field
 
 from brain.config import Settings
-from brain.github import GitHubReader
 from brain.jira import root_cause
 from brain.llm import LLM
 from brain.memory import MeetingMemory
@@ -48,7 +47,7 @@ from contracts import (
     TranscriptSegment,
     get_identity,
 )
-from contracts.agent import Severity, Verdict
+from contracts.agent import Severity, SourceKind, Verdict
 from contracts.settings import Sensitivity
 
 from .ask import (
@@ -62,7 +61,8 @@ from .ask import (
     number,
     render_tool,
 )
-from .team_tools import DEFAULT_TIMEOUT, Finding, TeamToolbox
+from .code import CodeReader
+from .team_tools import DEFAULT_TIMEOUT, Finding, LookupFailed, TeamToolbox, interleave, pick
 
 SETTLE_S = 5.0  # segments ending this close to `now` wait a tick, so late finals are not skipped
 MAX_BATCH = 200  # segments read per tick; a longer backlog keeps the latest
@@ -76,9 +76,9 @@ KEEP_CONFIDENCE = 0.8  # a high-severity contradiction at least this sure is kep
 MAX_FINDING = 240
 
 NO_CODE_SEARCH = "Code search is not available yet"
-# Code is looked up through each claim's code_query, so the toolbox's own code tool stays off
-# the fact-check menu and is never run from a plan.
-OWN_CODE_TOOL = "github_code"
+# Code is looked up through each claim's code_query, so the toolbox's own code tools stay off
+# the fact-check menu and are never run from a plan.
+OWN_CODE_TOOLS = ("github_code", "gitlab_code")
 
 
 # the claim filter
@@ -151,6 +151,11 @@ class ClaimPlan(BaseModel):
         description="Short search text for the team's code, only when code search is available "
         "and the claim is about code or configuration; otherwise null.",
     )
+    code_repo: str | None = Field(
+        default=None,
+        description="With code_query: the listed repository the claim is about, when it names "
+        "one; otherwise null to search all of them.",
+    )
 
 
 class FactCheckPlan(BaseModel):
@@ -186,8 +191,9 @@ class FactCheckVerdicts(BaseModel):
 
 # the checker
 
-CodeLookup = Callable[[GitHubReader, str], Awaitable[list[CodeSnippet]]]
-"""Code evidence for a search: the team's repository and short search text in, snippets out."""
+CodeLookup = Callable[[CodeReader, str], Awaitable[list[CodeSnippet]]]
+"""Code evidence for a search: one of the team's repositories (GitHub or GitLab) and short
+search text in, snippets out."""
 
 
 class Settled(BaseModel):
@@ -218,6 +224,7 @@ class FactChecker:
         memory: MeetingMemory | None = None,
         jira_target: Any = None,
         github_target: Any = None,
+        gitlab_target: Any = None,
         code: CodeLookup | None = None,
         timeout: float = DEFAULT_TIMEOUT,
     ):
@@ -227,6 +234,7 @@ class FactChecker:
         self.memory = memory
         self.jira_target = jira_target
         self.github_target = github_target
+        self.gitlab_target = gitlab_target
         self.code = code
         self.timeout = timeout
 
@@ -310,6 +318,7 @@ class FactChecker:
             memory=self.memory,
             jira_target=self.jira_target,
             github_target=self.github_target,
+            gitlab_target=self.gitlab_target,
             max_calls=MAX_LOOKUPS,
             max_evidence=MAX_EVIDENCE,
             timeout=self.timeout,
@@ -334,7 +343,10 @@ class FactChecker:
             return {}
 
         calls = [
-            call for item in planned.values() for call in item.calls if call.tool != OWN_CODE_TOOL
+            call
+            for item in planned.values()
+            for call in item.calls
+            if call.tool not in OWN_CODE_TOOLS
         ]
         _, groups, unavailable = await tools.run(toolbox, calls)
         if code_unavailable is None:
@@ -363,40 +375,85 @@ class FactChecker:
     def _code_unavailable(self, toolbox: TeamToolbox) -> str | None:
         if self.code is None:
             return NO_CODE_SEARCH
-        if isinstance(toolbox.github, str):
-            return toolbox.github
+        if not toolbox.code_readers():
+            return toolbox.github if isinstance(toolbox.github, str) else "No repository is set"
         return None
 
     async def _code(
         self, toolbox: TeamToolbox, planned: Iterable[ClaimPlan]
     ) -> tuple[list[list[Finding]], list[str]]:
-        """Code evidence for the planned code queries, one group per query."""
-        assert self.code is not None and isinstance(toolbox.github, GitHubReader)
-        queries = list(dict.fromkeys(q.code_query.strip() for q in planned if q.code_query))
+        """Code evidence for the planned code queries, one group per query: from the repository
+        the plan names, else from every connected repository at the same time."""
+        assert self.code is not None
+        readers = toolbox.code_readers()
+        searches = list(
+            dict.fromkeys(
+                (q.code_query.strip(), (q.code_repo or "").strip())
+                for q in planned
+                if q.code_query and q.code_query.strip()
+            )
+        )
         groups: list[list[Finding]] = []
         errors: list[str] = []
-        for query in [q for q in queries if q][:MAX_CODE_QUERIES]:
+        for query, repo in searches[:MAX_CODE_QUERIES]:
+            try:
+                chosen = pick(readers, repo)
+            except LookupError:
+                chosen = readers  # a repository the model made up: search them all
             try:
                 with anyio.fail_after(self.timeout):
-                    snippets = await self.code(toolbox.github, query)
+                    found = await self._search_code(chosen, query)
             except TimeoutError:
                 errors.append(f"Code search timed out after {self.timeout:g}s")
                 continue
+            except LookupFailed as e:
+                errors.append(f"Code search failed: {e}")
+                if not e.findings:
+                    continue
+                found = e.findings
             except Exception as e:
                 errors.append(f"Code search failed: {root_cause(e)}")
                 continue
-            groups.append([code_finding(s) for s in snippets[:MAX_SNIPPETS]])
+            groups.append(found)
         return groups, errors
+
+    async def _search_code(self, readers: Sequence[CodeReader], query: str) -> list[Finding]:
+        """Each repository's snippets, taken in turn, MAX_SNIPPETS in all. LookupFailed when
+        any repository's search failed, carrying what the others found."""
+        assert self.code is not None
+        code = self.code
+        found: list[list[Finding]] = [[] for _ in readers]
+        failed: list[str] = []
+
+        async def one(i: int, reader: CodeReader) -> None:
+            try:
+                snippets = await code(reader, query)
+            except Exception as e:
+                failed.append(f"{reader.full_name}: {root_cause(e)}")
+                return
+            kind: SourceKind = "gitlab_code" if reader.host == "gitlab" else "github_code"
+            found[i] = [code_finding(s, kind) for s in snippets]
+
+        async with anyio.create_task_group() as group:
+            for i, reader in enumerate(readers):
+                group.start_soon(one, i, reader)
+        findings = interleave(found, MAX_SNIPPETS)
+        if failed:
+            if len(readers) == 1:
+                raise LookupFailed([], [failed[0].split(": ", 1)[-1]])
+            raise LookupFailed(findings, failed)
+        return findings
 
 
 class CodeFinding(Finding):
     snippet: CodeSnippet
 
 
-def code_finding(snippet: CodeSnippet) -> CodeFinding:
-    label = f"{snippet.path}:{snippet.start_line}-{snippet.end_line}"
+def code_finding(snippet: CodeSnippet, kind: SourceKind = "github_code") -> CodeFinding:
+    where = f"{snippet.repo}:{snippet.path}" if snippet.repo else snippet.path
+    label = f"{where}:{snippet.start_line}-{snippet.end_line}"
     text = f"Code {label}: {snippet.caption}\n{snippet.code}"
-    source = Source(kind="github_code", label=label, url=snippet.github_url)
+    source = Source(kind=kind, label=label, url=snippet.github_url)
     return CodeFinding(text=text, source=source, snippet=snippet)
 
 
@@ -460,7 +517,9 @@ Rules:
 - Pick at most {max_claims} claims and at most {MAX_LOOKUPS} lookups in all, using only tool names
   from the menu, most useful first. Pick none when nothing is worth checking.
 - Merged is not released: for "released", "shipped", "deployed" or "in production", read the
-  pull request (github_read with kind pr) and the latest releases (github_releases).
+  pull request (github_read with kind pr) and the latest releases (github_releases), or the
+  GitLab merge request (gitlab_read with kind mr) and gitlab_releases.
+- The team may connect several repositories: set repo (and code_repo) when the claim names one.
 - What the team decided lives in decisions and its past meetings; the live state of issues and
   pull requests lives in Jira and GitHub.
 - Set code_query only when code search is available and the claim is about code or settings.
@@ -509,10 +568,14 @@ def render_plan_prompt(
     lines += [
         render_tool(spec, toolbox.unavailable(spec.name))
         for spec in toolbox.specs()
-        if spec.name != OWN_CODE_TOOL
+        if spec.name not in OWN_CODE_TOOLS
     ]
-    code = "- code search (code_query): search the team's repository's code"
-    lines.append(code + (f" [not available: {code_unavailable}]" if code_unavailable else ""))
+    code = "- code search (code_query, code_repo): search the team's repositories' code"
+    if code_unavailable:
+        code += f" [not available: {code_unavailable}]"
+    elif repos := [r.full_name for r in toolbox.code_readers()]:
+        code += f". Repositories: {', '.join(repos)}."
+    lines.append(code)
     return "\n".join(lines)
 
 

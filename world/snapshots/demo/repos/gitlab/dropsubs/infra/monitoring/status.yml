@@ -1,0 +1,12 @@
+# The status page: every check runs once a minute; any failure turns the page red.
+interval_seconds: 60
+checks:
+  - name: API
+    url: https://api.dropsubs.example/health
+    expect_status: 200
+  - name: Sync workers
+    heartbeat: sync-worker
+    max_silence_seconds: 180
+page:
+  title: DropSubs status
+  url: https://status.dropsubs.example

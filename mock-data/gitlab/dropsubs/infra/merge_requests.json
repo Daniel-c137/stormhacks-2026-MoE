@@ -1,0 +1,169 @@
+[
+  {
+    "id": 380000002,
+    "iid": 2,
+    "project_id": 61840213,
+    "title": "Deploy main to staging on every merge; production from release tags",
+    "description": "Closes #1",
+    "state": "merged",
+    "draft": false,
+    "author": {
+      "id": 30110002,
+      "username": "mohammadreza-dropsubs",
+      "name": "Mohammad Reza",
+      "web_url": "https://gitlab.com/mohammadreza-dropsubs"
+    },
+    "assignees": [
+      {
+        "id": 30110002,
+        "username": "mohammadreza-dropsubs",
+        "name": "Mohammad Reza",
+        "web_url": "https://gitlab.com/mohammadreza-dropsubs"
+      }
+    ],
+    "reviewers": [],
+    "labels": [],
+    "source_branch": "ci/staging-on-main",
+    "target_branch": "main",
+    "created_at": "2026-08-01T17:00:00Z",
+    "updated_at": "2026-08-03T22:00:00Z",
+    "merged_at": "2026-08-03T22:00:00Z",
+    "merged_by": {
+      "id": 30110002,
+      "username": "mohammadreza-dropsubs",
+      "name": "Mohammad Reza",
+      "web_url": "https://gitlab.com/mohammadreza-dropsubs"
+    },
+    "merge_commit_sha": "5fa5d3283938ef1770d12cad09ad45e6769df4ea",
+    "sha": "314c6b668de8876384e7cb6fdec93af9e0be43f1",
+    "web_url": "https://gitlab.com/dropsubs/infra/-/merge_requests/2",
+    "references": {
+      "short": "!2",
+      "full": "dropsubs/infra!2"
+    },
+    "_closes": [
+      1
+    ],
+    "_diffs": [
+      {
+        "old_path": ".gitlab-ci.yml",
+        "new_path": ".gitlab-ci.yml",
+        "new_file": true,
+        "renamed_file": false,
+        "deleted_file": false,
+        "diff": "@@ -0,0 +1,14 @@\n+stages: [deploy]\n+\n+deploy-staging:\n+  stage: deploy\n+  script: ./deploy.sh staging\n+  rules:\n+    - if: $CI_COMMIT_BRANCH == \"main\"\n+\n+deploy-production:\n+  stage: deploy\n+  script: ./deploy.sh production\n+  rules:\n+    - if: $CI_COMMIT_TAG =~ /^v\\d+/\n+  when: on_success\n",
+        "additions": 14,
+        "deletions": 0
+      }
+    ]
+  },
+  {
+    "id": 380000004,
+    "iid": 4,
+    "project_id": 61840213,
+    "title": "Status page: check the API and the sync workers every minute",
+    "description": "Closes #3",
+    "state": "merged",
+    "draft": false,
+    "author": {
+      "id": 30110002,
+      "username": "mohammadreza-dropsubs",
+      "name": "Mohammad Reza",
+      "web_url": "https://gitlab.com/mohammadreza-dropsubs"
+    },
+    "assignees": [
+      {
+        "id": 30110002,
+        "username": "mohammadreza-dropsubs",
+        "name": "Mohammad Reza",
+        "web_url": "https://gitlab.com/mohammadreza-dropsubs"
+      }
+    ],
+    "reviewers": [],
+    "labels": [],
+    "source_branch": "monitoring/status-page",
+    "target_branch": "main",
+    "created_at": "2026-09-28T21:30:00Z",
+    "updated_at": "2026-09-28T23:00:00Z",
+    "merged_at": "2026-09-28T23:00:00Z",
+    "merged_by": {
+      "id": 30110002,
+      "username": "mohammadreza-dropsubs",
+      "name": "Mohammad Reza",
+      "web_url": "https://gitlab.com/mohammadreza-dropsubs"
+    },
+    "merge_commit_sha": "290f7470c6d50f5b3b18d243b8773a2e7fce9154",
+    "sha": "f73745eccd2173f6992d908acfa4daae118ff1fd",
+    "web_url": "https://gitlab.com/dropsubs/infra/-/merge_requests/4",
+    "references": {
+      "short": "!4",
+      "full": "dropsubs/infra!4"
+    },
+    "_closes": [
+      3
+    ],
+    "_diffs": [
+      {
+        "old_path": "monitoring/status.yml",
+        "new_path": "monitoring/status.yml",
+        "new_file": true,
+        "renamed_file": false,
+        "deleted_file": false,
+        "diff": "@@ -0,0 +1,13 @@\n+# The status page: every check runs once a minute; any failure turns the page red.\n+interval_seconds: 60\n+checks:\n+  - name: API\n+    url: https://api.dropsubs.example/health\n+    expect_status: 200\n+  - name: Sync workers\n+    heartbeat: sync-worker\n+    max_silence_seconds: 180\n+page:\n+  title: DropSubs status\n+  url: https://status.dropsubs.example\n",
+        "additions": 12,
+        "deletions": 0
+      }
+    ]
+  },
+  {
+    "id": 380000007,
+    "iid": 7,
+    "project_id": 61840213,
+    "title": "Draft: Load test: replay 2,500 first syncs against staging",
+    "description": "Config for #5. Not run yet.",
+    "state": "opened",
+    "draft": true,
+    "author": {
+      "id": 30110002,
+      "username": "mohammadreza-dropsubs",
+      "name": "Mohammad Reza",
+      "web_url": "https://gitlab.com/mohammadreza-dropsubs"
+    },
+    "assignees": [
+      {
+        "id": 30110002,
+        "username": "mohammadreza-dropsubs",
+        "name": "Mohammad Reza",
+        "web_url": "https://gitlab.com/mohammadreza-dropsubs"
+      }
+    ],
+    "reviewers": [],
+    "labels": [],
+    "source_branch": "loadtest/first-syncs",
+    "target_branch": "main",
+    "created_at": "2026-10-01T20:00:00Z",
+    "updated_at": "2026-10-01T20:00:00Z",
+    "merged_at": null,
+    "merged_by": null,
+    "merge_commit_sha": null,
+    "sha": "93db04e8be8cbedfba00b58c48d8a682d1771952",
+    "web_url": "https://gitlab.com/dropsubs/infra/-/merge_requests/7",
+    "references": {
+      "short": "!7",
+      "full": "dropsubs/infra!7"
+    },
+    "_closes": [],
+    "_diffs": [
+      {
+        "old_path": "loadtest/first_syncs.yml",
+        "new_path": "loadtest/first_syncs.yml",
+        "new_file": true,
+        "renamed_file": false,
+        "deleted_file": false,
+        "diff": "@@ -0,0 +1,10 @@\n+# Replays first syncs against staging: two years of email per inbox, paged and classified.\n+target: staging\n+inboxes: 2500\n+history_days: 730\n+ramp_minutes: 60\n+report:\n+  - sync_queue_depth\n+  - classifier_rate_limited\n+  - p95_first_sync_minutes\n+  - errors\n",
+        "additions": 10,
+        "deletions": 0
+      }
+    ]
+  }
+]

@@ -1,0 +1,260 @@
+"use client";
+
+import {
+  type CodeRepo,
+  type CodeRepoChoice,
+  type ConnectorName,
+  type ConnectorState,
+  type ConnectorsUpdate,
+  MAX_CODE_REPOS,
+  type TeamSettings,
+} from "@moe/contracts";
+import { type FormEvent, useCallback, useRef, useState } from "react";
+import { Icon } from "@/components/ui/Icon";
+import { useDismiss } from "@/hooks/useDismiss";
+import type { useConnectors } from "@/hooks/useApi";
+import { describeError, updateConnectors } from "@/lib/api";
+
+type Statuses = ReturnType<typeof useConnectors>;
+type Host = "github" | "gitlab";
+
+const STATE: Record<ConnectorState, string> = {
+  connected: "Connected",
+  not_configured: "Not set up",
+  failing: "Not reachable",
+};
+
+const ADD: { name: ConnectorName; label: string }[] = [
+  { name: "github", label: "GitHub repository" },
+  { name: "gitlab", label: "GitLab project" },
+  { name: "jira", label: "Jira project" },
+];
+
+const PLACEHOLDER: Record<Host, string> = { github: "owner/repo", gitlab: "group/project" };
+
+/** What is being typed: a new item (index null) or an edit of an existing one. */
+interface Draft {
+  name: ConnectorName;
+  index: number | null;
+  path: string;
+  ref: string;
+}
+
+const choices = (repos: CodeRepo[]): CodeRepoChoice[] => repos.map(({ path, ref }) => ({ path, ref }));
+
+/** The choice as saved, for PUT /settings/connectors (which replaces it whole). */
+function current(s: TeamSettings): ConnectorsUpdate {
+  return {
+    github: choices(s.github.repos),
+    gitlab: choices(s.gitlab.projects),
+    jira: { site: s.jira.site ?? null, project: s.jira.project ?? null },
+  };
+}
+
+function State({ name, statuses }: { name: ConnectorName; statuses: Statuses }) {
+  const status = statuses.data?.find((c) => c.name === name);
+  const state = status?.state ?? (statuses.error ? "failing" : null);
+  return (
+    <span className="conn-state" data-state={state ?? "checking"} title={status?.detail ?? (statuses.error ? describeError(statuses.error) : undefined)}>
+      {state ? STATE[state] : "Checking…"}
+    </span>
+  );
+}
+
+/** One row per connected repository, project and Jira; admins add, edit and remove them inline.
+ * Each change is saved at once (PUT /settings/connectors) and the states are checked again. */
+export function Connectors({
+  settings,
+  statuses,
+  canEdit,
+  onSaved,
+}: {
+  settings: TeamSettings;
+  statuses: Statuses;
+  canEdit: boolean;
+  onSaved: (saved: TeamSettings) => void;
+}) {
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [menu, setMenu] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState("");
+  const addRef = useRef<HTMLDivElement>(null);
+  const rowMenu = useRef<HTMLDivElement>(null);
+  useDismiss(addRef, adding, useCallback(() => setAdding(false), []));
+  useDismiss(rowMenu, menu !== null, useCallback(() => setMenu(null), []));
+
+  const save = async (next: ConnectorsUpdate) => {
+    setBusy(true);
+    setProblem("");
+    try {
+      onSaved(await updateConnectors(next));
+      setDraft(null);
+      statuses.reload();
+    } catch (err) {
+      setProblem(`Not saved. ${describeError(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = (name: ConnectorName, index: number) => {
+    setMenu(null);
+    const next = current(settings);
+    if (name === "jira") next.jira = { site: null, project: null };
+    else next[name] = next[name].filter((_, i) => i !== index);
+    void save(next);
+  };
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!draft) return;
+    const next = current(settings);
+    const path = draft.path.trim();
+    const ref = draft.ref.trim() || null;
+    if (draft.name === "jira") {
+      next.jira = { site: ref, project: path.toUpperCase() || null };
+    } else if (draft.index === null) {
+      next[draft.name] = [...next[draft.name], { path, ref }];
+    } else {
+      next[draft.name] = next[draft.name].map((r, i) => (i === draft.index ? { path, ref } : r));
+    }
+    void save(next);
+  };
+
+  const start = (name: ConnectorName, index: number | null = null) => {
+    setAdding(false);
+    setMenu(null);
+    setProblem("");
+    if (name === "jira") {
+      setDraft({ name, index: 0, path: settings.jira.project ?? "", ref: settings.jira.site ?? "" });
+      return;
+    }
+    const repo = index === null ? null : (name === "github" ? settings.github.repos : settings.gitlab.projects)[index];
+    setDraft({ name, index, path: repo?.path ?? "", ref: repo?.ref ?? "" });
+  };
+
+  const rows: { name: ConnectorName; index: number; label: string; detail: string | null }[] = [
+    ...settings.github.repos.map((r, index) => ({ name: "github" as const, index, label: r.path, detail: r.ref ?? null })),
+    ...settings.gitlab.projects.map((r, index) => ({ name: "gitlab" as const, index, label: r.path, detail: r.ref ?? null })),
+    ...(settings.jira.project
+      ? [{ name: "jira" as const, index: 0, label: settings.jira.project, detail: settings.jira.site ?? null }]
+      : []),
+  ];
+  const full: Record<ConnectorName, boolean> = {
+    github: settings.github.repos.length >= MAX_CODE_REPOS,
+    gitlab: settings.gitlab.projects.length >= MAX_CODE_REPOS,
+    jira: Boolean(settings.jira.project),
+  };
+
+  const form = (d: Draft) => (
+    <form className="conn-row conn-edit" onSubmit={submit}>
+      <Icon name={d.name} className={`conn-icon is-${d.name}`} />
+      <input
+        className="field mono"
+        aria-label={d.name === "jira" ? "Jira project key" : d.name === "github" ? "GitHub repository" : "GitLab project"}
+        value={d.path}
+        onChange={(e) => setDraft({ ...d, path: e.target.value })}
+        placeholder={d.name === "jira" ? "KEY" : PLACEHOLDER[d.name]}
+        style={d.name === "jira" ? { textTransform: "uppercase" } : undefined}
+        autoFocus
+        required
+      />
+      <input
+        className="field mono conn-ref"
+        aria-label={d.name === "jira" ? "Jira site" : "Branch or tag"}
+        value={d.ref}
+        onChange={(e) => setDraft({ ...d, ref: e.target.value })}
+        placeholder={d.name === "jira" ? "team.atlassian.net" : "branch"}
+      />
+      <button type="submit" className="btn btn-primary btn-sm" disabled={busy || !d.path.trim()}>
+        {busy ? <Icon name="loader-circle" className="spin" /> : <Icon name="check" />}
+        Save
+      </button>
+      <button type="button" className="icon-btn sm" onClick={() => setDraft(null)} aria-label="Cancel">
+        <Icon name="x" />
+      </button>
+    </form>
+  );
+
+  return (
+    <div className="conn">
+      <ul className="conn-list">
+        {rows.map((row) => {
+          const key = `${row.name}:${row.index}`;
+          if (draft && draft.name === row.name && draft.index === row.index) return <li key={key}>{form(draft)}</li>;
+          return (
+            <li key={key} className="conn-row">
+              <Icon name={row.name} className={`conn-icon is-${row.name}`} />
+              <span className="conn-name">
+                {row.label}
+                {row.detail && <span className="conn-ref-text"> · {row.detail}</span>}
+              </span>
+              <State name={row.name} statuses={statuses} />
+              {canEdit && (
+                <div className="conn-more" ref={menu === key ? rowMenu : undefined}>
+                  <button
+                    type="button"
+                    className="icon-btn sm"
+                    aria-label={`More for ${row.label}`}
+                    aria-haspopup="menu"
+                    aria-expanded={menu === key}
+                    onClick={() => setMenu(menu === key ? null : key)}
+                    disabled={busy}
+                  >
+                    <Icon name="ellipsis" />
+                  </button>
+                  {menu === key && (
+                    <div className="menu conn-menu" role="menu" aria-label={row.label}>
+                      <button type="button" className="menu-item" role="menuitem" onClick={() => start(row.name, row.index)}>
+                        <Icon name="pencil" />
+                        Edit
+                      </button>
+                      <button type="button" className="menu-item danger" role="menuitem" onClick={() => remove(row.name, row.index)}>
+                        <Icon name="trash-2" />
+                        Remove
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </li>
+          );
+        })}
+        {draft && draft.index === null && <li>{form(draft)}</li>}
+        {draft?.name === "jira" && !settings.jira.project && <li>{form(draft)}</li>}
+      </ul>
+      {canEdit && (
+        <div className="conn-add" ref={addRef}>
+          <button
+            type="button"
+            className="btn btn-outline btn-sm"
+            aria-haspopup="menu"
+            aria-expanded={adding}
+            onClick={() => setAdding((open) => !open)}
+            disabled={busy}
+          >
+            <Icon name="plus" />
+            Add connector
+            <Icon name="chevron-down" />
+          </button>
+          {adding && (
+            <div className="menu" role="menu" aria-label="Add connector">
+              {ADD.map(({ name, label }) => (
+                <button key={name} type="button" className="menu-item" role="menuitem" disabled={full[name]} onClick={() => start(name)}>
+                  <Icon name={name} className={`conn-icon is-${name}`} />
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {problem && (
+        <p className="err" role="alert">
+          {problem}
+        </p>
+      )}
+    </div>
+  );
+}

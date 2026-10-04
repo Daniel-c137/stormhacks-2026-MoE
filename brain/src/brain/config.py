@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     livekit_token_ttl_seconds: int = 600
 
     github_mcp_url: str | None = None
+    # GitLab's MCP server, https://<instance>/api/v4/mcp (links to code use that instance), or
+    # the world mock
+    gitlab_mcp_url: str | None = None
     jira_mcp_url: str | None = None
     github_token: str | None = None
     github_repo: str | None = None

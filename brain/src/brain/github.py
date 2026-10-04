@@ -18,6 +18,7 @@ from brain.integrations import McpReader, McpToolError, ToolRefused, search_word
 from brain.jira import root_cause
 
 GitHubKind = Literal["issue", "pr"]
+CodeHost = Literal["github", "gitlab"]
 MAX_BODY = 400
 MAX_CODE_QUERY = 200  # the server takes 256 characters, the repo: qualifier included
 GITHUB_WEB = "https://github.com"
@@ -57,14 +58,16 @@ class CodeHit(BaseModel):
 
 
 class CodeFile(BaseModel):
-    """A file's text as GitHub returned it, at `ref`: the commit SHA when the server resolved
-    one (pinned), otherwise the branch or tag it was read at."""
+    """A file's text as its code host returned it, at `ref`: the commit SHA when the server
+    resolved one (pinned), otherwise the branch or tag it was read at."""
 
-    repo: str  # owner/name
+    repo: str  # owner/name on GitHub, the project path on GitLab
     path: str
     ref: str
     pinned: bool
     text: str
+    host: CodeHost = "github"
+    web: str = GITHUB_WEB  # the host's web address, e.g. https://gitlab.example.com
 
     def lines(self) -> list[str]:
         """The file's lines as GitHub numbers them: split at newlines only (a form feed is not
@@ -75,9 +78,12 @@ class CodeFile(BaseModel):
         return lines
 
     def url(self, start_line: int, end_line: int) -> str:
-        """The lines on GitHub; a permalink when the ref is a commit."""
+        """The lines on the code host; a permalink when the ref is a commit."""
         ref, path = quote(self.ref, safe="/"), quote(self.path, safe="/")
-        return f"{GITHUB_WEB}/{self.repo}/blob/{ref}/{path}#L{start_line}-L{end_line}"
+        web = self.web.rstrip("/")
+        if self.host == "gitlab":
+            return f"{web}/{self.repo}/-/blob/{ref}/{path}#L{start_line}-{end_line}"
+        return f"{web}/{self.repo}/blob/{ref}/{path}#L{start_line}-L{end_line}"
 
 
 def branch_name(ref: str | None) -> str:
@@ -88,7 +94,11 @@ def branch_name(ref: str | None) -> str:
     return ref.removeprefix("refs/heads/").removeprefix("refs/tags/")
 
 
-class GitHubError(RuntimeError):
+class CodeReadError(RuntimeError):
+    """A read from a code host (GitHub or GitLab) failed."""
+
+
+class GitHubError(CodeReadError):
     """A GitHub read failed."""
 
 
@@ -112,6 +122,8 @@ class GitHubRelease(BaseModel):
 
 
 class GitHubReader:
+    host: CodeHost = "github"
+
     def __init__(self, repo: str, target: str | MCPServer, ref: str | None = None):
         owner, _, name = repo.strip().partition("/")
         if not owner or not name or "/" in name:

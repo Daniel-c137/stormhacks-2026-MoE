@@ -1,0 +1,74 @@
+[
+  {
+    "sha": "697e5dfc4dbb90b5ae2bf0507919e595c9339422",
+    "html_url": "https://github.com/dropsubs/website/commit/697e5dfc4dbb90b5ae2bf0507919e595c9339422",
+    "commit": {
+      "message": "Landing page: 20% success fee (#8)",
+      "author": {
+        "name": "Reyhaneh",
+        "email": "reyhaneh@dropsubs.example",
+        "date": "2026-10-01T17:30:00Z"
+      },
+      "committer": {
+        "name": "Reyhaneh",
+        "email": "reyhaneh@dropsubs.example",
+        "date": "2026-10-01T17:30:00Z"
+      }
+    },
+    "author": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "_pr_number": 8
+  },
+  {
+    "sha": "59fa2c49bdc64d9e11e859604e611027b3cc00a3",
+    "html_url": "https://github.com/dropsubs/website/commit/59fa2c49bdc64d9e11e859604e611027b3cc00a3",
+    "commit": {
+      "message": "Landing page: iPhone screenshots and pricing (#3)",
+      "author": {
+        "name": "Reyhaneh",
+        "email": "reyhaneh@dropsubs.example",
+        "date": "2026-08-27T18:00:00Z"
+      },
+      "committer": {
+        "name": "Reyhaneh",
+        "email": "reyhaneh@dropsubs.example",
+        "date": "2026-08-27T18:00:00Z"
+      }
+    },
+    "author": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "_pr_number": 3
+  },
+  {
+    "sha": "3605a11fb4dbcb4f21d010c9031f8ab85fb8e0bb",
+    "html_url": "https://github.com/dropsubs/website/commit/3605a11fb4dbcb4f21d010c9031f8ab85fb8e0bb",
+    "commit": {
+      "message": "Waitlist sign-up form (#2)",
+      "author": {
+        "name": "Reyhaneh",
+        "email": "reyhaneh@dropsubs.example",
+        "date": "2026-07-10T21:00:00Z"
+      },
+      "committer": {
+        "name": "Reyhaneh",
+        "email": "reyhaneh@dropsubs.example",
+        "date": "2026-07-10T21:00:00Z"
+      }
+    },
+    "author": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "_pr_number": 2
+  }
+]

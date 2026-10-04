@@ -30,6 +30,7 @@ from brain.agent.pipeline import INDEX, REPORT_STEPS, ReportPipeline
 from brain.auth import MAX_PASSWORD, MIN_PASSWORD, hash_password
 from brain.config import Settings as BrainSettings
 from brain.db import migrate, open_pool
+from brain.jira import site_host
 from brain.llm import (
     LLM,
     Embedder,
@@ -47,7 +48,9 @@ from brain.pg_store import PostgresStore
 from brain.report.models import person_from_name
 from brain.store import NotFound, Store
 from contracts import (
+    CodeRepo,
     GitHubSettings,
+    GitLabSettings,
     JiraSettings,
     Meeting,
     Person,
@@ -135,8 +138,9 @@ async def seed_team(store: Store, people: Sequence[Person], *, jira_site: str = 
         await store.save_settings(
             TeamSettings(
                 team_id=tid,
-                github=GitHubSettings(repo=spec.github_repo),
-                jira=JiraSettings(site=jira_site, project=spec.jira_project),
+                github=GitHubSettings(repos=[CodeRepo(path=r) for r in spec.github_repos]),
+                gitlab=GitLabSettings(projects=[CodeRepo(path=p) for p in spec.gitlab_projects]),
+                jira=JiraSettings(site=site_host(jira_site), project=spec.jira_project),
                 timezone=TEAM_TIMEZONE,
             )
         )

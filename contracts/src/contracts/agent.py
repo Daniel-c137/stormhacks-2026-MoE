@@ -8,7 +8,16 @@ HandUrgency = Literal["normal", "critical"]
 Visibility = Literal["public", "private"]
 InvocationVia = Literal["voice", "follow_up", "chat", "ask", "private"]
 SourceKind = Literal[
-    "meeting", "github_issue", "github_pr", "github_code", "github_release", "jira_issue"
+    "meeting",
+    "github_issue",
+    "github_pr",
+    "github_code",
+    "github_release",
+    "gitlab_issue",
+    "gitlab_mr",
+    "gitlab_code",
+    "gitlab_release",
+    "jira_issue",
 ]
 Verdict = Literal["supported", "contradicted", "unknown"]
 Severity = Literal["low", "high"]
@@ -35,7 +44,8 @@ class Invocation(BaseModel):
 
 
 class Source(BaseModel):
-    """Evidence behind an answer: a meeting moment, a GitHub item or a Jira key."""
+    """Evidence behind an answer: a meeting moment, a GitHub or GitLab item or a Jira key. A
+    repository's items name it: dropsubs/web#41, group/project!12 (a GitLab merge request)."""
 
     kind: SourceKind
     label: str
@@ -51,8 +61,9 @@ class CodeSnippet(BaseModel):
     end_line: int
     language: str
     code: str
-    github_url: str
+    github_url: str  # the lines on their code host: GitHub, or GitLab for a GitLab project
     caption: str
+    repo: str | None = None  # owner/name on GitHub, the project path on GitLab
     highlight: tuple[int, int] | None = None  # UI-only
 
 

@@ -9,7 +9,11 @@ const ICON: Record<Source["kind"], IconName> = {
   github_pr: "github",
   github_code: "github",
   github_release: "github",
-  jira_issue: "square-check",
+  gitlab_issue: "gitlab",
+  gitlab_mr: "gitlab",
+  gitlab_code: "gitlab",
+  gitlab_release: "gitlab",
+  jira_issue: "jira",
 };
 
 /** Evidence chips under an answer. `newTab` keeps a live meeting open behind the link. */

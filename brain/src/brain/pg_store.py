@@ -18,8 +18,6 @@ from contracts import (
     Decision,
     DecisionRelation,
     FactCheck,
-    GitHubSettings,
-    JiraSettings,
     Meeting,
     Person,
     Report,
@@ -38,6 +36,7 @@ from .store import (
     Login,
     NotFound,
     ReportAudio,
+    default_settings,
     new_join_code,
     photo_path,
     unique_segments,
@@ -252,29 +251,26 @@ class PostgresStore:
             team = await self._team(cur, team_id)
             row = await self._one(
                 cur,
-                "select team_id, github, jira, voice, wake_phrase, sensitivity,"
+                "select team_id, github, gitlab, jira, voice, wake_phrase, sensitivity,"
                 " interrupt_minutes, who_can_allow, timezone from team_settings where team_id = %s",
                 [team_id],
             )
         if row is None:
-            return TeamSettings(
-                team_id=team_id,
-                github=GitHubSettings(repo=team.github_repo),
-                jira=JiraSettings(project=team.jira_project),
-            )
+            return default_settings(team)
         return TeamSettings.model_validate(row)
 
     async def save_settings(self, settings: TeamSettings) -> TeamSettings:
         values = settings.model_dump(mode="json")
-        values |= {"github": Jsonb(values["github"]), "jira": Jsonb(values["jira"])}
+        values |= {key: Jsonb(values[key]) for key in ("github", "gitlab", "jira")}
         async with self._tx() as cur:
             await cur.execute(
-                "insert into team_settings (team_id, github, jira, voice, wake_phrase,"
+                "insert into team_settings (team_id, github, gitlab, jira, voice, wake_phrase,"
                 " sensitivity, interrupt_minutes, who_can_allow, timezone)"
-                " values (%(team_id)s, %(github)s, %(jira)s, %(voice)s, %(wake_phrase)s,"
-                " %(sensitivity)s, %(interrupt_minutes)s, %(who_can_allow)s, %(timezone)s)"
+                " values (%(team_id)s, %(github)s, %(gitlab)s, %(jira)s, %(voice)s,"
+                " %(wake_phrase)s, %(sensitivity)s, %(interrupt_minutes)s, %(who_can_allow)s,"
+                " %(timezone)s)"
                 " on conflict (team_id) do update set github = excluded.github,"
-                " jira = excluded.jira, voice = excluded.voice,"
+                " gitlab = excluded.gitlab, jira = excluded.jira, voice = excluded.voice,"
                 " wake_phrase = excluded.wake_phrase, sensitivity = excluded.sensitivity,"
                 " interrupt_minutes = excluded.interrupt_minutes,"
                 " who_can_allow = excluded.who_can_allow, timezone = excluded.timezone",

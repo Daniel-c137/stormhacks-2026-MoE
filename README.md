@@ -9,16 +9,16 @@ The product and agent names live in [`contracts/identity.json`](contracts/identi
 | Folder | What it is |
 | --- | --- |
 | `board/` | The web app (Next.js). Calls the brain over HTTP at `NEXT_PUBLIC_API_URL` (`/api` in production) and joins LiveKit rooms with tokens the brain issues. Every screen calls the brain's real routes with the session from `POST /auth/login`. |
-| `brain/` | The API (FastAPI): meetings, asking Polaris, the after-meeting write-up, meeting memory. Stores everything in Postgres with pgvector; reasons with Gemini (OpenRouter as a fallback); reads GitHub and Jira through MCP servers; uses ElevenLabs for voices and the report read aloud. CLI: `brain`. |
+| `brain/` | The API (FastAPI): meetings, asking Polaris, the after-meeting write-up, meeting memory. Stores everything in Postgres with pgvector; reasons with Gemini (OpenRouter as a fallback); reads GitHub, GitLab and Jira through MCP servers; uses ElevenLabs for voices and the report read aloud. CLI: `brain`. |
 | `realtime/` | The LiveKit agent worker: transcribes each speaker with ElevenLabs, sends final transcript segments and invocations to the brain's `/internal` routes (authenticated with `BRAIN_INTERNAL_TOKEN`), and speaks an answer when a participant chooses Speak. |
-| `world/` | The demo world: mock GitHub and Jira MCP servers over `mock-data/`, with a write journal (overlay) that `world-reset` clears. |
+| `world/` | The demo world: mock GitHub, GitLab and Jira MCP servers over `mock-data/`, with a write journal (overlay) that `world-reset` clears. DropSubs has two GitHub repositories (`dropsubs/dropsubs`, `dropsubs/website`) and a GitLab project (`dropsubs/infra`). |
 | `contracts/` | Shared request, event and data shapes, in Python and TypeScript. |
 | `db/migrations` | SQL migrations for Postgres, applied by `brain migrate`. |
 
 ```
 browser ── /       ──> board
         ── /api/*  ──> brain ──> Postgres + pgvector
-                             ──> world-github / world-jira (or real GitHub and Jira MCP servers)
+                             ──> world-github / world-gitlab / world-jira (or the real MCP servers)
                              ──> Gemini, OpenRouter, ElevenLabs, LiveKit API
         ── WebRTC  ──> LiveKit Cloud <── realtime worker ── /internal/* ──> brain
 ```
@@ -55,6 +55,7 @@ uv run brain migrate
 uv run uvicorn brain.main:app --reload --port 8000   # the brain, http://localhost:8000/docs
 uv run world-github-mcp                              # mock GitHub MCP, http://localhost:8101/mcp
 uv run world-jira-mcp                                # mock Jira MCP, http://localhost:8102/mcp
+uv run world-gitlab-mcp                              # mock GitLab MCP, http://localhost:8103/mcp
 pnpm --filter board dev                              # the board, http://localhost:3000
 ```
 
@@ -71,6 +72,7 @@ uv run pytest brain realtime world                  # unit and API tests; live t
 BRAIN_TEST_STORE=postgres uv run pytest brain       # the API tests on embedded Postgres instead of memory
 uv run ruff check . && uv run ruff format --check .
 pnpm --filter board typecheck
+pnpm --filter board test                            # the board's link helpers, with Node's test runner
 ```
 
 Live tests call real services and spend quota. They skip unless `.env` has what they need: `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_EMBEDDING_MODEL` and `GEMINI_EMBEDDING_DIM` for most; `OPENROUTER_API_KEY` and `OPENROUTER_MODELS` for the fallback (`OPENROUTER_EMBEDDING_MODEL` for the embeddings fallback); `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` and `ELEVENLABS_TTS_MODEL` for speech. Run only the ones you need:
@@ -109,11 +111,17 @@ uv run world-seed --snapshot demo                   # the DropSubs team, logins,
 uv run world-seed --snapshot demo --reset           # remove the seeded team first (logins are kept)
 ```
 
+The seed connects DropSubs to `dropsubs/dropsubs` and `dropsubs/website` on GitHub, `dropsubs/infra` on GitLab and the `DS` Jira project. It writes settings only for a new team, so a team seeded earlier keeps its connectors: add the new ones in Settings, or seed again with `--reset`.
+
 On Gemini's free tier, set `WORLD_SEED_EMBEDS_PER_MINUTE=90`. The free tier also allows only 1,000 embedded texts a day. Each past meeting embeds about 35 windows of its transcript plus its summary, decisions and tasks, so the four meetings fit in one day; if a run is stopped by the quota anyway, a re-run the next day carries on where the last one stopped.
+
+## Connectors
+
+A team admin connects GitHub repositories and GitLab projects (up to 10 of each, each at an optional branch or tag) and the Jira site and project in Settings, under Connectors (`PUT /settings/connectors`). Polaris reads every connected repository when it answers, searches code and checks facts, unless a question names one; sources name their repository (`dropsubs/website#7`, `dropsubs/infra!4` for a GitLab merge request). Each connector shows Connected, Not set up or Not reachable, checked live against its MCP server (`GET /settings/connectors`).
 
 ## Deploying to a server
 
-One machine with Docker runs everything from [`docker-compose.yml`](docker-compose.yml): Postgres (never published), a one-shot `migrate`, the brain, the realtime worker, the two mock MCP servers, the board, and Caddy on ports 80 and 443. Caddy serves the board at `/` and the brain at `/api/*` (prefix stripped), answers 404 for `/api/internal/*` (the worker calls the brain directly on the compose network), and hides `/api/docs` and `/api/openapi.json` unless `EXPOSE_API_DOCS=true`.
+One machine with Docker runs everything from [`docker-compose.yml`](docker-compose.yml): Postgres (never published), a one-shot `migrate`, the brain, the realtime worker, the three mock MCP servers (GitHub, Jira, GitLab), the board, and Caddy on ports 80 and 443. Caddy serves the board at `/` and the brain at `/api/*` (prefix stripped), answers 404 for `/api/internal/*` (the worker calls the brain directly on the compose network), and hides `/api/docs` and `/api/openapi.json` unless `EXPOSE_API_DOCS=true`.
 
 1. Point the domain's DNS A/AAAA record at the server and open ports 80 and 443. Caddy gets the certificate itself.
 2. On the server, clone the repo and write the settings:

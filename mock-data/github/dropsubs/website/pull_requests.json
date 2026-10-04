@@ -1,0 +1,325 @@
+[
+  {
+    "number": 2,
+    "title": "Waitlist sign-up form",
+    "body": "Form, confirmation email and the live count.\n\nCloses #1",
+    "state": "closed",
+    "user": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "landing"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "reyhaneh-dropsubs",
+        "id": 41731418,
+        "type": "User",
+        "html_url": "https://github.com/reyhaneh-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-07-08T18:00:00Z",
+    "updated_at": "2026-07-10T21:00:00Z",
+    "closed_at": "2026-07-10T21:00:00Z",
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/website/pull/2",
+    "url": "https://api.github.com/repos/dropsubs/website/pulls/2",
+    "draft": false,
+    "merged": true,
+    "merged_at": "2026-07-10T21:00:00Z",
+    "merge_commit_sha": "3605a11fb4dbcb4f21d010c9031f8ab85fb8e0bb",
+    "merged_by": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "head": {
+      "ref": "fe/waitlist-form",
+      "sha": "8e4ae2ddeee3a4cebd577d8c7379816a8320b194",
+      "label": "dropsubs:fe/waitlist-form"
+    },
+    "base": {
+      "ref": "main",
+      "label": "dropsubs:main"
+    },
+    "additions": 64,
+    "deletions": 0,
+    "changed_files": 1,
+    "_files": [
+      {
+        "filename": "app/waitlist/form.tsx",
+        "status": "added",
+        "additions": 64,
+        "deletions": 0,
+        "changes": 64
+      }
+    ],
+    "_closes": [
+      1
+    ],
+    "mergeable_state": null,
+    "_status": {
+      "state": "success",
+      "total_count": 1,
+      "statuses": [
+        {
+          "context": "ci/build",
+          "state": "success"
+        }
+      ]
+    }
+  },
+  {
+    "number": 3,
+    "title": "Landing page: iPhone screenshots and pricing",
+    "body": "Hero with the iPhone app screenshots, and a pricing section with the success fee.",
+    "state": "closed",
+    "user": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "landing"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "reyhaneh-dropsubs",
+        "id": 41731418,
+        "type": "User",
+        "html_url": "https://github.com/reyhaneh-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-08-26T20:00:00Z",
+    "updated_at": "2026-08-27T18:00:00Z",
+    "closed_at": "2026-08-27T18:00:00Z",
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/website/pull/3",
+    "url": "https://api.github.com/repos/dropsubs/website/pulls/3",
+    "draft": false,
+    "merged": true,
+    "merged_at": "2026-08-27T18:00:00Z",
+    "merge_commit_sha": "59fa2c49bdc64d9e11e859604e611027b3cc00a3",
+    "merged_by": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "head": {
+      "ref": "fe/hero-pricing",
+      "sha": "0f467918a6c36209403b1536185b03c62c4bc6d4",
+      "label": "dropsubs:fe/hero-pricing"
+    },
+    "base": {
+      "ref": "main",
+      "label": "dropsubs:main"
+    },
+    "additions": 54,
+    "deletions": 12,
+    "changed_files": 2,
+    "_files": [
+      {
+        "filename": "app/page.tsx",
+        "status": "modified",
+        "additions": 48,
+        "deletions": 12,
+        "changes": 60
+      },
+      {
+        "filename": "lib/pricing.ts",
+        "status": "added",
+        "additions": 6,
+        "deletions": 0,
+        "changes": 6
+      }
+    ],
+    "_closes": [],
+    "mergeable_state": null,
+    "_status": {
+      "state": "success",
+      "total_count": 1,
+      "statuses": [
+        {
+          "context": "ci/build",
+          "state": "success"
+        }
+      ]
+    }
+  },
+  {
+    "number": 6,
+    "title": "Launch versions of the landing page, with and without the App Store badge",
+    "body": "Two flags in lib/flags.ts: WAITLIST_OPEN turns the hero button into Get started, APP_STORE_BADGE shows the badge. Both stay off until launch.\n\nCloses #4\nCloses #5",
+    "state": "open",
+    "user": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "launch"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "reyhaneh-dropsubs",
+        "id": 41731418,
+        "type": "User",
+        "html_url": "https://github.com/reyhaneh-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-10-01T22:00:00Z",
+    "updated_at": "2026-10-01T22:00:00Z",
+    "closed_at": null,
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/website/pull/6",
+    "url": "https://api.github.com/repos/dropsubs/website/pulls/6",
+    "draft": true,
+    "merged": false,
+    "merged_at": null,
+    "merge_commit_sha": null,
+    "merged_by": null,
+    "head": {
+      "ref": "fe/launch-variants",
+      "sha": "9bc4e3266f3e4133b5f7f443c051ffa0643c9e1a",
+      "label": "dropsubs:fe/launch-variants"
+    },
+    "base": {
+      "ref": "main",
+      "label": "dropsubs:main"
+    },
+    "additions": 26,
+    "deletions": 4,
+    "changed_files": 2,
+    "_files": [
+      {
+        "filename": "app/page.tsx",
+        "status": "modified",
+        "additions": 22,
+        "deletions": 4,
+        "changes": 26
+      },
+      {
+        "filename": "lib/flags.ts",
+        "status": "added",
+        "additions": 4,
+        "deletions": 0,
+        "changes": 4
+      }
+    ],
+    "_closes": [
+      4,
+      5
+    ],
+    "mergeable_state": "clean",
+    "_status": {
+      "state": "success",
+      "total_count": 1,
+      "statuses": [
+        {
+          "context": "ci/build",
+          "state": "success"
+        }
+      ]
+    }
+  },
+  {
+    "number": 8,
+    "title": "Landing page: 20% success fee",
+    "body": "Pricing section and FAQ now say 20% of what we save you in the first year.\n\nCloses #7",
+    "state": "closed",
+    "user": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "pricing"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "reyhaneh-dropsubs",
+        "id": 41731418,
+        "type": "User",
+        "html_url": "https://github.com/reyhaneh-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-10-01T15:00:00Z",
+    "updated_at": "2026-10-01T17:30:00Z",
+    "closed_at": "2026-10-01T17:30:00Z",
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/website/pull/8",
+    "url": "https://api.github.com/repos/dropsubs/website/pulls/8",
+    "draft": false,
+    "merged": true,
+    "merged_at": "2026-10-01T17:30:00Z",
+    "merge_commit_sha": "697e5dfc4dbb90b5ae2bf0507919e595c9339422",
+    "merged_by": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "head": {
+      "ref": "fe/fee-20",
+      "sha": "44bd73453d1fd2ba3ed08e4e265b8b25150fbd54",
+      "label": "dropsubs:fe/fee-20"
+    },
+    "base": {
+      "ref": "main",
+      "label": "dropsubs:main"
+    },
+    "additions": 3,
+    "deletions": 3,
+    "changed_files": 2,
+    "_files": [
+      {
+        "filename": "lib/pricing.ts",
+        "status": "modified",
+        "additions": 1,
+        "deletions": 1,
+        "changes": 2
+      },
+      {
+        "filename": "app/page.tsx",
+        "status": "modified",
+        "additions": 2,
+        "deletions": 2,
+        "changes": 4
+      }
+    ],
+    "_closes": [
+      7
+    ],
+    "mergeable_state": null,
+    "_status": {
+      "state": "success",
+      "total_count": 1,
+      "statuses": [
+        {
+          "context": "ci/build",
+          "state": "success"
+        }
+      ]
+    }
+  }
+]

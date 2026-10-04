@@ -1,6 +1,8 @@
 {
   "company": "DropSubs",
   "github_repo": "dropsubs/dropsubs",
+  "extra_github_repos": ["dropsubs/website"],
+  "gitlab_projects": ["dropsubs/infra"],
   "jira_project": "DS",
   "snapshots": {
     "dev": { "data_until": "2026-08-28", "today": "2026-08-31T10:00:00" },

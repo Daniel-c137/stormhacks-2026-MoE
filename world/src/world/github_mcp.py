@@ -1,5 +1,6 @@
 """Mock GitHub MCP server over mock-data/github/ and the snapshot's code, with comments journaled
-to the overlay.
+to the overlay. It serves every repository of world/world.json: the main one (github_repo) and
+the extra_github_repos, each with its own issues, pull requests, releases and code.
 
 Tool names, arguments and result shapes copy GitHub's official MCP server (github-mcp-server
 v1.14): searches return the REST search result, issue_read, pull_request_read and the list_*
@@ -30,7 +31,7 @@ from mcp.types import (
 )
 from pydantic import Field
 
-from .code import RepoTree, blob_sha, load_repo
+from .code import RepoTree, blob_sha, load_repo, load_tree
 from .config import Settings, world_spec
 from .overlay import JournalEntry, JournalOverlay
 from .snapshot import mock_records
@@ -162,6 +163,8 @@ _write_lock = threading.Lock()  # a write reads the state, checks it and journal
 
 @dataclass
 class World:
+    """One repository."""
+
     full_name: str  # owner/name, from world/world.json
     tree: RepoTree  # the default branch's code at the snapshot's head
     issues: list[Record]
@@ -169,10 +172,12 @@ class World:
     releases: list[Record]
     commits: list[Record]  # newest first, one line of history
     comments: list[Record]
+    main: bool = True  # world.json's github_repo; its comments journal as a bare number
 
-    def check_repo(self, owner: str, repo: str, action: str) -> None:
-        if f"{owner}/{repo}".casefold() != self.full_name.casefold():
-            raise ToolError(f"failed to {action}: {owner}/{repo}: 404 Not Found")
+    def target(self, number: int) -> str:
+        """How the journal names an issue: its number in the main repository, else
+        owner/name#number."""
+        return str(number) if self.main else f"{self.full_name}#{number}"
 
     def issue(self, number: int, action: str = "get issue") -> Record:
         """An issue or pull request by number: both are issues to the issues API."""
@@ -191,21 +196,44 @@ class World:
         return [c for c in self.comments if c["issue_number"] == number]
 
 
-def load_world() -> World:
-    """The mock data with every journaled GitHub write applied, in order."""
-    world = World(
-        full_name=world_spec().github_repo,
-        tree=load_repo(Settings().world_snapshot),
-        issues=mock_records("github", "issues"),
-        pulls=mock_records("github", "pull_requests"),
-        releases=mock_records("github", "releases"),
-        commits=mock_records("github", "commits"),
-        comments=mock_records("github", "comments"),
-    )
+def load_worlds() -> list[World]:
+    """Every repository's mock data with every journaled GitHub write applied, in order."""
+    spec = world_spec()
+    snapshot = Settings().world_snapshot
+    worlds = [
+        World(
+            full_name=full_name,
+            tree=load_repo(snapshot) if main else load_tree(snapshot, "github", full_name),
+            issues=mock_records("github", "issues", None if main else full_name),
+            pulls=mock_records("github", "pull_requests", None if main else full_name),
+            releases=mock_records("github", "releases", None if main else full_name),
+            commits=mock_records("github", "commits", None if main else full_name),
+            comments=mock_records("github", "comments", None if main else full_name),
+            main=main,
+        )
+        for main, full_name in (
+            (True, spec.github_repo),
+            *((False, r) for r in spec.extra_github_repos),
+        )
+    ]
     for entry in JournalOverlay.configured().journal():
         if entry.server == "github":
-            apply(world, entry)
-    return world
+            repo, _, number = entry.target.rpartition("#")
+            world = next((w for w in worlds if w.full_name == repo or (not repo and w.main)), None)
+            if world is not None:
+                apply(world, entry.model_copy(update={"target": number}))
+    return worlds
+
+
+def load_world(owner: str | None = None, repo: str | None = None, action: str = "get") -> World:
+    """One repository: the main one, or owner/repo (ignoring case); 404 for any other."""
+    worlds = load_worlds()
+    if owner is None and repo is None:
+        return worlds[0]
+    for world in worlds:
+        if f"{owner}/{repo}".casefold() == world.full_name.casefold():
+            return world
+    raise ToolError(f"failed to {action}: {owner}/{repo}: 404 Not Found")
 
 
 def apply(world: World, entry: JournalEntry) -> Record:
@@ -600,7 +628,7 @@ def search_matches(world: World, record: Record, query: SearchQuery) -> bool:
 
 
 def in_scope(world: World, query: SearchQuery) -> bool:
-    """GitHub ORs repeated repo: (or org:/user:) qualifiers; this world holds one repository."""
+    """GitHub ORs repeated repo: (or org:/user:) qualifiers."""
     repos = [v for n, v in query.qualifiers if n == "repo"]
     owners = [v for n, v in query.qualifiers if n in ("org", "user")]
     owner = world.full_name.split("/")[0].casefold()
@@ -608,7 +636,7 @@ def in_scope(world: World, query: SearchQuery) -> bool:
 
 
 def run_search(
-    world: World,
+    worlds: list[World],
     kind: Literal["issue", "pr"],
     query: str,
     owner: str | None,
@@ -622,13 +650,17 @@ def run_search(
     if sort not in (None, "created", "updated", "comments"):
         raise ToolError(f"sort {sort!r} is not supported here: use created, updated or comments")
     parsed = parse_search(prepare_search_args(query.strip(), kind, owner, repo))
-    found: list[Record] = []
-    if in_scope(world, parsed):
-        found = [r for r in (*world.issues, *world.pulls) if search_matches(world, r, parsed)]
+    found: list[tuple[World, Record]] = [
+        (world, r)
+        for world in worlds
+        if in_scope(world, parsed)
+        for r in (*world.issues, *world.pulls)
+        if search_matches(world, r, parsed)
+    ]
     key = {"created": "created_at", "comments": "comments"}.get(sort or "", "updated_at")
-    found.sort(key=lambda r: r["number"], reverse=True)
-    found.sort(key=lambda r: r[key], reverse=sort is None or order != "asc")
-    items = [search_item(world, r) for r in paged(found, page, per_page)]
+    found.sort(key=lambda wr: wr[1]["number"], reverse=True)
+    found.sort(key=lambda wr: wr[1][key], reverse=sort is None or order != "asc")
+    items = [search_item(world, r) for world, r in paged(found, page, per_page)]
     return marshalled(
         {"total_count": len(found), "incomplete_results": False, "items": trimmed(items, fields)}
     )
@@ -637,9 +669,14 @@ def run_search(
 # Code
 
 
-def repo_tree() -> tuple[str, RepoTree]:
-    """The world's repository (owner/name) and its files at the configured snapshot."""
-    return world_spec().github_repo, load_repo(Settings().world_snapshot)
+def repo_trees() -> list[tuple[str, RepoTree]]:
+    """Every repository (owner/name) with its files at the configured snapshot."""
+    snapshot = Settings().world_snapshot
+    spec = world_spec()
+    return [
+        (spec.github_repo, load_repo(snapshot)),
+        *((r, load_tree(snapshot, "github", r)) for r in spec.extra_github_repos),
+    ]
 
 
 CODE_QUALIFIERS = {"repo", "org", "user", "path", "filename", "extension"}
@@ -658,10 +695,10 @@ def search_code(
     Supports plain words (all must match the file's text or path, case-insensitively) and the
     repo:, org:, user:, path:, filename: and extension: qualifiers; other qualifiers, OR, NOT
     and exclusions are an error."""
-    full_name, tree = repo_tree()
-    owner = full_name.split("/")[0].casefold()
     words: list[str] = []
     paths: list[str] = []
+    repos: list[str] = []
+    owners: list[str] = []
     for token in query.split():
         key, colon, value = token.partition(":")
         key, value = key.casefold(), value.strip('"')
@@ -675,10 +712,10 @@ def search_code(
                 f"Unsupported code search qualifier {key}: (supported: "
                 f"{', '.join(sorted(CODE_QUALIFIERS))})"
             )
-        elif key == "repo" and value.casefold() != full_name.casefold():
-            return {"total_count": 0, "incomplete_results": False, "items": []}
-        elif key in ("org", "user") and value.casefold() != owner:
-            return {"total_count": 0, "incomplete_results": False, "items": []}
+        elif key == "repo":
+            repos.append(value.casefold())  # repeated repo: (or org:/user:) are ORed
+        elif key in ("org", "user"):
+            owners.append(value.casefold())
         elif key == "path":
             paths.append(value.strip("/"))
         elif key == "filename":
@@ -696,6 +733,9 @@ def search_code(
             "sha": blob_sha(text),
             "repository": full_name,
         }
+        for full_name, tree in repo_trees()
+        if (not repos or full_name.casefold() in repos)
+        and (not owners or full_name.split("/")[0].casefold() in owners)
         for path, text in tree.files.items()
         if path_ok(path) and all(w in path.casefold() or w in text.casefold() for w in words)
     ]
@@ -719,9 +759,10 @@ def get_file_contents(
     """A file as a text message plus an embedded resource whose URI names the commit, or a
     directory as a JSON list of entries, like the official server. Only the default branch's
     head commit exists."""
-    full_name, tree = repo_tree()
-    if f"{owner}/{repo}".casefold() != full_name.casefold():
+    found = [(n, t) for n, t in repo_trees() if f"{owner}/{repo}".casefold() == n.casefold()]
+    if not found:
         raise ToolError(f"failed to get repository info: {owner}/{repo}: 404 Not Found")
+    ((full_name, tree),) = found
     branch = (ref or tree.branch).removeprefix("refs/heads/")
     if (sha and sha != tree.sha) or branch != tree.branch:
         raise ToolError(f"failed to resolve git reference {sha or ref}: 404 Not Found")
@@ -810,8 +851,7 @@ def list_issues(
     """The repository's issues (not pull requests), by default every one, newest first:
     {"issues", "totalCount", "pageInfo"}. labels matches an issue with any of them; since keeps
     issues updated at or after it. Pages by cursor (after), not page."""
-    world = load_world()
-    world.check_repo(owner, repo, "list issues")
+    world = load_world(owner, repo, "list issues")
     if page is not None:
         raise ToolError(
             "This tool uses cursor-based pagination. Use the 'after' parameter with the "
@@ -859,7 +899,9 @@ def search_issues(
     comments, ignoring case. Qualifiers: repo:, org:, user:, is:/type:, state:, label:, author:,
     assignee:; anything else is an error, never a wider search. Best match lists the most
     recently updated first."""
-    return run_search(load_world(), "issue", query, owner, repo, sort, order, page, perPage, fields)
+    return run_search(
+        load_worlds(), "issue", query, owner, repo, sort, order, page, perPage, fields
+    )
 
 
 @server.tool(annotations=READ)
@@ -874,8 +916,7 @@ def issue_read(
     """One issue (or pull request, as an issue): get, with the pull requests set to close it;
     get_comments; get_labels. The data has no issue hierarchy, so get_sub_issues and
     get_parent are errors."""
-    world = load_world()
-    world.check_repo(owner, repo, "get issue")
+    world = load_world(owner, repo, "get issue")
     record = world.issue(issue_number)
     if method == "get":
         issue = minimal_issue(record)
@@ -927,8 +968,7 @@ def list_pull_requests(
     these carry merged_at but no merged flag (always false here), merge author or size; read
     one with pull_request_read for those. head is owner:branch or a branch; popularity sorts by
     comments; long-running is not supported."""
-    world = load_world()
-    world.check_repo(owner, repo, "list pull requests")
+    world = load_world(owner, repo, "list pull requests")
     if sort == "long-running":
         raise ToolError("sort 'long-running' is not supported here: use created or updated")
     wanted = state or "open"
@@ -962,7 +1002,7 @@ def search_pull_requests(
     """Pull requests matching the query, as search_issues but scoped to is:pr; items are issue
     search results whose pull_request holds merged_at. Also supports is:merged, is:unmerged and
     is:draft."""
-    return run_search(load_world(), "pr", query, owner, repo, sort, order, page, perPage, fields)
+    return run_search(load_worlds(), "pr", query, owner, repo, sort, order, page, perPage, fields)
 
 
 def pull_commits(world: World, number: int) -> list[Record]:
@@ -992,8 +1032,7 @@ def pull_request_read(
     """One pull request: get (with merged, merged_at and merged_by), get_status (the combined
     commit status), get_files, get_commits (its merge commit) and get_comments. The data has
     no diffs, reviews or check runs, so those methods are errors."""
-    world = load_world()
-    world.check_repo(owner, repo, "get pull request")
+    world = load_world(owner, repo, "get pull request")
     record = world.pull(pullNumber)
     if method == "get":
         return marshalled(minimal_pull(world, record, full=True))
@@ -1094,8 +1133,7 @@ def list_commits(
     """Commits reachable from sha (a branch, tag or commit SHA; default: the default branch),
     newest first. author is a login or an email; path keeps commits whose pull request changed
     it; since and until bound the commit date."""
-    world = load_world()
-    world.check_repo(owner, repo, "list commits")
+    world = load_world(owner, repo, "list commits")
     found = world.commits[resolve(world, sha) :]
     if author:
         who = author.casefold()
@@ -1133,8 +1171,7 @@ def list_releases(
     fields: list[ReleaseField] | None = None,
 ) -> CallToolResult:
     """The repository's releases, newest first."""
-    world = load_world()
-    world.check_repo(owner, repo, "list releases")
+    world = load_world(owner, repo, "list releases")
     releases = [minimal_release(r) for r in paged(newest_first(world.releases), page, perPage)]
     return marshalled(trimmed(releases, fields))
 
@@ -1143,8 +1180,7 @@ def list_releases(
 def get_latest_release(owner: str, repo: str) -> CallToolResult:
     """The newest release that is neither a draft nor a prerelease, as the REST API returns it.
     Whatever it contains is in production; anything merged later is not."""
-    world = load_world()
-    world.check_repo(owner, repo, "get latest release")
+    world = load_world(owner, repo, "get latest release")
     full = [r for r in newest_first(world.releases) if not r["draft"] and not r["prerelease"]]
     if not full:
         raise ToolError(f"failed to get latest release: {world.full_name}: 404 Not Found")
@@ -1159,13 +1195,12 @@ def add_issue_comment(owner: str, repo: str, issue_number: int, body: str) -> Ca
     """Comments on an issue or pull request: {"id", "url"}. Writes go to the overlay journal,
     never to the mock data."""
     with _write_lock:
-        world = load_world()
-        world.check_repo(owner, repo, "add comment")
-        target = str(world.issue(issue_number, "add comment")["number"])
+        world = load_world(owner, repo, "add comment")
+        target = world.target(world.issue(issue_number, "add comment")["number"])
         entry = JournalEntry.now(
             "github", "add_issue_comment", "add_comment", target, {"body": body}
         )
-        comment = apply(world, entry)
+        comment = apply(world, entry.model_copy(update={"target": str(issue_number)}))
         JournalOverlay.configured().record(entry)
     return marshalled({"id": str(comment["id"]), "url": comment["html_url"]})
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { type ConnectorName, type ConnectorStatus, type Sensitivity, type TeamSettings, identity } from "@moe/contracts";
+import { type Sensitivity, type TeamSettings, identity } from "@moe/contracts";
 import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from "react";
 import { useTeam } from "@/components/AuthProvider";
 import { TeamAccounts } from "@/components/settings/TeamAccounts";
@@ -8,6 +8,7 @@ import { Avatar } from "@/components/ui/Avatar";
 import { Icon, Spinner } from "@/components/ui/Icon";
 import { Mark } from "@/components/ui/Mark";
 import { Notice } from "@/components/ui/Notice";
+import { Connectors } from "./Connectors";
 import { useConnectors, useSettings, useVoices } from "@/hooks/useApi";
 import { ApiError, changePassword, deletePhoto, describeError, updateMe, updateSettings, uploadPhoto, waitText } from "@/lib/api";
 import { signOut } from "@/lib/auth";
@@ -45,32 +46,6 @@ async function squarePhoto(file: File): Promise<Blob> {
   context.drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, PHOTO_SIZE, PHOTO_SIZE);
   return new Promise((resolve, reject) =>
     canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("The image couldn't be encoded."))), "image/jpeg", 0.85),
-  );
-}
-
-const CONNECTOR_TEXT: Record<ConnectorStatus["state"], string> = {
-  connected: "Connected",
-  not_configured: "Not configured",
-  failing: "Not reachable",
-};
-
-/** Whether the server can use an integration right now, checked live (GET /settings/connectors). */
-function ConnectorState({ name, statuses }: { name: ConnectorName; statuses: ReturnType<typeof useConnectors> }) {
-  const status = statuses.data?.find((c) => c.name === name);
-  if (!status) {
-    return (
-      <div className="connected" data-on={false}>
-        <Icon name="circle-dashed" />
-        {statuses.error ? `Status unavailable. ${describeError(statuses.error)}` : "Checking…"}
-      </div>
-    );
-  }
-  return (
-    <div className="connected" data-on={status.state === "connected"}>
-      <Icon name={status.state === "connected" ? "circle-check" : status.state === "failing" ? "triangle-alert" : "circle-dashed"} />
-      {CONNECTOR_TEXT[status.state]}
-      {status.detail && <span>· {status.detail}</span>}
-    </div>
   );
 }
 
@@ -167,7 +142,7 @@ function PasswordForm() {
   );
 }
 
-/** Profile, GitHub repo and ref, Jira site and project, the agent's voice and fact-check sensitivity. */
+/** Profile, account, connectors, the agent's voice and fact-check sensitivity. */
 export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
   const agent = identity.agent_name;
   const { me, email, setMe } = useTeam();
@@ -185,6 +160,8 @@ export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [problem, setProblem] = useState("");
+  // Connectors save on their own (PUT /settings/connectors); the latest saved choice shows here.
+  const [savedConnectors, setSavedConnectors] = useState<TeamSettings | null>(null);
   const audio = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
@@ -256,7 +233,6 @@ export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
       if (draft) {
         await updateSettings(draft);
         settings.reload();
-        connectors.reload();
         setDraft(null);
       }
       setSaved(true);
@@ -269,10 +245,6 @@ export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
 
   const options = SENSITIVITY.filter(([value]) => value !== "eager" || s?.sensitivity === "eager");
   const minutes = s?.interrupt_minutes ?? 0;
-  const indexed = s?.github.indexed_at ? new Date(s.github.indexed_at).toLocaleString() : null;
-  const githubStatus = [s?.github.files != null && `${s.github.files.toLocaleString()} files indexed`, indexed && `at ${indexed}`]
-    .filter(Boolean)
-    .join(" ");
 
   return (
     <div className="scrim" onClick={onClose}>
@@ -372,61 +344,15 @@ export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
               {!admin && <p className="note admin-only">Only admins can change these.</p>}
               <div className="sgroup" role="group" aria-labelledby="g-conn">
                 <h2 id="g-conn">Connectors</h2>
-                <section className="srow" aria-labelledby="s-code">
-                  <h3 id="s-code">Codebase</h3>
-                  <div>
-                    {!admin && <p className="ro mono">{[s.github.repo, s.github.ref].filter(Boolean).join(" @ ") || "Not set"}</p>}
-                    {admin && <div className="two">
-                      <label className="label">
-                        GitHub repository
-                        <input
-                          className="field mono"
-                          value={s.github.repo ?? ""}
-                          onChange={(e) => set({ github: { ...s.github, repo: e.target.value || null } })}
-                          placeholder="owner/repo"
-                        />
-                      </label>
-                      <label className="label">
-                        Branch or tag
-                        <input
-                          className="field mono"
-                          value={s.github.ref ?? ""}
-                          onChange={(e) => set({ github: { ...s.github, ref: e.target.value || null } })}
-                          placeholder="main"
-                        />
-                      </label>
-                    </div>}
-                    <ConnectorState name="github" statuses={connectors} />
-                    {githubStatus && <span className="note">{githubStatus}</span>}
-                  </div>
-                </section>
-                <section className="srow" aria-labelledby="s-jira">
-                  <h3 id="s-jira">Jira</h3>
-                  <div>
-                    {!admin && <p className="ro">{[s.jira.site, s.jira.project].filter(Boolean).join(" · ") || "Not set"}</p>}
-                    {admin && <div className="two">
-                      <label className="label">
-                        Site
-                        <input
-                          className="field"
-                          value={s.jira.site ?? ""}
-                          onChange={(e) => set({ jira: { ...s.jira, site: e.target.value || null } })}
-                          placeholder="your-team.atlassian.net"
-                        />
-                      </label>
-                      <label className="label">
-                        Project key
-                        <input
-                          className="field mono"
-                          value={s.jira.project ?? ""}
-                          onChange={(e) => set({ jira: { ...s.jira, project: e.target.value.toUpperCase() || null } })}
-                          style={{ textTransform: "uppercase" }}
-                        />
-                      </label>
-                    </div>}
-                    <ConnectorState name="jira" statuses={connectors} />
-                  </div>
-                </section>
+                <Connectors
+                  settings={savedConnectors ?? settings.data ?? s}
+                  statuses={connectors}
+                  canEdit={admin}
+                  onSaved={(saved) => {
+                    setSavedConnectors(saved);
+                    settings.reload();
+                  }}
+                />
               </div>
 
               <fieldset className="sgroup" disabled={!admin} aria-labelledby="g-agent">
