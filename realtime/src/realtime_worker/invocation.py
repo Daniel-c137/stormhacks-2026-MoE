@@ -4,6 +4,7 @@ button, or a public @mention. Plain text matching, never an LLM.
 Everything else is transcribed and saved but never sent to the brain for reasoning.
 """
 
+import math
 import re
 from dataclasses import dataclass
 from uuid import uuid4
@@ -21,6 +22,13 @@ LEADING_PUNCTUATION = " \t,.:;!?-" + chr(0x2013) + chr(0x2014)  # en and em dash
 OPENERS = r"(?:(?:hey|hi|ok|okay|so|um|uh|alright|right|and)\W+)*"
 # While waiting for the question, shorter segments are filler ("Um,", "So...").
 MIN_QUESTION_WORDS = 2
+# A spoken question that trails off waits this long after its segment ends for the same
+# speaker's next final segment, then goes as it is.
+TRAILING_SECONDS = 6.0
+# A question ending on one of these words, or shorter than MIN_FINISHED_WORDS, is unfinished.
+TRAILING_WORDS = frozenset("of the a an to for about on in with and or is are what's whats".split())
+MIN_FINISHED_WORDS = 3
+ELLIPSES = ("...", chr(0x2026))
 
 
 def default_aliases(agent_name: str) -> list[str]:
@@ -50,8 +58,42 @@ class Pending:
     until: float
 
 
+@dataclass
+class Held:
+    """A spoken question that trailed off, waiting for the rest of the sentence."""
+
+    via: InvocationVia
+    question: str
+    segment: TranscriptSegment  # where the question began: its speaker and time
+    until: float
+
+
+def unfinished(question: str) -> bool:
+    """It trails off ("what's the status of..."), ends on a joining word, or is too short to be
+    a whole question. A question mark means the speaker finished."""
+    question = question.strip()
+    if question.endswith(ELLIPSES):
+        return True
+    if question.endswith("?"):
+        return False
+    words = question.split()
+    if len(words) < MIN_FINISHED_WORDS:
+        return True
+    last = words[-1].strip(LEADING_PUNCTUATION).replace(chr(0x2019), "'").casefold()
+    return last in TRAILING_WORDS
+
+
+def joined(start: str, rest: str) -> str:
+    """Joins "what's the status of..." and "DS-104 in Jira." into one question."""
+    start = start.rstrip()
+    for ellipsis in ELLIPSES:
+        start = start.removesuffix(ellipsis)
+    rest = rest.strip().lstrip("." + ELLIPSES[1]).strip()
+    return f"{start.rstrip()} {rest}"
+
+
 class WakeDetector:
-    def __init__(self, aliases: list[str]):
+    def __init__(self, aliases: list[str], *, trailing_seconds: float = TRAILING_SECONDS):
         if not aliases:
             raise ValueError("WakeDetector needs at least one alias")
         name = alias_pattern(aliases)
@@ -61,6 +103,9 @@ class WakeDetector:
         self._openers = re.compile(rf"^\W*{OPENERS}", re.IGNORECASE)
         self._mention = re.compile(rf"(?<!\w)@{name}(?!\w)", re.IGNORECASE)
         self._pending: dict[str, Pending] = {}
+        self._trailing_seconds = trailing_seconds
+        self._held: dict[str, Held] = {}
+        self._overdue: list[Held] = []
 
     def arm_ask(self, speaker_id: str, at: float) -> None:
         """The Ask button: this speaker's next final segment is the question.
@@ -77,27 +122,63 @@ class WakeDetector:
         del self._pending[speaker_id]
         return True
 
+    def next_due(self) -> float | None:
+        """When the earliest held question stops waiting, on the segments' clock; None if none
+        is held. Whoever owns the clock calls due() then, so a held question is never lost."""
+        if self._overdue:
+            return -math.inf
+        return min((h.until for h in self._held.values()), default=None)
+
+    def due(self, now: float) -> list[Invocation]:
+        """Held questions whose wait is over by `now`, sent as they are."""
+        overdue, self._overdue = self._overdue, []
+        for speaker_id, held in list(self._held.items()):
+            if held.until <= now:
+                overdue.append(self._held.pop(speaker_id))
+        return [self._invocation(h.segment, h.via, h.question) for h in overdue]
+
     def on_segment(self, segment: TranscriptSegment) -> Invocation | None:
         if not segment.is_final or segment.speaker_id == AGENT_PARTICIPANT_ID:
             return None
+        addressed, question = self._addressed(segment.text)
+
+        if held := self._held.pop(segment.speaker_id, None):
+            if segment.t_start > held.until:
+                self._overdue.append(held)  # too late to join; due() sends it as it is
+            elif not addressed:  # saying the name again starts over
+                question = joined(held.question, segment.text)
+                return self._spoken(held.segment, held.via, question, heard_until=segment.t_end)
+
         pending = self._pending.pop(segment.speaker_id, None)
         if pending and segment.t_start > pending.until:
             pending = None
 
-        addressed, question = self._addressed(segment.text)
         if pending:
             if not addressed:
                 question = segment.text.strip()
             if len(question.split()) < MIN_QUESTION_WORDS:
                 self._pending[segment.speaker_id] = pending
                 return None
-            return self._invocation(segment, pending.via, question)
+            if pending.via == "ask":
+                return self._invocation(segment, pending.via, question)
+            return self._spoken(segment, pending.via, question, heard_until=segment.t_end)
         if not addressed:
             return None
         if not question:
             self._pending[segment.speaker_id] = Pending("voice", segment.t_end + NAME_ONLY_SECONDS)
             return None
-        return self._invocation(segment, "voice", question)
+        return self._spoken(segment, "voice", question, heard_until=segment.t_end)
+
+    def _spoken(
+        self, segment: TranscriptSegment, via: InvocationVia, question: str, *, heard_until: float
+    ) -> Invocation | None:
+        """A spoken question goes at once, or waits for the rest of the sentence if it trails
+        off. `segment` is where the question began; `heard_until` is when its last part ended."""
+        if unfinished(question):
+            until = heard_until + self._trailing_seconds
+            self._held[segment.speaker_id] = Held(via, question, segment, until)
+            return None
+        return self._invocation(segment, via, question)
 
     def _addressed(self, text: str) -> tuple[bool, str]:
         """(is the assistant addressed, the question). "Polaris, X" and "X, Polaris?" ask X;
