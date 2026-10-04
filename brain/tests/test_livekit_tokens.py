@@ -1,3 +1,6 @@
+from datetime import timedelta
+
+import jwt
 from livekit.api import TokenVerifier
 
 from brain.livekit_tokens import participant_token
@@ -45,3 +48,12 @@ def test_only_the_host_gets_room_admin():
 
     assert host.video.room_admin is True
     assert not member.video.room_admin
+
+
+def test_token_lives_only_as_long_as_asked():
+    token = participant_token(
+        MEETING, ALEX, is_host=False, api_key=KEY, api_secret=SECRET, ttl=timedelta(minutes=10)
+    )
+
+    claims = jwt.decode(token, SECRET, algorithms=["HS256"], options={"verify_aud": False})
+    assert claims["exp"] - claims["nbf"] == 600
