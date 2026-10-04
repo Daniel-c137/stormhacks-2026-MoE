@@ -126,9 +126,16 @@ def track(worker: TestClient, meeting_id: str, now: float | None = None) -> http
 
 
 def tracked(worker: TestClient, meeting_id: str, now: float | None = None) -> dict:
+    """The tick's response, with `agenda` set to Alex's: most tests follow one person's agenda;
+    everyone's is in `agendas`."""
     response = track(worker, meeting_id, now)
     assert response.status_code == 200, response.text
-    return response.json()
+    body = response.json()
+    mine = [a for a in body["agendas"] if a["person_id"] == ALEX.id]
+    body["agenda"] = (
+        mine[0] if mine else {"items": [], "current_item_id": None, "tracked_until": None}
+    )
+    return body
 
 
 def plan(client: TestClient, meeting_id: str, *items: tuple[str, int | None]) -> list[str]:
@@ -153,7 +160,10 @@ def T() -> datetime:
 
 
 def seed(store, agenda: Agenda) -> None:
-    anyio.run(store.save_agenda, agenda)
+    """Saves the agenda as Alex's unless it names its owner."""
+    anyio.run(
+        store.save_agenda, agenda.model_copy(update={"person_id": agenda.person_id or ALEX.id})
+    )
 
 
 def live_meeting(store, *, duration_min: int | None = None, started_ago_s: float = HOUR):
@@ -176,14 +186,14 @@ def standup(store, client_as) -> tuple[str, list[str]]:
 
 
 def saved_agenda(store, meeting_id: str) -> Agenda:
-    agenda = anyio.run(store.agenda, meeting_id)
+    agenda = anyio.run(store.agenda, meeting_id, ALEX.id)
     assert agenda is not None
     return agenda
 
 
 async def rename_first(store, meeting_id: str, title: str = "Waitlist email, renamed") -> None:
     """Another writer (a lobby edit) renames the first item and commits."""
-    agenda = await store.agenda(meeting_id)
+    agenda = await store.agenda(meeting_id, ALEX.id)
     items = [agenda.items[0].model_copy(update={"title": title}), *agenda.items[1:]]
     await store.save_agenda(agenda.model_copy(update={"items": items}))
 
@@ -1120,6 +1130,7 @@ def test_an_item_past_its_timebox_nudges_about_the_next_timeboxed_item_once(work
 
     [nudge] = body["nudges"]
     assert nudge["meeting_id"] == meeting and nudge["item_id"] == "r"
+    assert nudge["person_id"] == ALEX.id  # the worker sends it only to the agenda's owner
     assert "Refund policy hasn't come up yet" in nudge["text"]
     assert "Waitlist email" in nudge["text"]
     assert by_id(body["agenda"])["r"]["nudged_t"] == 25
@@ -1707,7 +1718,12 @@ async def test_ticks_racing_lobby_edits_on_postgres_lose_no_edit(pg_dsn, setting
         meeting.model_copy(update={"started_at": datetime.now(UTC) - timedelta(hours=1)})
     )
     first = await store.save_agenda(
-        Agenda(meeting_id=meeting.id, items=[item("w", "Waitlist email", 10)], generated_at=T())
+        Agenda(
+            meeting_id=meeting.id,
+            person_id=ALEX.id,
+            items=[item("w", "Waitlist email", 10)],
+            generated_at=T(),
+        )
     )
     llm = MockLLM(structured={AgendaTrackDraft: all_about("a1")})
     app = app_for(store, settings, llm)
@@ -1731,10 +1747,34 @@ async def test_ticks_racing_lobby_edits_on_postgres_lose_no_edit(pg_dsn, setting
                 tg.start_soon(tick)
                 tg.start_soon(edit)
             statuses.append((replies["tick"].status_code, replies["edit"].status_code))
-            saved = await store.agenda(meeting.id)
+            saved = await store.agenda(meeting.id, ALEX.id)
             assert saved.items[0].title == f"Waitlist email {n}", f"round {n} lost the edit"
 
     assert statuses == [(200, 200)] * ROUNDS
-    saved = await store.agenda(meeting.id)
+    saved = await store.agenda(meeting.id, ALEX.id)
     assert saved.items[0].discussed_s == 30 * ROUNDS - 5
     assert saved.revision == first.revision + 2 * ROUNDS
+
+
+# everyone's own agenda
+
+
+def test_everyones_agenda_is_tracked_separately(worker, client_as, store, model):
+    meeting = live_meeting(store).id
+    [waitlist] = plan(client_as(ALEX), meeting, ("Waitlist email", 10))
+    [refunds] = plan(client_as(SARAH), meeting, ("Refund policy", 5))
+    ingest(worker, meeting, said(meeting, 1, "The waitlist email goes out Thursday", 0, 30))
+    model.says("a1").says(None)  # Alex's: about his item; Sarah's: nothing on hers
+
+    response = track(worker, meeting, now=60)
+
+    assert response.status_code == 200, response.text
+    agendas = {a["person_id"]: a for a in response.json()["agendas"]}
+    assert set(agendas) == {ALEX.id, SARAH.id}
+    assert agendas[ALEX.id]["current_item_id"] == waitlist
+    assert by_id(agendas[ALEX.id])[waitlist]["discussed_s"] == 30
+    assert agendas[SARAH.id]["current_item_id"] is None
+    assert by_id(agendas[SARAH.id])[refunds]["discussed_s"] == 0
+    alexs, sarahs = model.prompts  # one call per agenda, each with only its owner's items
+    assert "Waitlist email" in alexs and "Refund policy" not in alexs
+    assert "Refund policy" in sarahs and "Waitlist email" not in sarahs
