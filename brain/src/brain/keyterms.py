@@ -11,7 +11,7 @@ from contracts import Meeting, TeamSettings, get_identity
 
 from .agent.team_tools import code_repos, jira_reader
 from .config import Settings
-from .store import Store
+from .store import JiraAccount, Store
 
 logger = logging.getLogger(__name__)
 
@@ -83,14 +83,17 @@ async def meeting_keyterms(store: Store, settings: Settings, meeting: Meeting) -
         candidates += [item.title for item in agenda.items]
     terms = select(candidates)
     if room := MAX_KEYTERMS - len(terms):
-        terms = select([*terms, *await open_issue_keys(settings, team, room)])
+        account = await store.jira_account(meeting.team_id)
+        terms = select([*terms, *await open_issue_keys(settings, team, room, account)])
     return terms
 
 
-async def open_issue_keys(settings: Settings, team: TeamSettings, limit: int) -> list[str]:
+async def open_issue_keys(
+    settings: Settings, team: TeamSettings, limit: int, account: JiraAccount | None = None
+) -> list[str]:
     """Keys of the team's unfinished Jira issues; none when Jira is not configured. Keyterms are
     a nicety, so a failing or slow Jira is logged and skipped, never an error."""
-    reader = jira_reader(settings, team)
+    reader = jira_reader(settings, team, account=account)
     if isinstance(reader, str):
         return []
     try:

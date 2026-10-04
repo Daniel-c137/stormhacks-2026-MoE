@@ -27,9 +27,10 @@ from ..agent.agenda import (
     suggest_items,
     valid_minutes,
 )
+from ..agent.team_tools import jira_reader
 from ..agent.timekeeping import seconds_since_start
 from ..config import Settings
-from ..jira import JiraError, JiraReader, JiraUnavailable, jira_config
+from ..jira import JiraError, JiraUnavailable
 from ..llm import LLM, LLMError
 from ..store import Conflict, Store
 from ..zones import today as team_today
@@ -160,8 +161,15 @@ async def suggest_agenda(
     today = team_today(zone)
     inputs = await store_inputs(store, meeting.team_id, meeting.id, today, zone)
     unavailable = [GITHUB_NOT_READ]
+    reader = jira_reader(
+        settings,
+        await store.settings(meeting.team_id),
+        account=await store.jira_account(meeting.team_id),
+    )
     try:
-        issues = await JiraReader(jira_config(settings)).unfinished()
+        if isinstance(reader, str):
+            raise JiraUnavailable(reader)
+        issues = await reader.unfinished()
     except JiraUnavailable as e:
         unavailable.append(str(e))
     except JiraError as e:

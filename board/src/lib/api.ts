@@ -12,7 +12,7 @@ import type {
   CreateAccountRequest,
   CreateAccountResponse,
   ConnectorsUpdate,
-  GitHubAccountConnect,
+  GitHubRepoConnect,
   JiraAccountConnect,
   CreateMeetingRequest,
   Decision,
@@ -185,12 +185,12 @@ export const updateSettings = (body: TeamSettings) => request<TeamSettings>("PUT
 export const listConnectors = () => get<ConnectorStatus[]>("/settings/connectors");
 /** Admins only: the whole connector choice, replacing the saved one. */
 export const updateConnectors = (body: ConnectorsUpdate) => request<TeamSettings>("PUT", "/settings/connectors", body);
-/** Admins only: connects the team's Jira account. The brain checks it against Jira first. */
+/** Admins only: connects the team's Jira project with the account it is read and pushed with.
+ * The brain checks it against Jira first. */
 export const connectJiraAccount = (body: JiraAccountConnect) => request<TeamSettings>("PUT", "/settings/jira/account", body);
-/** Admins only: forgets the team's Jira account and its token. */
+/** Admins only: removes the team's Jira project and forgets its account and token. */
 export const disconnectJiraAccount = () => request<TeamSettings>("DELETE", "/settings/jira/account");
-/** Admins only: connects GitHub with a fine-grained token. The brain checks it with GitHub first. */
-export const connectGitHubAccount = (body: GitHubAccountConnect) => request<TeamSettings>("PUT", "/settings/github/account", body);
-/** Admins only: forgets the team's GitHub token; its repositories are then read without it. */
-export const disconnectGitHubAccount = () => request<TeamSettings>("DELETE", "/settings/github/account");
+/** Admins only: connects a GitHub repository with its fine-grained token, or changes one. The
+ * brain checks the token reads it first. */
+export const connectGitHubRepo = (body: GitHubRepoConnect) => request<TeamSettings>("PUT", "/settings/github/repos", body);
 export const listVoices = () => get<Voice[]>("/voices");

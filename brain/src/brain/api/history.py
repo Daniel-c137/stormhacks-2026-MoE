@@ -22,12 +22,10 @@ from contracts import (
 
 from ..agent.ask import Question, ToolOrchestrator
 from ..agent.pipeline import PipelineRunner, PostMeetingPipeline, can_retry
-from ..auth import signing_secret
 from ..config import Settings
 from ..jira import ApprovalRequired, JiraPusher, JiraUnavailable, TaskPusher, apply_results
-from ..jira_rest import JiraAccess, JiraRestPusher
+from ..jira_rest import JiraRestPusher, account_access
 from ..report import ProcessedMeeting
-from ..sealing import Unsealable, unseal
 from ..speech import (
     CONTENT_TYPE,
     MeetingLocks,
@@ -230,17 +228,9 @@ def connected_pusher(
 ) -> JiraRestPusher:
     """The pusher for a team's connected account and its project. 409 when its token was sealed
     under an AUTH_SECRET the server no longer has."""
-    try:
-        token = unseal(account.sealed_token, signing_secret(config) or "", account.team_id)
-        access = JiraAccess(
-            site=account.site,
-            email=account.email,
-            api_token=token,
-            project_key=account.project,
-            issue_type_id=account.issue_type_id,
-        )
-    except (Unsealable, ValueError):
-        raise HTTPException(status_code=409, detail=CONNECT_AGAIN) from None
+    access = account_access(config, account)
+    if access is None:
+        raise HTTPException(status_code=409, detail=CONNECT_AGAIN)
     return JiraRestPusher(access, transport=transport)
 
 
