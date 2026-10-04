@@ -1047,15 +1047,19 @@ version = "0.0.0"
 source = { editable = "world" }
 dependencies = [
     { name = "mcp" },
+    { name = "moe-brain" },
     { name = "moe-contracts" },
     { name = "pydantic-settings" },
+    { name = "pyyaml" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "mcp" },
+    { name = "moe-brain", editable = "brain" },
     { name = "moe-contracts", editable = "contracts" },
     { name = "pydantic-settings" },
+    { name = "pyyaml" },
 ]
 
 [[package]]

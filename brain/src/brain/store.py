@@ -76,6 +76,12 @@ class Store(Protocol):
 
     async def create_team(self, team: Team) -> Team: ...
     async def team(self, team_id: str) -> Team: ...
+    async def delete_team(self, team_id: str) -> None:
+        """Removes the team with its settings, memberships and meetings, and everything under
+        them (transcripts, chat, agendas, fact-checks, reports, tasks, decisions, audio). Its
+        people stay: a person is not the team's. NotFound for a missing team."""
+        ...
+
     async def team_for_user(self, user_id: str) -> Team: ...
     async def upsert_person(self, person: Person, team_id: str) -> Person:
         """Save the person and add them to the team's members if they are not already."""
@@ -339,6 +345,28 @@ class InMemoryStore:
 
     async def team(self, team_id: str) -> Team:
         return _copy(self._team(team_id))
+
+    async def delete_team(self, team_id: str) -> None:
+        self._team(team_id)
+        gone = {i for i, m in self._meetings.items() if m.team_id == team_id}
+        for rows in (
+            self._meetings,
+            self._segments,
+            self._chat,
+            self._agendas,
+            self._fact_checks,
+            self._fact_check_states,
+            self._reports,
+            self._progress,
+            self._report_audio,
+        ):
+            for meeting_id in gone & rows.keys():
+                del rows[meeting_id]
+        for rows in (self._tasks, self._decisions):
+            for row_id in [i for i, row in rows.items() if row.meeting_id in gone]:
+                del rows[row_id]
+        self._settings.pop(team_id, None)
+        del self._teams[team_id]
 
     async def team_for_user(self, user_id: str) -> Team:
         for team in self._teams.values():

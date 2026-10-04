@@ -379,6 +379,70 @@ async def test_saved_settings_are_read_back_per_team(store):
         await store.save_settings(saved.model_copy(update={"team_id": new_id()}))
 
 
+async def test_deleting_a_team_removes_everything_under_it_and_keeps_its_people(store):
+    team, alex, sarah, other, olga = await two_teams(store)
+    await store.save_settings(
+        TeamSettings(team_id=team.id, github=GitHubSettings(), jira=JiraSettings(), voice="v")
+    )
+    meeting = await ended_meeting(store, team, alex, "Planning", at(0))
+    await store.add_participant(meeting.id, sarah.id)
+    await store.add_segments(meeting.id, [segment(meeting.id, 1, alex)])
+    await store.add_public_chat(chat(meeting.id, alex, "hi", at(1)))
+    await store.save_agenda(Agenda(meeting_id=meeting.id, items=[], generated_at=at(0)))
+    report = report_for(meeting.id, owner=alex, decisions=["Use Redis"], tasks=["Ship it"])
+    await store.complete_report(report)
+    await store.save_report_progress(
+        ReportProgress(meeting_id=meeting.id, steps=["Saving"], current=1, done=True)
+    )
+    await store.save_report_audio(meeting.id, "k", "audio/mpeg", b"mp3")
+    kept = await ended_meeting(store, other, olga, "Elsewhere", at(0))
+    await store.complete_report(report_for(kept.id, owner=olga, decisions=["A"], tasks=["B"]))
+
+    await store.delete_team(team.id)
+
+    with pytest.raises(NotFound):
+        await store.team(team.id)
+    with pytest.raises(NotFound):
+        await store.settings(team.id)
+    with pytest.raises(NotFound):
+        await store.team_for_user(alex.id)
+    with pytest.raises(NotFound):
+        await store.meeting(meeting.id)
+    with pytest.raises(NotFound):
+        await store.report(meeting.id)
+    assert await store.meetings(team.id) == []
+    assert await store.transcript(meeting.id) == []
+    assert await store.public_chat(meeting.id) == []
+    assert await store.agenda(meeting.id) is None
+    assert await store.report_progress(meeting.id) is None
+    with pytest.raises(NotFound):
+        await store.report_audio(meeting.id)
+    with pytest.raises(NotFound):
+        await store.task(team.id, report.tasks[0].id)
+    assert await store.person(alex.id) == alex  # a person is not the team's
+    assert await store.team(other.id) == other
+    assert [m.id for m in await store.meetings(other.id)] == [kept.id]
+    assert len(await store.decisions(other.id)) == len(await store.tasks(other.id)) == 1
+
+
+async def test_a_deleted_team_can_be_created_again_empty(store):
+    team, alex, *_ = await two_teams(store)
+    await ended_meeting(store, team, alex, "Planning", at(0))
+
+    await store.delete_team(team.id)
+    again = await store.create_team(team.model_copy(update={"member_ids": []}))
+
+    assert again.member_ids == []
+    assert await store.meetings(team.id) == []
+    await store.upsert_person(alex, team.id)
+    assert (await store.team_for_user(alex.id)).id == team.id
+
+
+async def test_deleting_a_missing_team_is_not_found(store):
+    with pytest.raises(NotFound):
+        await store.delete_team(new_id())
+
+
 # logins (email and password sign-in; the store only ever sees the hash)
 
 

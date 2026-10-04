@@ -1171,4 +1171,5 @@ def add_issue_comment(owner: str, repo: str, issue_number: int, body: str) -> Ca
 
 
 def main() -> None:
-    server.run("streamable-http", port=Settings().world_github_mcp_port)
+    settings = Settings()
+    server.run("streamable-http", host=settings.world_mcp_host, port=settings.world_github_mcp_port)

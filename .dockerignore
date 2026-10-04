@@ -1,0 +1,21 @@
+# Secrets and local state never enter an image.
+**/.env
+**/.env.*
+!**/.env.example
+.git
+.claude
+**/.venv
+**/node_modules
+**/.next
+**/__pycache__
+**/*.py[cod]
+**/.ruff_cache
+**/.pytest_cache
+**/*.tsbuildinfo
+world/.overlay
+*/tests
+**/.DS_Store
+.idea
+.vscode
+backups
+.pgdata
