@@ -10,8 +10,10 @@ ChunkKind = Literal["transcript", "summary", "decision", "task", "public_chat"]
 class Chunk(BaseModel):
     """A pgvector row. Private chat is never embedded.
 
-    Transcript chunks carry the speaker and the span of their turn; decision and task chunks
-    carry the report item's id in `ref_id` and its time, when known, in `t_start`.
+    Transcript chunks are windows of consecutive turns: they carry the window's span, and its
+    speaker only when one person speaks in all of it. Decision chunks carry who made the
+    decision; decision and task chunks carry the report item's id in `ref_id` and its time, when
+    known, in `t_start`.
     """
 
     id: str

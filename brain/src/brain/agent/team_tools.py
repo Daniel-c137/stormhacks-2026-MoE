@@ -12,13 +12,14 @@ from brain.config import Settings
 from brain.github import GitHubItem, GitHubReader, GitHubRelease
 from brain.integrations import ToolRefused
 from brain.jira import JiraConfig, JiraIssue, JiraReader, root_cause
-from brain.memory import MeetingMemory
+from brain.memory import Chunk, MeetingMemory
+from brain.memory.chunking import Turn, people_turns, turn_text
 from brain.report.decisions import terms
 from brain.report.extraction import clock
 from brain.store import NotFound, Store
 from brain.zones import local_date
 from brain.zones import today as team_today
-from contracts import CodeSnippet, Meeting, Person, Source, TeamSettings
+from contracts import CodeSnippet, Meeting, Person, Source, TeamSettings, TranscriptSegment
 
 from .code import code_evidence
 from .tools import ToolResult, ToolSpec
@@ -26,6 +27,8 @@ from .tools import ToolResult, ToolSpec
 TaskStatus = Literal["open", "overdue", "all"]
 
 MEMORY_HITS = 6
+MEMORY_FINDINGS = 24
+"""Most findings one meeting search returns: a transcript hit is a window of several turns."""
 LIST_LIMIT = 10
 TASK_LIMIT = 15
 DEFAULT_TIMEOUT = 10.0
@@ -230,6 +233,7 @@ class TeamToolbox:
         self.zone = zone
         self.today = today or team_today(zone)
         self._meetings: dict[str, Meeting | None] = {}
+        self._transcripts: dict[str, list[TranscriptSegment]] = {}
         self._tools: dict[str, Callable[..., Coroutine[Any, Any, list[Finding]]]] = {
             "search_meetings": self.search_meetings,
             "decisions": self.decisions,
@@ -286,8 +290,25 @@ class TeamToolbox:
             meeting = await self.meeting(chunk.meeting_id)
             if chunk.team_id != self.team_id or meeting is None:
                 continue
-            found.append(self.at(meeting, chunk.t_start, chunk.text))
-        return found
+            if turns := await self.turns_in(chunk):
+                found += [self.at(meeting, turn[0].t_start, turn_text(turn)) for turn in turns]
+            else:
+                found.append(self.at(meeting, chunk.t_start, chunk.text))
+        return found[:MEMORY_FINDINGS]
+
+    async def turns_in(self, chunk: Chunk) -> list[Turn]:
+        """A transcript chunk's turns from the stored transcript, so each is cited at its own
+        moment rather than the window's start. Empty for other chunks or a missing transcript."""
+        if chunk.kind != "transcript" or chunk.t_start is None or chunk.t_end is None:
+            return []
+        if chunk.meeting_id not in self._transcripts:
+            self._transcripts[chunk.meeting_id] = await self.store.transcript(chunk.meeting_id)
+        inside = [
+            s
+            for s in self._transcripts[chunk.meeting_id]
+            if chunk.t_start <= s.t_start and s.t_end <= chunk.t_end
+        ]
+        return people_turns(chunk.meeting_id, inside)
 
     async def decisions(self, query: str | None = None, **_: Any) -> list[Finding]:
         decisions = await self.store.decisions(self.team_id)

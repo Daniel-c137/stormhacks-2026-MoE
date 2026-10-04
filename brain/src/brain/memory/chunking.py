@@ -9,6 +9,11 @@ from contracts import Report, TranscriptSegment
 from .models import Chunk
 
 MAX_CHUNK_CHARS = 1200
+"""About a minute and a half of conversation: an hour-long meeting makes 30-odd chunks, so the
+free embedding tier's daily texts cover the demo's meetings, and each chunk still carries enough
+of the exchange around a fact to be found by it. Well under the embedding models' input limits."""
+
+Turn = list[TranscriptSegment]
 
 
 def chunk_transcript(
@@ -18,36 +23,55 @@ def chunk_transcript(
     *,
     max_chars: int = MAX_CHUNK_CHARS,
 ) -> list[Chunk]:
-    """One chunk per run of consecutive final segments by the same speaker, split when it would
-    grow past `max_chars`. A single segment longer than that stays whole. The agent's turns
-    are left out."""
-    final = final_segments(meeting_id, segments)
-    runs: list[list[TranscriptSegment]] = []
-    for segment in final:
-        run = runs[-1] if runs else None
-        if (
-            run
-            and run[-1].speaker_id == segment.speaker_id
-            and len(turn_text([*run, segment])) <= max_chars
-        ):
-            run.append(segment)
-        else:
-            runs.append([segment])
-    return [
-        Chunk(
-            id=f"{meeting_id}:transcript:{run[0].seg_id}",
-            team_id=team_id,
-            meeting_id=meeting_id,
-            kind="transcript",
-            text=turn_text(run),
-            speaker_id=run[0].speaker_id,
-            speaker_name=run[0].speaker_name,
-            t_start=run[0].t_start,
-            t_end=run[-1].t_end,
-        )
-        for run in runs
-        if not by_agent(run[0])
-    ]
+    """Windows of consecutive turns, each turn on its own `Speaker: text` line, packed up to
+    `max_chars`. A turn longer than that is split between segments; a single segment longer
+    than that stays whole. The agent's turns are left out."""
+    windows: list[list[Turn]] = []
+    for turn in people_turns(meeting_id, segments):
+        for i, segment in enumerate(turn):
+            window = windows[-1] if windows else None
+            if window is None:
+                windows.append([[segment]])
+                continue
+            # The turn's first segment starts a new line; later ones continue the last line.
+            grown = [*window, [segment]] if i == 0 else [*window[:-1], [*window[-1], segment]]
+            if len(window_text(grown)) <= max_chars:
+                window[:] = grown
+            else:
+                windows.append([[segment]])
+    return [window_chunk(team_id, meeting_id, window) for window in windows]
+
+
+def people_turns(meeting_id: str, segments: Iterable[TranscriptSegment]) -> list[Turn]:
+    """Runs of consecutive final segments by one speaker, in time order, without the agent's.
+    The agent speaking between two lines of one person ends that person's turn."""
+    turns: list[Turn] = []
+    previous: TranscriptSegment | None = None
+    for segment in final_segments(meeting_id, segments):
+        if not by_agent(segment):
+            if previous is not None and previous.speaker_id == segment.speaker_id:
+                turns[-1].append(segment)
+            else:
+                turns.append([segment])
+        previous = segment
+    return turns
+
+
+def window_chunk(team_id: str, meeting_id: str, window: list[Turn]) -> Chunk:
+    first, last = window[0][0], window[-1][-1]
+    speakers = {turn[0].speaker_id for turn in window}
+    alone = len(speakers) == 1
+    return Chunk(
+        id=f"{meeting_id}:transcript:{first.seg_id}",
+        team_id=team_id,
+        meeting_id=meeting_id,
+        kind="transcript",
+        text=window_text(window),
+        speaker_id=first.speaker_id if alone else None,
+        speaker_name=first.speaker_name if alone else None,
+        t_start=first.t_start,
+        t_end=last.t_end,
+    )
 
 
 def final_segments(
@@ -64,7 +88,11 @@ def final_segments(
     return final
 
 
-def turn_text(run: list[TranscriptSegment]) -> str:
+def window_text(window: list[Turn]) -> str:
+    return "\n".join(turn_text(turn) for turn in window)
+
+
+def turn_text(run: Turn) -> str:
     return f"{run[0].speaker_name}: " + " ".join(s.text.strip() for s in run)
 
 
