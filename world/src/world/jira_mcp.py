@@ -42,6 +42,9 @@ def getTransitionsForJiraIssue(cloudId: str, issueIdOrKey: str) -> dict[str, Any
 
 @server.tool(annotations=READ)
 def lookupJiraAccountId(cloudId: str, searchString: str) -> dict[str, Any]:
+    """Accounts whose name or email matches: {"users": [{"accountId", "displayName",
+    "emailAddress"}, ...]}. The brain also accepts a bare list or "result" in place of "users",
+    and "account_id"; the real server's shape is unverified."""
     raise NotImplementedError
 
 
