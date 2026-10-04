@@ -2,10 +2,11 @@ import secrets
 from functools import cache
 from typing import NoReturn
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
 
 from contracts import Meeting, Person, Team
 
+from ..auth import AuthNotConfigured, InvalidToken, KeysUnavailable, TokenVerifier
 from ..config import Settings
 from ..store import NotFound, Store
 
@@ -24,9 +25,52 @@ async def get_store() -> Store:
     not_implemented()
 
 
-async def current_user(authorization: str = Header()) -> Person:
+def get_verifier(request: Request, settings: Settings = Depends(get_settings)) -> TokenVerifier:
+    """One verifier per app and auth config, so the JWKS cache outlives a request."""
+    state = request.app.state
+    if not hasattr(state, "token_verifiers"):
+        state.token_verifiers = {}
+    cache: dict[tuple, TokenVerifier] = state.token_verifiers
+    key = (settings.supabase_url, settings.supabase_jwt_secret, settings.supabase_jwt_audience)
+    if key not in cache:
+        cache[key] = TokenVerifier.from_settings(settings)
+    return cache[key]
+
+
+def _unauthorized(detail: str, error: str | None = None) -> HTTPException:
+    challenge = f'Bearer error="{error}"' if error else "Bearer"
+    return HTTPException(status_code=401, detail=detail, headers={"WWW-Authenticate": challenge})
+
+
+NOT_CONFIGURED = "Supabase auth is not configured"
+
+
+async def current_user(
+    authorization: str | None = Header(default=None),
+    verifier: TokenVerifier = Depends(get_verifier),
+    store: Store = Depends(get_store),
+) -> Person:
     """Resolve the Supabase session; every query is scoped to this user's team."""
-    not_implemented()
+    if not verifier.configured:
+        raise HTTPException(status_code=503, detail=NOT_CONFIGURED)
+    scheme, _, token = (authorization or "").partition(" ")
+    token = token.strip()
+    if scheme.lower() != "bearer" or not token or " " in token:
+        raise _unauthorized("Missing bearer token")
+    try:
+        claims = await verifier.verify(token)
+    except AuthNotConfigured:
+        raise HTTPException(status_code=503, detail=NOT_CONFIGURED) from None
+    except KeysUnavailable:
+        raise HTTPException(
+            status_code=503, detail="Supabase signing keys are unavailable"
+        ) from None
+    except InvalidToken:
+        raise _unauthorized("Invalid or expired session", "invalid_token") from None
+    try:
+        return await store.person(claims["sub"])
+    except NotFound:
+        raise HTTPException(status_code=403, detail="not a workspace member") from None
 
 
 async def require_internal(
