@@ -35,3 +35,9 @@ backups/
 
 # Local embedded Postgres (pgserver)
 .pgdata/
+
+# Local Claude Code state
+.claude/
+
+# Demo-day scripts (kept local)
+demo-script/
