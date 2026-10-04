@@ -16,12 +16,15 @@ async def ingest_segments(
 ) -> None:
     """Final segments only; duplicates by seg_id are ignored. A bad batch saves nothing.
 
-    Accepted after the host ends the meeting too, so the last words still reach the record.
+    Accepted after the host ends the meeting too, so the last words still reach the record, but
+    not once retention deleted the transcript: a late resend must not bring it back.
     """
     try:
-        await store.meeting(meeting_id)
+        meeting = await store.meeting(meeting_id)
     except NotFound:
         raise HTTPException(status_code=404, detail="Meeting not found") from None
+    if meeting.transcript_deleted_at is not None:
+        raise HTTPException(status_code=409, detail="The transcript was deleted after retention")
     if any(s.meeting_id != meeting_id for s in body.segments):
         raise HTTPException(status_code=422, detail="Segment belongs to another meeting")
     if any(not s.is_final for s in body.segments):

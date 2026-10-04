@@ -34,9 +34,13 @@ def get_http_transport() -> httpx.AsyncBaseTransport | None:
     return None
 
 
-async def get_store() -> Store:
-    """The Supabase store. Until it exists, tests and local runs override this dependency."""
-    not_implemented()
+async def get_store(request: Request) -> Store:
+    """The Postgres store the app opened at startup (DATABASE_URL); 503 when there is none.
+    Tests override this dependency."""
+    store: Store | None = getattr(request.app.state, "store", None)
+    if store is None:
+        raise HTTPException(status_code=503, detail="DATABASE_URL is not configured")
+    return store
 
 
 async def get_llm(settings: Settings = Depends(get_settings)) -> LLM:

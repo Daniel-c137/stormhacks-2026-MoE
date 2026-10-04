@@ -1,3 +1,6 @@
+import asyncio
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -6,7 +9,11 @@ from google.genai import errors as genai_errors
 
 from brain.cli import main
 from brain.llm import GeminiLLM
+from brain.llm.mock import MockEmbedder
+from brain.memory import InMemoryMemoryStore, MeetingMemory
 from brain.report import ProcessedMeeting
+from brain.store import InMemoryStore
+from contracts import Person, Team, TranscriptSegment
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -133,3 +140,143 @@ def test_push_prints_why_an_issue_was_created_unassigned(jira_env, tmp_path, cap
     out = capsys.readouterr().out
     assert "mtg-standup-task-1: DS-117" in out
     assert "mtg-standup-task-1: created unassigned:" in out
+
+
+def test_migrate_without_database_url_says_what_is_missing(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "")
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(["migrate"])
+
+    assert "DATABASE_URL" in str(exit_info.value.code)
+
+
+def test_migrate_applies_the_migrations_once(monkeypatch, pg_dsn, capsys):
+    monkeypatch.setenv("DATABASE_URL", pg_dsn)
+
+    assert main(["migrate"]) == 0
+    first = capsys.readouterr().out
+    assert main(["migrate"]) == 0
+    second = capsys.readouterr().out
+
+    assert "_core" in first
+    assert "_core" not in second
+    assert "up to date" in second
+
+
+# purge-transcripts
+
+ALEX = Person(id="u-alex", name="Alex Chen", short="Alex", initials="AC")
+TEAM = Team(id="t-1", name="Checkout", member_ids=[ALEX.id])
+
+
+def ended_with_transcript(store: InMemoryStore, title: str, days_ago: float):
+    async def make():
+        ended = datetime.now(UTC) - timedelta(days=days_ago)
+        meeting = await store.create_meeting(TEAM.id, title, ALEX.id)
+        await store.start_meeting(meeting.id, ended - timedelta(minutes=30))
+        await store.add_segments(
+            meeting.id,
+            [
+                TranscriptSegment(
+                    seg_id=f"{meeting.id}-1",
+                    meeting_id=meeting.id,
+                    speaker_id=ALEX.id,
+                    speaker_name=ALEX.name,
+                    text="Refund the users",
+                    is_final=True,
+                    t_start=0,
+                    t_end=2,
+                )
+            ],
+        )
+        await store.transition_status(meeting.id, {"live"}, "processing", at=ended)
+        return await store.set_status(meeting.id, "needs_review")
+
+    return asyncio.run(make())
+
+
+@pytest.fixture
+def retention_env(monkeypatch):
+    """The CLI's store and memory, swapped for in-memory ones."""
+    store = InMemoryStore(teams=[TEAM], people=[ALEX])
+    env = SimpleNamespace(
+        store=store, memory=MeetingMemory(MockEmbedder(dim=16), InMemoryMemoryStore())
+    )
+
+    @asynccontextmanager
+    async def open_stores(settings):
+        yield env.store, env.memory
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
+    monkeypatch.setenv("TRANSCRIPT_RETENTION_DAYS", "14")
+    monkeypatch.setattr("brain.cli.open_retention_stores", open_stores)
+    return env
+
+
+def test_purge_dry_run_lists_what_would_go_and_deletes_nothing(retention_env, capsys):
+    old = ended_with_transcript(retention_env.store, "Old standup", 20)
+    recent = ended_with_transcript(retention_env.store, "Recent standup", 3)
+
+    assert main(["purge-transcripts", "--dry-run"]) == 0
+
+    out = capsys.readouterr().out
+    assert old.id in out and "Old standup" in out
+    assert recent.id not in out
+    assert "dry run" in out.lower()
+    assert len(asyncio.run(retention_env.store.transcript(old.id))) == 1
+    assert asyncio.run(retention_env.store.meeting(old.id)).transcript_deleted_at is None
+
+
+def test_purge_deletes_old_transcripts_and_prints_them(retention_env, capsys):
+    old = ended_with_transcript(retention_env.store, "Old standup", 20)
+    recent = ended_with_transcript(retention_env.store, "Recent standup", 3)
+
+    assert main(["purge-transcripts"]) == 0
+
+    out = capsys.readouterr().out
+    assert old.id in out and "Old standup" in out
+    assert recent.id not in out
+    assert asyncio.run(retention_env.store.transcript(old.id)) == []
+    assert asyncio.run(retention_env.store.meeting(old.id)).transcript_deleted_at is not None
+    assert len(asyncio.run(retention_env.store.transcript(recent.id))) == 1
+
+    assert main(["purge-transcripts"]) == 0
+    assert "0 meetings" in capsys.readouterr().out
+
+
+def test_purge_uses_the_configured_retention(retention_env, monkeypatch, capsys):
+    old = ended_with_transcript(retention_env.store, "Old standup", 20)
+    monkeypatch.setenv("TRANSCRIPT_RETENTION_DAYS", "30")
+
+    assert main(["purge-transcripts"]) == 0
+
+    assert old.id not in capsys.readouterr().out
+    assert len(asyncio.run(retention_env.store.transcript(old.id))) == 1
+
+
+def test_purge_says_when_memory_chunks_were_left(retention_env, capsys):
+    ended_with_transcript(retention_env.store, "Old standup", 20)
+    retention_env.memory = None
+
+    assert main(["purge-transcripts"]) == 0
+
+    assert "memory" in capsys.readouterr().out.lower()
+
+
+def test_purge_refuses_a_retention_below_one_day(retention_env, monkeypatch):
+    monkeypatch.setenv("TRANSCRIPT_RETENTION_DAYS", "0")
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(["purge-transcripts", "--dry-run"])
+
+    assert "TRANSCRIPT_RETENTION_DAYS" in str(exit_info.value.code)
+
+
+def test_purge_without_a_database_says_what_is_missing(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "")
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(["purge-transcripts", "--dry-run"])
+
+    assert "DATABASE_URL is not configured" in str(exit_info.value.code)

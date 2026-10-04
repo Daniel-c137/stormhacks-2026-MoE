@@ -1,5 +1,8 @@
 """Final transcript segments: the worker saves them, team members read them back."""
 
+import asyncio
+from datetime import UTC, datetime
+
 from api_support import ALEX, OUTSIDER, SARAH, WORKER_TOKEN, create
 from fastapi.testclient import TestClient
 
@@ -153,3 +156,38 @@ def test_another_team_cannot_read_the_transcript(worker, client_as):
     response = transcript(client_as(OUTSIDER), meeting["id"])
 
     assert response.status_code == 404
+
+
+# after retention deleted the transcript
+
+DELETED_AT = datetime(2026, 10, 20, 3, 0, tzinfo=UTC)
+
+
+def deleted_by_retention(store, worker, client_as) -> dict:
+    alex = client_as(ALEX)
+    meeting = create(alex)
+    ingest(worker, meeting["id"], segment(meeting["id"], 1), segment(meeting["id"], 2))
+    alex.post(f"/meetings/{meeting['id']}/end")
+    asyncio.run(store.delete_transcript(meeting["id"], DELETED_AT))
+    return meeting
+
+
+def test_a_deleted_transcript_reads_as_empty_and_the_meeting_says_when(store, worker, client_as):
+    meeting = deleted_by_retention(store, worker, client_as)
+    sarah = client_as(SARAH)
+
+    response = transcript(sarah, meeting["id"])
+
+    assert response.status_code == 200
+    assert response.json() == []
+    deleted_at = sarah.get(f"/meetings/{meeting['id']}").json()["transcript_deleted_at"]
+    assert datetime.fromisoformat(deleted_at) == DELETED_AT
+
+
+def test_a_late_resend_cannot_bring_a_deleted_transcript_back(store, worker, client_as):
+    meeting = deleted_by_retention(store, worker, client_as)
+
+    response = ingest(worker, meeting["id"], segment(meeting["id"], 1), segment(meeting["id"], 3))
+
+    assert response.status_code == 409
+    assert transcript(client_as(ALEX), meeting["id"]).json() == []

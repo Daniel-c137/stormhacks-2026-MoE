@@ -63,6 +63,25 @@ async def test_a_failed_write_up_is_logged_and_drain_still_returns(caplog):
     assert not runner.running("m1")
 
 
+async def test_shutdown_stops_running_write_ups():
+    runner = PipelineRunner()
+    stopped: list[str] = []
+
+    async def forever(meeting_id: str) -> None:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            stopped.append(meeting_id)
+            raise
+
+    runner.start("m1", forever)
+    await asyncio.sleep(0)
+    await runner.shutdown()
+
+    assert stopped == ["m1"]
+    assert not runner.running("m1")
+
+
 async def test_the_app_keeps_one_runner():
     app = create_app()
 

@@ -187,6 +187,13 @@ class PipelineRunner:
         while pending := [t for t in self._tasks.values() if not t.done()]:
             await asyncio.wait(pending)
 
+    async def shutdown(self) -> None:
+        """Stops every running write-up; each records that it was interrupted, so it can be
+        retried."""
+        for task in self._tasks.values():
+            task.cancel()
+        await self.drain()
+
     async def _run(self, meeting_id: str, run: Callable[[str], Awaitable[object]]) -> None:
         try:
             await run(meeting_id)
