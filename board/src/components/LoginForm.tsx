@@ -2,7 +2,7 @@
 
 import { identity } from "@moe/contracts";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useEffect, useState } from "react";
+import { type CSSProperties, type FormEvent, useEffect, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { Icon, Spinner } from "@/components/ui/Icon";
 import { Mark } from "@/components/ui/Mark";
@@ -64,7 +64,13 @@ export function LoginForm() {
           <span className="mark-slot">
             <Mark size={30} />
           </span>
-          <span className="wordmark">{identity.product_name}</span>
+          <span className="wordmark" role="img" aria-label={identity.product_name}>
+            {[...identity.product_name].map((ch, i) => (
+              <span key={i} className="wordmark-ch" style={{ "--i": i } as CSSProperties} aria-hidden="true">
+                {ch}
+              </span>
+            ))}
+          </span>
         </span>
         <h1 className="auth-title">Sign in</h1>
         {!apiConfigured() ? (
