@@ -160,6 +160,6 @@ def test_every_missing_setting_is_named_in_one_clear_error():
 def test_tick_intervals_default_to_what_the_brain_expects():
     settings = Settings(_env_file=None)
 
-    assert settings.agenda_tick_seconds == 30
+    assert settings.agenda_tick_seconds == 10
     assert settings.fact_check_tick_seconds == 60
     assert settings.elevenlabs_api_url == "https://api.elevenlabs.io"

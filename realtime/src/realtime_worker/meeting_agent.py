@@ -96,7 +96,7 @@ class MeetingAgent:
         default_voice_id: str | None,
         detector: WakeDetector | None = None,  # share the TranscriptionManager's
         spoken_max_chars: int = 600,
-        agenda_tick_seconds: float = 30,
+        agenda_tick_seconds: float = 10,
         fact_check_tick_seconds: float = 60,
         ask_seconds: float = ASK_SECONDS,
         clock: Callable[[], float] | None = None,
