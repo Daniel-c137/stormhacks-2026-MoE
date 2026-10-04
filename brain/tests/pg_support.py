@@ -7,6 +7,7 @@ that is dropped afterwards. Tests apply the migrations they need themselves.
 import shutil
 import tempfile
 from collections.abc import Iterator
+from contextlib import contextmanager
 from uuid import uuid4
 
 import psycopg
@@ -26,12 +27,21 @@ def pg_server():
     shutil.rmtree(data_dir, ignore_errors=True)
 
 
+@contextmanager
+def fresh_database(server) -> Iterator[str]:
+    """The DSN of a new, empty database on `server`, dropped on exit."""
+    name = f"test_{uuid4().hex}"
+    with psycopg.connect(server.get_uri(), autocommit=True) as admin:
+        admin.execute(sql.SQL("create database {}").format(sql.Identifier(name)))
+    try:
+        yield server.get_uri(name)
+    finally:
+        with psycopg.connect(server.get_uri(), autocommit=True) as admin:
+            admin.execute(sql.SQL("drop database {} with (force)").format(sql.Identifier(name)))
+
+
 @pytest.fixture
 def pg_dsn(pg_server) -> Iterator[str]:
     """The DSN of a fresh database on the session's server, dropped after the test."""
-    name = f"test_{uuid4().hex}"
-    with psycopg.connect(pg_server.get_uri(), autocommit=True) as admin:
-        admin.execute(sql.SQL("create database {}").format(sql.Identifier(name)))
-    yield pg_server.get_uri(name)
-    with psycopg.connect(pg_server.get_uri(), autocommit=True) as admin:
-        admin.execute(sql.SQL("drop database {} with (force)").format(sql.Identifier(name)))
+    with fresh_database(pg_server) as dsn:
+        yield dsn
