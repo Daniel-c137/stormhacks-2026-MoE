@@ -276,6 +276,7 @@ class ToolOrchestrator:
             system=plan_system(self.max_calls),
         )
         called, groups, unavailable = await self.run(toolbox, plan.calls)
+        groups = await with_releases(toolbox, groups)
         if meeting is not None:
             said = [
                 Finding(
@@ -338,6 +339,64 @@ class ToolOrchestrator:
             if result.error and result.error not in unavailable:
                 unavailable.append(result.error)  # failed, or failed for some repositories
         return bool(chosen), groups, unavailable
+
+
+async def with_releases(toolbox: TeamToolbox, groups: list[list[Finding]]) -> list[list[Finding]]:
+    """Each merged pull request found says whether its repository's latest release has it, worked
+    out here from the two dates rather than left to the model. A repository whose releases were
+    not looked up has them read, and its latest release joins the evidence."""
+    merged = [
+        f for group in groups for f in group if f.source.kind == "github_pr" and f.when is not None
+    ]
+    if not merged:
+        return groups
+    latest: dict[str, Finding] = {}
+    for f in (f for group in groups for f in group if f.source.kind == "github_release"):
+        repo = f.source.label.partition("@")[0]
+        if f.when and (repo not in latest or f.when > (latest[repo].when or f.when)):
+            latest[repo] = f
+    added: list[Finding] = []
+    for repo in dict.fromkeys(f.source.label.partition("#")[0] for f in merged):
+        if repo in latest:
+            continue
+        result = await toolbox.call("github_releases", {"repo": repo})
+        dated = [f for f in (result.content if result.ok else []) if f.when]
+        if dated:
+            latest[repo] = max(dated, key=lambda f: f.when or date.min)
+            added.append(latest[repo])
+    marked = [[released_or_not(f, latest) for f in group] for group in groups]
+    return [*marked, added] if added else marked
+
+
+def released_or_not(finding: Finding, latest: dict[str, Finding]) -> Finding:
+    """A merged pull request's finding with whether the latest release has it, next to its merge
+    date (before the text can be clipped)."""
+    if finding.source.kind != "github_pr" or finding.when is None:
+        return finding
+    release = latest.get(finding.source.label.partition("#")[0])
+    if release is None or release.when is None:
+        return finding
+    tag = release.source.label.partition("@")[2]
+    published = release.when.isoformat()
+    if finding.when > release.when:
+        note = (
+            f"merged after the latest release, {tag} (published {published}), so not released yet"
+        )
+    elif finding.when < release.when:
+        note = (
+            f"merged before the latest release, {tag} (published {published}), "
+            f"so released in {tag} or earlier"
+        )
+    else:
+        note = (
+            f"merged the day the latest release, {tag}, was published; "
+            f"whether {tag} has it is not known"
+        )
+    stamp = f"(merged {finding.when.isoformat()})"
+    if stamp not in finding.text:
+        return finding
+    text = finding.text.replace(stamp, f"(merged {finding.when.isoformat()}; {note})", 1)
+    return finding.model_copy(update={"text": text})
 
 
 def recent_segments(question: Question, meeting: Meeting | None) -> list[TranscriptSegment]:
