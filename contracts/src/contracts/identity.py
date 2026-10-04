@@ -17,7 +17,8 @@ class Identity(BaseModel):
 
     @property
     def wake_phrase(self) -> str:
-        return f"Hey {self.agent_name}"
+        """The agent's name alone: "Polaris, what's blocking DS-104?"."""
+        return self.agent_name
 
     @property
     def mention(self) -> str:
