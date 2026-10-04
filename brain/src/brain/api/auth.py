@@ -202,7 +202,7 @@ async def google_sign_in(
     if secret is None or not google_configured(settings):
         raise HTTPException(status_code=503, detail="Google sign-in isn't configured")
     flow = new_flow(next)
-    redirect_uri = str(request.url_for("google_callback"))
+    redirect_uri = callback_url(request, settings)
     response = RedirectResponse(
         authorize_url(settings.google_client_id or "", redirect_uri, flow), status_code=302
     )
@@ -257,7 +257,7 @@ async def google_callback(
                 flow,
                 client_id=settings.google_client_id or "",
                 client_secret=settings.google_client_secret or "",
-                redirect_uri=str(request.url_for("google_callback")),
+                redirect_uri=callback_url(request, settings),
                 keys=keys,
                 http=http,
             )
@@ -269,6 +269,12 @@ async def google_callback(
     token, expires_at = issue_token(person.id, settings)
     session = LoginResponse(token=token, expires_at=expires_at, person=person)
     return back(google=codes.issue(session), next=flow.next)
+
+
+def callback_url(request: Request, settings: Settings) -> str:
+    """The redirect URI registered with Google: GOOGLE_REDIRECT_URL behind a proxy, else this
+    brain's own callback as the request reached it."""
+    return settings.google_redirect_url or str(request.url_for("google_callback"))
 
 
 async def google_person(store: Store, settings: Settings, email: str) -> Person | None:

@@ -28,7 +28,7 @@ ISSUERS = ("https://accounts.google.com", "accounts.google.com")
 SCOPE = "openid email profile"
 
 FLOW_COOKIE = "google_signin"
-FLOW_COOKIE_PATH = "/auth/google"
+FLOW_COOKIE_PATH = "/"  # the brain may be served under a prefix such as /api
 FLOW_SECONDS = 10 * 60  # time allowed at Google
 FLOW_AUDIENCE = "google-signin"
 CODE_SECONDS = 60  # the board swaps its one-time code at once
