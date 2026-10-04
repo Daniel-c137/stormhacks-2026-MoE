@@ -29,6 +29,7 @@ class Agenda(BaseModel):
     updated_at: datetime | None = None  # last human edit
     current_item_id: str | None = None  # being discussed now; None when off the agenda
     tracked_until: float | None = None  # transcript seconds tracked so far; None before any
+    revision: int = Field(default=0, ge=0)  # bumped by every save; 0 until first saved
 
 
 class AgendaSuggestions(BaseModel):
