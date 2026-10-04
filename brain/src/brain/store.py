@@ -1,3 +1,4 @@
+import hashlib
 import secrets
 from collections.abc import Collection, Iterable, Sequence
 from datetime import UTC, datetime
@@ -53,6 +54,18 @@ class Store(Protocol):
 
     async def person(self, person_id: str) -> Person: ...
     async def update_person(self, person: Person) -> Person: ...
+    async def save_photo(self, person_id: str, content_type: str, data: bytes) -> Person:
+        """Replaces the person's photo and sets photo_url to photo_path(person_id, data)."""
+        ...
+
+    async def photo(self, person_id: str) -> tuple[str, bytes]:
+        """(content_type, data); NotFound when the person has none."""
+        ...
+
+    async def delete_photo(self, person_id: str) -> Person:
+        """Clears photo_url; a person without a photo is returned unchanged."""
+        ...
+
     async def members(self, team_id: str) -> list[Person]: ...
     async def search_members(self, team_id: str, query: str, limit: int = 20) -> list[Person]:
         """Case-insensitive match on name, email or title, by name. A blank query lists all."""
@@ -181,6 +194,13 @@ class Store(Protocol):
         ...
 
 
+def photo_path(person_id: str, data: bytes) -> str:
+    """Where the API serves a person's photo. The version changes with the bytes, so a browser
+    never shows a cached old photo."""
+    version = hashlib.sha256(data).hexdigest()[:12]
+    return f"/people/{person_id}/photo?v={version}"
+
+
 def new_join_code() -> str:
     """Unguessable and URL-safe; the link is the only thing a teammate needs to join."""
     return secrets.token_urlsafe(9)
@@ -205,6 +225,7 @@ class InMemoryStore:
     def __init__(self, teams: Iterable[Team] = (), people: Iterable[Person] = ()):
         self._teams = {t.id: _copy(t) for t in teams}
         self._people = {p.id: _copy(p) for p in people}
+        self._photos: dict[str, tuple[str, bytes]] = {}
         self._settings: dict[str, TeamSettings] = {}
         self._meetings: dict[str, Meeting] = {}
         self._segments: dict[str, dict[str, TranscriptSegment]] = {}
@@ -244,6 +265,23 @@ class InMemoryStore:
         self._person(person.id)
         self._people[person.id] = _copy(person)
         return _copy(person)
+
+    async def save_photo(self, person_id: str, content_type: str, data: bytes) -> Person:
+        person = self._person(person_id)
+        self._photos[person_id] = (content_type, bytes(data))
+        return self._save_person(person, photo_url=photo_path(person_id, data))
+
+    async def photo(self, person_id: str) -> tuple[str, bytes]:
+        self._person(person_id)
+        saved = self._photos.get(person_id)
+        if saved is None:
+            raise NotFound(f"photo for person {person_id}")
+        return saved
+
+    async def delete_photo(self, person_id: str) -> Person:
+        person = self._person(person_id)
+        self._photos.pop(person_id, None)
+        return self._save_person(person, photo_url=None)
 
     async def members(self, team_id: str) -> list[Person]:
         team = self._team(team_id)
@@ -493,6 +531,11 @@ class InMemoryStore:
         if person is None:
             raise NotFound(f"person {person_id}")
         return person
+
+    def _save_person(self, person: Person, **changes) -> Person:
+        saved = person.model_copy(update=changes, deep=True)
+        self._people[person.id] = saved
+        return _copy(saved)
 
     def _meeting(self, meeting_id: str) -> Meeting:
         meeting = self._meetings.get(meeting_id)

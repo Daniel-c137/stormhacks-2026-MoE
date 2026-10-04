@@ -991,6 +991,7 @@ dependencies = [
     { name = "psycopg-pool" },
     { name = "pydantic-settings" },
     { name = "pyjwt", extra = ["crypto"] },
+    { name = "python-multipart" },
     { name = "supabase" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -1007,6 +1008,7 @@ requires-dist = [
     { name = "psycopg-pool" },
     { name = "pydantic-settings" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.15.1" },
+    { name = "python-multipart" },
     { name = "supabase" },
     { name = "uvicorn", extras = ["standard"] },
 ]

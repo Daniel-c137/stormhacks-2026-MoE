@@ -1,6 +1,8 @@
 import socket
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import pytest
@@ -85,28 +87,37 @@ def fake_jira() -> FakeJira:
     return FakeJira()
 
 
+@contextmanager
+def serve_mcp(server: MCPServer) -> Iterator[str]:
+    """Serve an in-process MCP server over streamable HTTP on localhost; yields its URL."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    http = uvicorn.Server(
+        uvicorn.Config(
+            server.streamable_http_app(), host="127.0.0.1", port=port, log_level="warning"
+        )
+    )
+    thread = threading.Thread(target=http.run, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 10
+    while not http.started:
+        if time.monotonic() > deadline:
+            raise RuntimeError(f"fake MCP server {server.name} did not start")
+        time.sleep(0.02)
+    try:
+        yield f"http://127.0.0.1:{port}/mcp"
+    finally:
+        http.should_exit = True
+        thread.join(timeout=10)
+
+
 @pytest.fixture
 def jira_over_http():
     """FakeJira served over streamable HTTP on localhost: (fake, url)."""
     jira = FakeJira()
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        port = s.getsockname()[1]
-    server = uvicorn.Server(
-        uvicorn.Config(
-            jira.server.streamable_http_app(), host="127.0.0.1", port=port, log_level="warning"
-        )
-    )
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    deadline = time.monotonic() + 10
-    while not server.started:
-        if time.monotonic() > deadline:
-            raise RuntimeError("fake Jira MCP server did not start")
-        time.sleep(0.02)
-    yield jira, f"http://127.0.0.1:{port}/mcp"
-    server.should_exit = True
-    thread.join(timeout=10)
+    with serve_mcp(jira.server) as url:
+        yield jira, url
 
 
 @pytest.fixture
