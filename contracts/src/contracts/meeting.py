@@ -44,6 +44,7 @@ class Meeting(BaseModel):
     duration_min: int | None = None
     jira_keys: list[str] = []
     transcript_deleted_at: datetime | None = None  # set once retention removed the segments
+    agent_joined_at: datetime | None = None  # when the agent first joined; None if it never did
 
 
 class Participant(BaseModel):

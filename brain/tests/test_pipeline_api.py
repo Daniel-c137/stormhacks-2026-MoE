@@ -258,6 +258,24 @@ async def test_the_report_is_written_from_the_meetings_title_date_members_and_tr
         assert expected in call.prompt
 
 
+async def test_the_report_lists_polaris_only_when_it_joined_the_meeting(api, llm):
+    agent_line = f"- {AGENT_PARTICIPANT_ID}: {get_identity().agent_name}"
+    await ended(api, "Polaris never came")
+    joined = await api.create("Polaris joined")
+    response = await api.http.post(
+        f"/internal/meetings/{joined['id']}/agent-joined",
+        headers={"X-Internal-Token": WORKER_TOKEN},
+    )
+    assert response.status_code == 204
+    await api.ingest(joined["id"])
+    await api.end(joined["id"])
+    await api.drain()
+
+    absent, present = calls_for(llm, ReportExtraction)
+    assert agent_line not in absent.prompt
+    assert agent_line in present.prompt
+
+
 async def test_final_segments_arriving_while_the_transcript_settles_are_written_up(
     api, app, store, llm, memory
 ):

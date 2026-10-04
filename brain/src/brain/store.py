@@ -181,6 +181,11 @@ class Store(Protocol):
         """Saves the whole meeting, e.g. jira_keys or ended_at."""
         ...
 
+    async def mark_agent_joined(self, meeting_id: str, at: datetime) -> Meeting:
+        """Records that the agent joined the live meeting at `at`, once: a later call keeps the
+        first time. Atomic; Conflict unless the meeting is live."""
+        ...
+
     # transcript and public chat
 
     async def add_segments(self, meeting_id: str, segments: list[TranscriptSegment]) -> None:
@@ -550,6 +555,14 @@ class InMemoryStore:
         self._meeting(meeting.id)
         self._meetings[meeting.id] = _copy(meeting)
         return _copy(meeting)
+
+    async def mark_agent_joined(self, meeting_id: str, at: datetime) -> Meeting:
+        meeting = self._meeting(meeting_id)
+        if meeting.status != "live":
+            raise Conflict(f"meeting {meeting_id} is {meeting.status}")
+        if meeting.agent_joined_at is not None:
+            return _copy(meeting)
+        return self._save_meeting(meeting, agent_joined_at=at)
 
     # transcript and public chat
 

@@ -80,6 +80,8 @@ class FakeBrain:
         self.fact_ticks: list = []
         self.agenda_calls = 0
         self.fact_calls = 0
+        self.joined: list[str] = []
+        self.join_error: Exception | None = None
 
     async def meeting(self, meeting_id: str) -> WorkerMeetingResponse:
         if self.meeting_error:
@@ -96,6 +98,11 @@ class FakeBrain:
             ),
             voice_id=self.voice_id,
         )
+
+    async def agent_joined(self, meeting_id: str) -> None:
+        self.joined.append(meeting_id)
+        if self.join_error:
+            raise self.join_error
 
     async def invoke(self, invocation: Invocation, recent: list[TranscriptSegment]) -> Answer:
         self.invoked.append((invocation, recent))
@@ -623,6 +630,34 @@ async def test_the_agents_own_chat_is_not_forwarded_again(agent, brain):
     )
 
     assert brain.chat == [] and brain.invoked == []
+
+
+# joining
+
+
+async def test_polaris_tells_the_brain_it_joined_once_it_starts(make_agent, brain):
+    make_agent()
+
+    await until(lambda: brain.joined)
+
+    assert brain.joined == [MEETING]
+
+
+@pytest.mark.parametrize(
+    "failure", [BrainUnavailable("down"), BrainRejected(409, "The meeting is processing")]
+)
+async def test_a_failed_join_report_is_logged_and_polaris_keeps_working(
+    make_agent, bus, brain, caplog, failure
+):
+    brain.join_error = failure
+
+    with caplog.at_level(logging.WARNING):
+        agent = make_agent(agenda_tick_seconds=0.01)
+        await until(lambda: brain.joined and bus.on(Topic.AGENDA))
+    await agent.on_invocation(invocation())
+
+    assert "joined" in caplog.text
+    assert brain.invoked and bus.cards()
 
 
 # ticks

@@ -48,6 +48,7 @@ async def build_report(
             labelled=labelled,
             agenda=agenda,
             fact_checks=fact_checks,
+            agent_attended=meeting.agent_attended(),
         ),
         ReportExtraction,
         system=system_prompt(),

@@ -109,10 +109,20 @@ class MeetingAgent:
         self._tasks: set[asyncio.Task[None]] = set()
 
     def start(self) -> None:
+        """Called once the agent is in the room."""
         self.bus.subscribe(Topic.ASK, self.on_ask)
         self.bus.subscribe(Topic.RESPONSE_ACTION, self.on_action)
+        self._spawn(self._say_joined())
         self._spawn(self._every(self._agenda_tick_seconds, self.tick_agenda, "Agenda"))
         self._spawn(self._every(self._fact_check_tick_seconds, self.tick_fact_check, "Fact-check"))
+
+    async def _say_joined(self) -> None:
+        """Lets the brain record that the agent attended. Failing only costs the report the
+        agent's name among those present; the agent keeps working."""
+        try:
+            await self.brain.agent_joined(self.meeting_id)
+        except Exception as e:
+            log.warning("Could not tell the brain the agent joined %s: %s", self.meeting_id, e)
 
     async def aclose(self) -> None:
         for task in [*self._tasks, *self._asking.values()]:

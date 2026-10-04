@@ -58,6 +58,8 @@ class BrainClient(Protocol):
 
     async def meeting(self, meeting_id: str) -> WorkerMeetingResponse: ...
 
+    async def agent_joined(self, meeting_id: str) -> None: ...
+
     async def keyterms(self, meeting_id: str) -> list[str]: ...
 
     async def track_agenda(self, meeting_id: str) -> AgendaTrackResponse: ...
@@ -118,6 +120,10 @@ class HttpBrainClient:
     async def meeting(self, meeting_id: str) -> WorkerMeetingResponse:
         response = await self._request("GET", f"/internal/meetings/{meeting_id}", idempotent=True)
         return WorkerMeetingResponse.model_validate_json(response.content)
+
+    async def agent_joined(self, meeting_id: str) -> None:
+        """Retried: the brain keeps the first join time, so a resend changes nothing."""
+        await self._post(f"/internal/meetings/{meeting_id}/agent-joined", {}, idempotent=True)
 
     async def keyterms(self, meeting_id: str) -> list[str]:
         response = await self._request(
