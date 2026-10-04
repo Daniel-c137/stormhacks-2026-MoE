@@ -16,12 +16,31 @@ def anyio_backend():
 
 
 class FakeJira:
-    """Stand-in for the Jira MCP server's createJiraIssue. A summary starting with FAIL is
-    rejected the way Jira rejects an invalid field."""
+    """Stand-in for the Jira MCP server's createJiraIssue and searchJiraIssuesUsingJql. A summary
+    starting with FAIL is rejected the way Jira rejects an invalid field. Searches return
+    `issues` (in Atlassian's shape) or fail with `search_error`."""
 
     def __init__(self, first_number: int = 117):
         self.created: list[dict[str, Any]] = []
+        self.issues: list[dict[str, Any]] = []
+        self.searches: list[dict[str, Any]] = []
+        self.search_error: str | None = None
         self.server = MCPServer("jira")
+
+        @self.server.tool()
+        def searchJiraIssuesUsingJql(
+            cloudId: str,
+            jql: str,
+            fields: list[str] | None = None,
+            maxResults: int | None = None,
+            nextPageToken: str | None = None,
+        ) -> dict[str, Any]:
+            self.searches.append(
+                {"cloudId": cloudId, "jql": jql, "fields": fields, "maxResults": maxResults}
+            )
+            if self.search_error:
+                raise ToolError(self.search_error)
+            return {"issues": self.issues[: maxResults or None], "isLast": True}
 
         @self.server.tool()
         def createJiraIssue(
