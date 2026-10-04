@@ -385,8 +385,9 @@ async def test_the_transcript_and_report_are_indexed_into_memory(api, memory):
 
     mine = [h.chunk for h in hits if h.chunk.meeting_id == meeting["id"]]
     assert {c.kind for c in mine} == {"transcript", "summary", "decision", "task"}
-    turns = [c for c in mine if c.kind == "transcript"]
-    assert turns[0].speaker_id == SARAH.id
+    (window,) = [c for c in mine if c.kind == "transcript"]
+    assert f"{SARAH.name}: The fix is merged." in window.text.splitlines()[1]
+    assert window.speaker_id is None  # two people speak in it
 
 
 async def test_the_agents_own_words_are_left_out_of_memory(api, memory):
@@ -722,10 +723,10 @@ async def test_a_failed_save_leaves_no_report_links_or_memory_and_a_retry_links_
     assert decisions["d-send"]["relation"] == {"type": "superseded_by", "decision_id": new_id}
     assert decisions[new_id]["relation"] == {"type": "contradicts", "decision_id": "d-send"}
     assert len((await api.get("/tasks")).json()) == 1
-    # three turns, the summary, one decision and one task, each once
+    # the three turns' window, the summary, one decision and one task, each once
     mine = [h.chunk for h in await memory.search(TEAM.id, "refund", k=100)]
     assert sorted(c.kind for c in mine if c.meeting_id == meeting["id"]) == sorted(
-        ["transcript"] * 3 + ["summary", "decision", "task"]
+        ["transcript", "summary", "decision", "task"]
     )
 
 

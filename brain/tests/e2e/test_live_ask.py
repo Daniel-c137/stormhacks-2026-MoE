@@ -32,13 +32,14 @@ pytestmark = [
 
 
 async def indexed_standup():
-    """The standup as a meeting of a live team, indexed with real Gemini embeddings."""
+    """The standup as a meeting of a live team, stored and indexed with real Gemini embeddings."""
     standup = TranscriptInput.model_validate_json((FIXTURES / "standup.json").read_text())
     people = standup.members
     team = Team(id="t-live", name="Dropsubs", member_ids=[p.id for p in people])
     store = InMemoryStore(teams=[team], people=people)
     meeting = await store.create_meeting(team.id, standup.title, people[0].id)
     segments = [s.model_copy(update={"meeting_id": meeting.id}) for s in standup.segments]
+    await store.add_segments(meeting.id, segments)
     embedder = make_embedder(settings)
     assert isinstance(embedder, GeminiEmbedder)
     memory = MeetingMemory(embedder, InMemoryMemoryStore(dim=embedder.dim))

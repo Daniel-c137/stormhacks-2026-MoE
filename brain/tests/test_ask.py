@@ -21,6 +21,7 @@ from brain.agent.ask import (
     Question,
     ToolOrchestrator,
 )
+from brain.agent.team_tools import MEMORY_FINDINGS, TeamToolbox
 from brain.config import Settings
 from brain.integrations import McpReader, ToolRefused
 from brain.llm import MockEmbedder, MockLLM
@@ -28,6 +29,7 @@ from brain.memory import InMemoryMemoryStore, MeetingMemory
 from brain.report import TranscriptInput
 from brain.store import InMemoryStore
 from contracts import (
+    AGENT_PARTICIPANT_ID,
     AskTurn,
     Decision,
     GitHubSettings,
@@ -69,10 +71,11 @@ def memory() -> MeetingMemory:
 
 
 async def standup(store, memory, team_id: str = TEAM.id, title: str = "Friday standup"):
-    """The standup fixture as a meeting of `team_id`, indexed in memory."""
+    """The standup fixture as a meeting of `team_id`, its transcript stored and indexed."""
     host = ALEX.id if team_id == TEAM.id else OUTSIDER.id
     meeting = await store.create_meeting(team_id, title, host)
     segments = [s.model_copy(update={"meeting_id": meeting.id}) for s in STANDUP.segments]
+    await store.add_segments(meeting.id, segments)
     await memory.index_meeting(team_id, meeting.id, segments)
     return meeting
 
@@ -121,6 +124,59 @@ async def test_prompts_name_the_agent_from_the_identity_file(store, settings, me
 
     agent = get_identity().agent_name
     assert all(agent in call.system for call in llm.calls)
+
+
+def toolbox(store, memory) -> TeamToolbox:
+    return TeamToolbox(
+        TEAM.id, ALEX.id, store, members=[ALEX, SARAH], memory=memory, jira="off", github="off"
+    )
+
+
+async def test_a_window_found_in_memory_shows_each_turn_at_its_own_moment(store, memory):
+    meeting = await standup(store, memory)
+
+    result = await toolbox(store, memory).call("search_meetings", {"query": "waitlist email"})
+
+    assert result.ok
+    people = [s for s in STANDUP.segments if s.speaker_id != AGENT_PARTICIPANT_ID]
+    assert [(f.text, f.source.t, f.source.meeting_id) for f in result.content] == [
+        (f"{s.speaker_name}: {s.text}", s.t_start, meeting.id) for s in people
+    ]
+
+
+async def test_a_window_whose_transcript_is_gone_is_shown_whole_at_its_start(store, memory):
+    meeting = await standup(store, memory)
+    await store.delete_transcript(meeting.id, datetime.now(UTC))
+
+    result = await toolbox(store, memory).call("search_meetings", {"query": "waitlist email"})
+
+    (window,) = result.content
+    assert window.text.startswith("Alice Moreau: Morning everyone")
+    assert "Alice Moreau: Then we hold the waitlist email" in window.text
+    assert window.source.t == 0
+
+
+async def test_a_meeting_search_shows_at_most_a_bounded_number_of_turns(store, memory):
+    meeting = await store.create_meeting(TEAM.id, "Long sync", ALEX.id)
+    segments = [
+        TranscriptSegment(
+            seg_id=f"s{i}",
+            meeting_id=meeting.id,
+            speaker_id=[ALEX, SARAH][i % 2].id,
+            speaker_name=[ALEX, SARAH][i % 2].name,
+            text=f"Refund note {i}.",
+            is_final=True,
+            t_start=i * 5,
+            t_end=i * 5 + 4,
+        )
+        for i in range(200)
+    ]
+    await store.add_segments(meeting.id, segments)
+    await memory.index_meeting(TEAM.id, meeting.id, segments)
+
+    result = await toolbox(store, memory).call("search_meetings", {"query": "refund"})
+
+    assert len(result.content) == MEMORY_FINDINGS
 
 
 async def test_a_hallucinated_evidence_id_is_dropped(store, settings, memory):

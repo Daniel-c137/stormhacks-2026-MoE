@@ -14,7 +14,8 @@ from brain.agent.pipeline import REPORT_STEPS
 from brain.config import Settings as BrainSettings
 from brain.db import migrate, open_pool
 from brain.llm import LLMError, MockEmbedder, MockLLM, make_embedder, make_llm
-from brain.memory import InMemoryMemoryStore, MeetingMemory, PgMemoryStore
+from brain.memory import InMemoryMemoryStore, MeetingMemory, PgMemoryStore, chunk_transcript
+from brain.memory.chunking import MAX_CHUNK_CHARS
 from brain.pg_store import PostgresStore
 from brain.report import ExtractedDecision, ExtractedTask, ReportExtraction
 from brain.report.decisions import DecisionVerdict, DecisionVerdicts
@@ -97,6 +98,20 @@ def test_a_meeting_keeps_its_real_times_and_lines():
     opening = first.segments[0]
     assert (opening.speaker_id, opening.text) == ("p-danial", "Morning. Can everyone hear me?")
     assert (opening.t_start, opening.t_end) == (3.0, 6.0)  # [00:00:03], next line [00:00:06]
+
+
+def test_an_hour_long_meeting_is_a_few_dozen_memory_chunks():
+    """#90: windows of turns, not a chunk per turn, so the demo's meetings fit in a day of the
+    free embedding tier. One chunk per turn made 336 here."""
+    first = load_meeting(MEETINGS_DIR / "2026-09-23.md")
+
+    chunks = chunk_transcript(TEAM, first.id, first.segments)
+
+    assert len(first.segments) == 342
+    assert len(chunks) == 35
+    assert all(len(c.text) <= MAX_CHUNK_CHARS for c in chunks)
+    names = {p.name for p in first.participants}
+    assert all(line.split(": ")[0] in names for c in chunks for line in c.text.splitlines())
 
 
 FRONT = """---
@@ -593,7 +608,7 @@ settings = BrainSettings()
 )
 async def test_the_earliest_meeting_is_written_up_by_the_real_models():
     store = InMemoryStore()
-    # Gemini's free tier counts each embedded text against 100 a minute; a meeting has ~350.
+    # Gemini's free tier counts each embedded text against 100 a minute; a meeting has ~50.
     embedder = PacedEmbedder(make_embedder(settings), per_minute=90)
     memory = MeetingMemory(embedder, InMemoryMemoryStore(dim=settings.gemini_embedding_dim))
 
