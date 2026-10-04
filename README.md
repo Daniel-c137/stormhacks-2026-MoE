@@ -84,12 +84,14 @@ uv run brain add-team --id <team-id> --name "<team name>"
 uv run brain add-user --team <team-id> --name "<full name>" --email <email>
 ```
 
-The demo seed arrives with #82 (re-check these once it merges):
+The demo seed loads the DropSubs team, its settings and its past meetings (written up by the real models) and gives each person a login with their seeded email. `WORLD_SEED_PASSWORD` sets one demo password for everyone; otherwise each person gets a generated one, printed once. Running it again skips what's already there.
 
 ```sh
-uv run world-seed --snapshot demo                   # the DropSubs team, settings and past meetings
-uv run world-seed --snapshot demo --reset           # remove the seeded team first
+uv run world-seed --snapshot demo                   # the DropSubs team, logins, settings and past meetings
+uv run world-seed --snapshot demo --reset           # remove the seeded team first (logins are kept)
 ```
+
+On Gemini's free tier, set `WORLD_SEED_EMBEDS_PER_MINUTE=90`. The free tier also allows only 1,000 embedded texts a day, which today's chunking uses up after one or two past meetings (#90); a re-run the next day carries on where the last one stopped.
 
 ## Deploying to a server
 
@@ -111,7 +113,7 @@ One machine with Docker runs everything from [`docker-compose.yml`](docker-compo
    docker compose --env-file deploy/.env exec brain brain add-team --id <team-id> --name "<team name>"
    docker compose --env-file deploy/.env exec brain brain add-user --team <team-id> --name "<full name>" --email <email>
    ```
-   Or load the demo instead (from #82; the brain image includes the world CLIs):
+   Or load the demo instead; it creates the DropSubs people with logins (the brain image includes the world CLIs):
    ```sh
    docker compose --env-file deploy/.env exec brain world-seed --snapshot demo
    ```
