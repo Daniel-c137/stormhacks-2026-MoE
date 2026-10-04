@@ -20,6 +20,10 @@ class AgendaItem(BaseModel):
     # Timekeeping during the meeting; times are seconds from the meeting start.
     discussed_s: float = Field(default=0, ge=0)  # talk time attributed to this item so far
     nudged_t: float | None = None  # when the agent nudged that it had not come up; once at most
+    # The end of the last thing said about it, as the tracker labelled it. None until it comes
+    # up, and again once a person reopens it: the tracker only covers an item that has come up
+    # since.
+    last_discussed_t: float | None = None
     # Who marked it covered: a person id, or AGENT_PARTICIPANT_ID when the tracker did. None
     # while it is not covered. covered_t is when: for the tracker, when the item's discussion
     # ended (not when it noticed); for a person, when they ticked it. None if the meeting had
@@ -34,7 +38,7 @@ class Agenda(BaseModel):
     generated_at: datetime
     updated_at: datetime | None = None  # last human edit
     current_item_id: str | None = None  # being discussed now; None when off the agenda
-    tracked_until: float | None = None  # transcript seconds tracked so far; None before any
+    tracked_until: float | None = None  # end of the last caption tracked; None before any
     revision: int = Field(default=0, ge=0)  # bumped by every save; 0 until first saved
 
 
