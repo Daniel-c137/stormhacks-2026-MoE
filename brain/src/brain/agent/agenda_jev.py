@@ -1,9 +1,10 @@
 """Labelling the live transcript against the agenda with Jev (JEV_MODEL), in place of Gemini.
 
 One request per stretch asks which agenda item each new line is about (a choice among the items'
-labels and "none") and, for each pending item, how likely its discussion is over by the end of
-the stretch (a noul). The lines just before the stretch are given as context. A long backlog is
-asked about in parts of JEV_MAX_LINES lines, each part seeing the lines before it.
+labels, "other" for the team's work off the agenda and "none" for small talk) and, for each
+pending item, how likely its discussion is over by the end of the stretch (a noul). The lines just
+before the stretch are given as context. A long backlog is asked about in parts of JEV_MAX_LINES
+lines, each part seeing the lines before it.
 
 timekeeping.track_agenda decides what the answers change, exactly as it does with Gemini's.
 """
@@ -15,19 +16,23 @@ from contracts import AgendaItem, TranscriptSegment
 
 from .ask import clip
 
-NO_ITEM = "none"  # timekeeping's label for talk about no agenda item
+NO_ITEM = "none"  # timekeeping's label for talk about no agenda item: here, small talk
+OTHER = "other"  # the team's work, off the agenda: about no item, but not small talk either
 JEV_MAX_LINES = 40  # new lines per request; Jev answered 88 questions in one in 350 ms
 CONTEXT_LINES = 12  # lines before a part, given as context
-# How likely an item must be over for it to be ticked. Jev put a decision taken mid-discussion
-# ("I'll cut the link today") near 0.5 and a closing line ("That's settled.") at 0.74; a terse
-# "Yes, agreed." at 0.55 is ticked at the next line instead, still timed at its last word.
-COVERED_P = 0.65
+# How likely an item must be over for it to be ticked. With OVER's wording Jev put work still
+# planned or in progress ("I'll cut the link today") at 0.25 or less, and reported results and
+# closing lines at 0.6 to 0.95; a terse "Yes, agreed." can fall short and is then ticked at the
+# next line, still timed at its last word.
+COVERED_P = 0.5
 
 OVER = {
-    "true": "It was decided or answered, someone said it is done or closed, or it was really "
-    "discussed and the talk has now moved on to another agenda item.",
-    "false": "It is still being weighed, only a side point was settled, it was only named in "
-    "passing or put off for later, or nobody discussed it.",
+    "true": "It was decided or answered, someone reported it done or gave its result, someone "
+    "said it is closed, or it was really discussed and the talk has now moved on to another "
+    "topic.",
+    "false": "It is still being weighed, work on it is still in progress or only planned, only a "
+    "side point was settled, it was only named in passing or put off for later, or nobody "
+    "discussed it.",
 }
 
 
@@ -46,8 +51,8 @@ async def jev_labels(
     segments: Sequence[TranscriptSegment],
     earlier: Sequence[TranscriptSegment] = (),
 ) -> tuple[list[str], set[str]]:
-    """Each segment's label ("a1", ..., or "none"), and the labels of the pending items Jev
-    finds over. `current` is the label of the item being discussed before the stretch."""
+    """Each segment's label ("a1", ..., "other" or "none"), and the labels of the pending items
+    Jev finds over. `current` is the label of the item being discussed before the stretch."""
     pending = [label for label, item in labels.items() if item.status == "pending"]
     about: list[str] = []
     over: set[str] = set()
@@ -62,7 +67,7 @@ async def jev_labels(
         about += said
         over |= {label for label in pending if answers[f"closed_{label}"]["noul"] >= COVERED_P}
         context += part
-        current = next((label for label in reversed(said) if label != NO_ITEM), current)
+        current = said[-1] if said[-1] in labels else NO_ITEM  # as timekeeping's `current`
     return about, over
 
 
@@ -84,7 +89,8 @@ def questions(
     labels: Mapping[str, AgendaItem], pending: Sequence[str], lines: int
 ) -> dict[str, dict[str, Any]]:
     options = {label: item.title for label, item in labels.items()}
-    options[NO_ITEM] = "Small talk, setup, or a topic that is not on the agenda."
+    options[OTHER] = "The team's work, but a topic that is not on the agenda."
+    options[NO_ITEM] = "Small talk, greetings, setup or filler: not about the team's work."
     asked: dict[str, dict[str, Any]] = {
         f"about_{n}": {
             "type": "choice",

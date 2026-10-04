@@ -178,7 +178,7 @@ def test_jev_is_asked_about_each_new_line_and_each_pending_item(worker, client_a
     assert sorted(k for k in questions if k.startswith("about_")) == ["about_1", "about_2"]
     for key in ("about_1", "about_2"):
         assert questions[key]["type"] == "choice"
-        assert set(questions[key]["criteria"]) == {"a1", "a2", "a3", "none"}
+        assert set(questions[key]["criteria"]) == {"a1", "a2", "a3", "other", "none"}
     assert "Waitlist email" in questions["about_1"]["criteria"]["a1"]
     assert sorted(k for k in questions if k.startswith("closed_")) == ["closed_a1", "closed_a2"]
     assert questions["closed_a1"]["type"] == "noul"
@@ -264,6 +264,75 @@ def test_small_talk_after_an_item_does_not_tick_it(worker, client_as, store, jev
     tracked(worker, meeting, now=40)
     ingest(worker, meeting, said(meeting, 2, "Did anyone watch the game last night?", 41, 44))
     jev.says("none", closed={"a1": 0.75})
+
+    body = tracked(worker, meeting, now=50)
+
+    assert by_id(body["agenda"])[waitlist]["status"] == "pending"
+
+
+def test_moving_on_to_work_off_the_agenda_ticks_the_item(worker, client_as, store, jev):
+    """Off-agenda work is not small talk: leaving an item for it finishes the item."""
+    meeting, (waitlist, *_) = standup(store, client_as)
+    ingest(worker, meeting, said(meeting, 1, "The waitlist email draft is ready", 0, 30))
+    jev.says("a1")
+    tracked(worker, meeting, now=40)
+    ingest(worker, meeting, said(meeting, 2, "Also, we need to pick a NoSQL database", 41, 44))
+    jev.says("other", closed={"a1": 0.75})
+
+    body = tracked(worker, meeting, now=50)
+
+    items = by_id(body["agenda"])
+    assert covered_by(items[waitlist]) == (AGENT_PARTICIPANT_ID, 30)
+    assert body["agenda"]["current_item_id"] is None  # nothing on the agenda is being discussed
+
+
+def test_off_agenda_work_after_an_item_leaves_no_item_being_discussed(
+    worker, client_as, store, jev
+):
+    """The last line decides what is being discussed: off-agenda work is no agenda item, so the
+    pause before the next line is not the item's either."""
+    meeting, (waitlist, *_) = standup(store, client_as)
+    ingest(
+        worker,
+        meeting,
+        said(meeting, 1, "The waitlist email draft is ready", 0, 10),
+        said(meeting, 2, "Also, we need to pick a NoSQL database", 12, 16),
+    )
+    jev.says("a1", "other")
+    first = tracked(worker, meeting, now=30)
+    ingest(worker, meeting, said(meeting, 3, "Mongo is what the data team uses", 26, 30))
+    jev.says("other")
+
+    body = tracked(worker, meeting, now=40)
+
+    assert first["agenda"]["current_item_id"] is None
+    assert by_id(body["agenda"])[waitlist]["discussed_s"] == 12  # its line and the pause after
+    assert jev.calls[-1][0]["being_discussed_before"] == "none"
+
+
+def test_a_part_ending_on_off_agenda_work_hands_on_no_item(worker, client_as, store, jev):
+    meeting, _ = standup(store, client_as)
+    ingest(
+        worker,
+        meeting,
+        *(said(meeting, n, f"Line {n}", 2 * n, 2 * n + 1) for n in range(JEV_MAX_LINES + 1)),
+    )
+    jev.says("a1", "other").says("a2")
+
+    tracked(worker, meeting, now=2 * JEV_MAX_LINES + 10)
+
+    first, second = jev.calls
+    assert first[0]["being_discussed_before"] == "none"
+    assert second[0]["being_discussed_before"] == "none"  # part one ended on other work
+
+
+def test_a_label_not_on_the_agenda_is_not_work(worker, client_as, store, jev):
+    meeting, (waitlist, *_) = standup(store, client_as)
+    ingest(worker, meeting, said(meeting, 1, "The waitlist email draft is ready", 0, 30))
+    jev.says("a1")
+    tracked(worker, meeting, now=40)
+    ingest(worker, meeting, said(meeting, 2, "Something", 41, 44))
+    jev.says("a9", closed={"a1": 0.9})
 
     body = tracked(worker, meeting, now=50)
 
