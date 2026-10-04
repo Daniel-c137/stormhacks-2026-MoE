@@ -7,13 +7,20 @@ from typing import NoReturn
 import httpx
 from fastapi import Depends, Header, HTTPException, Request
 
-from contracts import Meeting, Person, Team
+from contracts import Answer, Meeting, Person, Team
 
+from ..agent.ask import (
+    MAX_HISTORY_TURNS,
+    MAX_QUESTION_CHARS,
+    MAX_TURN_CHARS,
+    Question,
+    ToolOrchestrator,
+)
 from ..agent.pipeline import PipelineRunner, PostMeetingPipeline, ReportPipeline
 from ..auth import AuthNotConfigured, InvalidToken, KeysUnavailable, TokenVerifier
 from ..config import Settings
 from ..jira import JiraPusher, jira_config
-from ..llm import LLM, LLMUnavailable, make_embedder, make_llm
+from ..llm import LLM, LLMError, LLMUnavailable, make_embedder, make_llm
 from ..memory import MeetingMemory, PgMemoryStore
 from ..store import NotFound, Store
 
@@ -72,6 +79,16 @@ def get_memory(
     except ValueError as e:  # embedding dimensions the table cannot hold
         logger.warning("meeting memory is unavailable: %s", e)
         return None
+
+
+def get_orchestrator(
+    llm: LLM = Depends(get_llm),
+    store: Store = Depends(get_store),
+    memory: MeetingMemory | None = Depends(get_memory),
+    settings: Settings = Depends(get_settings),
+) -> ToolOrchestrator:
+    """The agent for deliberate questions. Read-only; GitHub and Jira when configured."""
+    return ToolOrchestrator(llm, store, settings=settings, memory=memory)
 
 
 def get_pipeline(
@@ -175,3 +192,22 @@ async def team_meeting(store: Store, user: Person, meeting_id: str) -> Meeting:
     if meeting is None or meeting.team_id != team.id:
         raise HTTPException(status_code=404, detail="Meeting not found")
     return meeting
+
+
+async def ask_agent(orchestrator: ToolOrchestrator, question: Question) -> Answer:
+    """The agent's answer; 422 for an oversized question or history, 502 when the model fails.
+    Nothing about the question is kept."""
+    if len(question.text) > MAX_QUESTION_CHARS:
+        raise HTTPException(
+            status_code=422, detail=f"Questions are at most {MAX_QUESTION_CHARS} characters"
+        )
+    if len(question.history) > MAX_HISTORY_TURNS:
+        raise HTTPException(status_code=422, detail=f"History is at most {MAX_HISTORY_TURNS} turns")
+    if any(len(turn.text) > MAX_TURN_CHARS for turn in question.history):
+        raise HTTPException(
+            status_code=422, detail=f"History turns are at most {MAX_TURN_CHARS} characters"
+        )
+    try:
+        return await orchestrator.ask(question)
+    except LLMError as e:
+        raise HTTPException(status_code=502, detail=f"Could not answer: {e}") from e

@@ -16,6 +16,7 @@ from contracts import (
     SegmentsIngest,
 )
 
+from ..agent.ask import Question, ToolOrchestrator
 from ..agent.timekeeping import (
     NOW_SLACK_S,
     ClassificationFailed,
@@ -24,7 +25,14 @@ from ..agent.timekeeping import (
 )
 from ..llm import LLM, LLMUnavailable
 from ..store import Conflict, NotFound, Store
-from .deps import get_llm_factory, get_store, not_implemented, require_internal
+from .deps import (
+    ask_agent,
+    get_llm_factory,
+    get_orchestrator,
+    get_store,
+    not_implemented,
+    require_internal,
+)
 
 router = APIRouter(prefix="/internal", tags=["internal"], dependencies=[Depends(require_internal)])
 
@@ -58,9 +66,35 @@ async def ingest_public_chat(meeting_id: str, body: ChatMessage) -> None:
 
 
 @router.post("/meetings/{meeting_id}/invoke")
-async def invoke(meeting_id: str, body: InvokeRequest) -> InvokeResponse:
-    """A voice question, follow-up or @mention. The caller routes the answer by its visibility."""
-    not_implemented()
+async def invoke(
+    meeting_id: str,
+    body: InvokeRequest,
+    store: Store = Depends(get_store),
+    orchestrator: ToolOrchestrator = Depends(get_orchestrator),
+) -> InvokeResponse:
+    """A voice question, follow-up or @mention, answered for the meeting's team with the recent
+    final segments as context. The worker routes the answer by the invocation's visibility: a
+    public one to the room, a private one only to the asker. Nothing is stored."""
+    try:
+        meeting = await store.meeting(meeting_id)
+    except NotFound:
+        raise HTTPException(status_code=404, detail="Meeting not found") from None
+    invocation = body.invocation
+    if invocation.meeting_id != meeting.id:
+        raise HTTPException(status_code=422, detail="The invocation belongs to another meeting")
+    if any(s.meeting_id != meeting.id for s in body.recent_segments):
+        raise HTTPException(status_code=422, detail="Segment belongs to another meeting")
+    question = Question(
+        id=invocation.id,
+        team_id=meeting.team_id,
+        text=invocation.question,
+        asker_id=invocation.asked_by_id,
+        asker_name=invocation.asked_by_name,
+        visibility=invocation.visibility,
+        meeting_id=meeting.id,
+        recent=body.recent_segments,
+    )
+    return InvokeResponse(answer=await ask_agent(orchestrator, question))
 
 
 def agenda_lock(request: Request, meeting_id: str) -> asyncio.Lock:
