@@ -303,7 +303,7 @@ async def test_speaking_in_two_sessions_saves_both_utterances_in_the_real_brain(
 ):
     """Mute and unmute starts a new stream. Its ids must not collide with the first one's,
     or the brain's dedup would drop the new words."""
-    from brain.api.deps import app_settings, get_store
+    from brain.api.deps import get_settings, get_store
     from brain.config import Settings as BrainSettings
     from brain.main import create_app
     from brain.store import InMemoryStore
@@ -315,7 +315,7 @@ async def test_speaking_in_two_sessions_saves_both_utterances_in_the_real_brain(
     await store.add_participant(meeting.id, "u-sarah")
     app = create_app()
     app.dependency_overrides[get_store] = lambda: store
-    app.dependency_overrides[app_settings] = lambda: BrainSettings(
+    app.dependency_overrides[get_settings] = lambda: BrainSettings(
         _env_file=None, brain_internal_token=token
     )
     brain = HttpBrainClient("http://brain.test", token, transport=httpx.ASGITransport(app=app))
