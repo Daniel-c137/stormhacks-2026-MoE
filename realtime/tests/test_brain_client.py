@@ -14,7 +14,7 @@ from realtime_worker.config import Settings
 
 pytestmark = pytest.mark.anyio
 
-TOKEN = "worker-shared-secret"
+TOKEN = "worker-shared-secret-0123456789abcdef"
 
 
 def seg(meeting_id: str, n: int) -> TranscriptSegment:
@@ -115,7 +115,7 @@ def test_missing_brain_settings_are_reported_not_guessed():
 
 
 async def test_segments_land_in_the_real_brain_transcript():
-    from brain.api.deps import get_settings, get_store
+    from brain.api.deps import app_settings, get_store
     from brain.config import Settings as BrainSettings
     from brain.main import create_app
     from brain.store import InMemoryStore
@@ -123,9 +123,10 @@ async def test_segments_land_in_the_real_brain_transcript():
 
     store = InMemoryStore(teams=[Team(id="t-1", name="Checkout", member_ids=["u-alex"])], people=[])
     meeting = await store.create_meeting("t-1", "Standup", host_id="u-alex")
+    await store.add_participant(meeting.id, "u-alex")  # joined through the link
     app = create_app()
     app.dependency_overrides[get_store] = lambda: store
-    app.dependency_overrides[get_settings] = lambda: BrainSettings(
+    app.dependency_overrides[app_settings] = lambda: BrainSettings(
         _env_file=None, brain_internal_token=TOKEN
     )
     brain = HttpBrainClient(
