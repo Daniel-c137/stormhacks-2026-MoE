@@ -13,6 +13,12 @@ from world.github_mcp import server
 
 pytestmark = pytest.mark.anyio
 
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
 OWNER, REPO = world_spec().github_repo.split("/")
 FEES = "api/billing/fees.py"
 

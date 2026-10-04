@@ -58,4 +58,4 @@ async def test_gemini_answers_the_refund_window_with_a_snippet_from_the_file():
         f"https://github.com/dropsubs/app/blob/{MAIN_SHA}/api/billing/refunds.py#L"
     )
     assert any(s.kind == "github_code" and s.url == snippet.github_url for s in answer.sources)
-    assert "30" in answer.text
+    assert "30" in answer.text or "thirty" in answer.text.lower()  # answers read aloud
