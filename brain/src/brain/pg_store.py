@@ -148,6 +148,13 @@ class PostgresStore:
         async with self._tx() as cur:
             return await self._team(cur, team_id)
 
+    async def delete_team(self, team_id: str) -> None:
+        async with self._tx() as cur:
+            # Memberships, settings and meetings cascade, and everything under the meetings.
+            row = await self._one(cur, "delete from teams where id = %s returning id", [team_id])
+        if row is None:
+            raise NotFound(f"team {team_id}")
+
     async def team_for_user(self, user_id: str) -> Team:
         async with self._tx() as cur:
             row = await self._one(

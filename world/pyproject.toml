@@ -5,8 +5,10 @@ description = "Demo world: generated GitHub/Jira snapshots, past meetings and mo
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "moe-contracts",
+    "moe-brain",
     "mcp",
     "pydantic-settings",
+    "pyyaml",
 ]
 
 [project.scripts]
@@ -18,6 +20,7 @@ world-seed = "world.seed:main"
 
 [tool.uv.sources]
 moe-contracts = { workspace = true }
+moe-brain = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
