@@ -38,3 +38,6 @@ backups/
 
 # Local Claude Code state
 .claude/
+
+# Demo-day scripts (kept local)
+demo-script/
