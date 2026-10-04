@@ -244,7 +244,11 @@ async def seed_meeting(
         progress = await store.report_progress(meeting.id)
         if progress is None or progress.steps[INDEX] != REPORT_STEPS[INDEX]:
             step = progress.steps[INDEX] if progress else "no progress saved"
-            raise SeedError(f"{describe(result)}: the write-up could not index it: {step}")
+            by = ", ".join(log.models) or "no model"
+            raise SeedError(
+                f"{describe(result)}: the report by {by} was saved, but the write-up could not"
+                f" index it: {step}. Run world-seed again to index it."
+            )
     elif meeting.status == "needs_review":
         await index_again(store, memory, meeting)
     # The host's review: the drafts are kept as written and nothing is pushed anywhere.
