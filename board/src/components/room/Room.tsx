@@ -2,6 +2,7 @@
 
 import {
   AGENT_PARTICIPANT_ID,
+  type AgendaItem,
   type CodeSnippet,
   type JoinMeetingResponse,
   type Meeting,
@@ -37,6 +38,7 @@ import {
 import { askInMeeting, describeError, endMeeting } from "@/lib/api";
 import { initialsOf, shortOf } from "@/lib/format";
 import { publish } from "@/lib/room";
+import { AgendaTracker } from "./AgendaTracker";
 import { AgentPresence } from "./AgentPresence";
 import { CodeStage } from "./CodeStage";
 import type { DeviceChoices } from "./Lobby";
@@ -166,7 +168,7 @@ function RoomView({
   const publicChat = useChat(meeting.id);
   const privateChat = usePrivateChat();
   const { stage, setStage } = useStage();
-  const agenda = useAgenda(meeting.id);
+  const agenda = useAgenda(meeting.id, me.id, meeting.started_at);
   const { nudges, dismiss: dismissNudge } = useAgendaNudges(meeting.id);
 
   const [chatOpen, setChatOpen] = useState(true);
@@ -371,6 +373,14 @@ function RoomView({
     }
   };
 
+  // ---- the agenda: anyone can tick an item or untick it, and undo the agent's call
+  const checkItem = (item: Pick<AgendaItem, "id">, covered: boolean) => {
+    agenda
+      .setStatus(item.id, covered ? "covered" : "pending")
+      .catch((err: unknown) => setToast(`The agenda wasn't updated. ${describeError(err)}`));
+  };
+  const shortName = (id: string) => (id === me.id ? me.short : (members.find((m) => m.id === id)?.short ?? null));
+
   // ---- controls
   const toggleHand = () => {
     room.localParticipant
@@ -407,16 +417,22 @@ function RoomView({
     <div className="room">
       <div className="fx-main">
         <header className="fx-top">
-          <div className="fx-pill fx-id">
-            <span className="mark-slot">
-              <Mark size={26} />
-            </span>
-            <span className="fx-divider" aria-hidden="true" />
-            <h1 className="room-name">{meeting.title}</h1>
-            <button type="button" className="code-chip" onClick={copyLink} aria-label={`Meeting code ${meeting.code}. Copy the link`} title="Copy meeting link">
-              {copied ? "Link copied" : meeting.code}
-              <Icon name={copied ? "check" : "copy"} />
-            </button>
+          <div className="fx-left">
+            <div className="fx-pill fx-id">
+              <span className="mark-slot">
+                <Mark size={26} />
+              </span>
+              <span className="fx-divider" aria-hidden="true" />
+              <h1 className="room-name">{meeting.title}</h1>
+            </div>
+            <AgendaTracker
+              agenda={agenda.agenda}
+              error={agenda.error}
+              meId={me.id}
+              startedAt={meeting.started_at}
+              nameOf={shortName}
+              onCheck={checkItem}
+            />
           </div>
           <div className="fx-pill fx-atlas">
             {card ? (
@@ -476,37 +492,33 @@ function RoomView({
           )}
         </section>
 
-        {nudges.length > 0 && (
-          <div className="room-notes">
-            {nudges.map((n) => (
-              <div key={n.key} className="nudge" role="status">
-                <Icon name="clock" />
-                <span>{n.text}</span>
-                <button type="button" className="icon-btn sm" onClick={() => dismissNudge(n.key)} aria-label="Dismiss this reminder">
-                  <Icon name="x" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
         {toast && (
           <p className="room-toast" role="status">
             {toast}
           </p>
         )}
-        <MeetingControls
-          isHost={isHost}
-          handUp={handUp}
-          captionsOn={captionsOn}
-          chatOpen={chatOpen}
-          ending={ending}
-          onToggleHand={toggleHand}
-          onToggleCaptions={() => setCaptionsOn((on) => !on)}
-          onToggleChat={() => setChatOpen((open) => !open)}
-          onLeave={() => void room.disconnect()}
-          onEnd={() => void end()}
-          onError={setToast}
-        />
+        {/* One row: the meeting code at the left, the controls in the middle. */}
+        <div className="fx-bottom">
+          <div className="fx-code">
+            <button type="button" className="code-chip" onClick={copyLink} aria-label={`Meeting code ${meeting.code}. Copy the link`} title="Copy meeting link">
+              <span>{copied ? "Link copied" : meeting.code}</span>
+              <Icon name={copied ? "check" : "copy"} />
+            </button>
+          </div>
+          <MeetingControls
+            isHost={isHost}
+            handUp={handUp}
+            captionsOn={captionsOn}
+            chatOpen={chatOpen}
+            ending={ending}
+            onToggleHand={toggleHand}
+            onToggleCaptions={() => setCaptionsOn((on) => !on)}
+            onToggleChat={() => setChatOpen((open) => !open)}
+            onLeave={() => void room.disconnect()}
+            onEnd={() => void end()}
+            onError={setToast}
+          />
+        </div>
       </div>
       {chatOpen && (
         <SidePanel
@@ -516,11 +528,48 @@ function RoomView({
           personOf={personOf}
           agentTyping={privateAsks > 0 || awaitingMention}
           error={chatError}
-          agenda={agenda.agenda}
-          agendaError={agenda.error}
           onSend={onSend}
           onClose={() => setChatOpen(false)}
         />
+      )}
+      {/* What the agent has to say about the agenda, sliding in at the top right of the page. */}
+      {(agenda.notices.length > 0 || nudges.length > 0) && (
+        <div className="room-notes" data-chat={chatOpen}>
+          {agenda.notices.map((n) => (
+            <div key={n.key} className="note" role="status" data-leaving={n.leaving}>
+              <span className="note-ic" aria-hidden="true">
+                <Icon name="check" />
+              </span>
+              <div className="note-main">
+                <span className="note-kind">Agenda item covered</span>
+                <b className="note-title">{n.title}</b>
+              </div>
+              <button
+                type="button"
+                className="note-undo"
+                onClick={() => {
+                  checkItem({ id: n.item_id }, false);
+                  agenda.dismissNotice(n.key);
+                }}
+              >
+                <Icon name="undo-2" />
+                Undo
+              </button>
+              <button type="button" className="icon-btn sm" onClick={() => agenda.dismissNotice(n.key)} aria-label="Dismiss">
+                <Icon name="x" />
+              </button>
+            </div>
+          ))}
+          {nudges.map((n) => (
+            <div key={n.key} className="nudge" role="status">
+              <Icon name="clock" />
+              <span>{n.text}</span>
+              <button type="button" className="icon-btn sm" onClick={() => dismissNudge(n.key)} aria-label="Dismiss this reminder">
+                <Icon name="x" />
+              </button>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );

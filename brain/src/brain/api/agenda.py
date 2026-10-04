@@ -27,6 +27,7 @@ from ..agent.agenda import (
     suggest_items,
     valid_minutes,
 )
+from ..agent.timekeeping import seconds_since_start
 from ..config import Settings
 from ..jira import JiraError, JiraReader, JiraUnavailable, jira_config
 from ..llm import LLM, LLMError
@@ -89,10 +90,19 @@ async def update_agenda(
         items: list[AgendaItem] = []
         for n, edit in enumerate(body.items):
             changes: dict = {"title": edit.title.strip(), "minutes": edit.minutes}
+            before = existing.get(edit.id) if edit.id else None
             if edit.status is not None:  # e.g. undoing a wrong "covered"
                 changes["status"] = edit.status
-            if edit.id and edit.id in existing:
-                items.append(existing[edit.id].model_copy(update=changes))
+                if edit.status != "covered":
+                    changes |= {"covered_by": None, "covered_t": None}
+                elif before is None or before.status != "covered":  # this person checked it
+                    started = meeting.started_at is not None
+                    changes |= {
+                        "covered_by": user.id,
+                        "covered_t": seconds_since_start(meeting) if started else None,
+                    }
+            if before is not None:
+                items.append(before.model_copy(update=changes))
             else:
                 item_id = new_ids.setdefault(n, uuid4().hex)
                 items.append(AgendaItem(id=item_id, added_by=user.id, **changes))
