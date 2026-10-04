@@ -51,9 +51,9 @@ export function AppHeader() {
                   <b>{me.name}</b>
                   {email && <span>{email}</span>}
                 </div>
-                <Link className="menu-item" role="menuitem" href="/memory" onClick={() => setMenuOpen(false)}>
+                <Link className="menu-item" role="menuitem" href="/tasks" onClick={() => setMenuOpen(false)}>
                   <Icon name="list-checks" />
-                  Decisions &amp; tasks
+                  Tasks
                 </Link>
                 <button type="button" className="menu-item" role="menuitem" onClick={signOut}>
                   <Icon name="log-out" />

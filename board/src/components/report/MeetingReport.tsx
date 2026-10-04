@@ -453,11 +453,13 @@ function ReportView({ meeting, onPushed }: { meeting: Meeting; onPushed: () => v
                                 {d.relation.type === "contradicts" ? "Contradicts a past decision" : "Superseded by a later decision"}
                               </div>
                               {related && <p>“{related.text}”</p>}
-                              <Link className="link" href="/memory">
-                                {[relatedMeeting?.title, relatedStart && fmtDate(relatedStart, true), "see in Decisions"]
-                                  .filter(Boolean)
-                                  .join(" · ")}
-                              </Link>
+                              {related && (
+                                <Link className="link" href={`/meetings/${related.meeting_id}`}>
+                                  {[relatedMeeting?.title ?? "That meeting", relatedStart && fmtDate(relatedStart, true)]
+                                    .filter(Boolean)
+                                    .join(" · ")}
+                                </Link>
+                              )}
                             </div>
                           </div>
                         )}
