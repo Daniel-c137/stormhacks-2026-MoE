@@ -1,9 +1,23 @@
 """The worker's HTTP client for the brain's /internal routes."""
 
+from datetime import UTC, datetime
+
 import httpx
 import pytest
 
-from contracts import Answer, Invocation, TranscriptSegment
+from contracts import (
+    Agenda,
+    AgendaNudge,
+    AgendaTrackResponse,
+    Answer,
+    ChatMessage,
+    FactCheck,
+    FactCheckResponse,
+    Invocation,
+    Meeting,
+    TranscriptSegment,
+    WorkerMeetingResponse,
+)
 from realtime_worker.brain_client import (
     BrainRejected,
     BrainUnavailable,
@@ -209,3 +223,161 @@ async def test_segments_land_in_the_real_brain_transcript():
 
     saved = await store.transcript(meeting.id)
     assert [s.seg_id for s in saved] == [seg(meeting.id, 1).seg_id, seg(meeting.id, 2).seg_id]
+
+
+# what the worker reads when it joins
+
+
+def json_response(model) -> httpx.Response:
+    return httpx.Response(200, json=model.model_dump(mode="json"))
+
+
+def a_meeting(meeting_id: str = "m-1") -> Meeting:
+    return Meeting(
+        id=meeting_id,
+        team_id="t-1",
+        title="Standup",
+        status="live",
+        code="abc-defg-hij",
+        host_id="u-alex",
+        participant_ids=["u-alex"],
+        started_at=datetime(2026, 10, 3, 17, 0, tzinfo=UTC),
+    )
+
+
+async def test_reads_the_meeting_and_the_teams_voice():
+    info = WorkerMeetingResponse(meeting=a_meeting(), voice_id="v-team")
+    recorder = Recorder(500, json_response(info))
+
+    got = await client(recorder).meeting("m-1")
+
+    assert got == info
+    assert [r.method for r in recorder.requests] == ["GET", "GET"]  # a read is retried
+    assert str(recorder.requests[0].url) == "http://brain.test/internal/meetings/m-1"
+    assert recorder.requests[0].headers["X-Internal-Token"] == TOKEN
+
+
+async def test_an_unknown_meeting_is_a_rejection():
+    with pytest.raises(BrainRejected) as caught:
+        await client(Recorder(404)).meeting("not-a-meeting")
+
+    assert caught.value.status == 404
+
+
+async def test_reads_the_keyterms_for_the_meetings_scribe_streams():
+    recorder = Recorder(httpx.Response(200, json={"terms": ["Polaris", "DS-104"]}))
+
+    assert await client(recorder).keyterms("m-1") == ["Polaris", "DS-104"]
+    assert str(recorder.requests[0].url) == "http://brain.test/internal/meetings/m-1/keyterms"
+
+
+# public chat
+
+
+def chat_message(**overrides) -> ChatMessage:
+    return ChatMessage(
+        **{
+            "id": "lk-stream-1",
+            "meeting_id": "m-1",
+            "sender_id": "u-alex",
+            "sender_name": "Alex Chen",
+            "is_agent": False,
+            "text": "@Polaris what's blocking DS-104?",
+            "ts": datetime(2026, 10, 3, 17, 5, tzinfo=UTC),
+        }
+        | overrides
+    )
+
+
+async def test_public_chat_is_posted_and_retried_since_the_brain_keeps_one_copy_per_id():
+    recorder = Recorder(503, 204)
+
+    await client(recorder).ingest_public_chat("m-1", chat_message())
+
+    assert len(recorder.requests) == 2
+    assert str(recorder.requests[0].url) == "http://brain.test/internal/meetings/m-1/chat"
+    body = httpx.Response(200, content=recorder.requests[0].content).json()
+    assert body["id"] == "lk-stream-1"
+
+
+async def test_private_chat_is_never_sent():
+    recorder = Recorder()
+    private = chat_message(text="just between us", visibility="private", recipient_id="u-sarah")
+
+    with pytest.raises(ValueError):
+        await client(recorder).ingest_public_chat("m-1", private)
+    assert recorder.requests == []
+
+
+# ticks
+
+
+def an_agenda() -> Agenda:
+    return Agenda(meeting_id="m-1", items=[], generated_at=datetime(2026, 10, 3, tzinfo=UTC))
+
+
+async def test_an_agenda_tick_posts_and_returns_the_agenda_and_nudges():
+    response = AgendaTrackResponse(
+        agenda=an_agenda(),
+        nudges=[AgendaNudge(meeting_id="m-1", item_id="i-1", text="Refunds hasn't come up")],
+    )
+    recorder = Recorder(json_response(response))
+
+    got = await client(recorder).track_agenda("m-1")
+
+    assert got == response
+    [request] = recorder.requests
+    assert (request.method, str(request.url)) == (
+        "POST",
+        "http://brain.test/internal/meetings/m-1/agenda/track",
+    )
+
+
+@pytest.mark.parametrize("status", [502, 503])
+async def test_an_agenda_tick_whose_model_failed_still_returns_what_to_publish(status):
+    """The brain saved the rule nudges as sent, so the worker must publish them."""
+    body = {
+        "detail": "Gemini is not configured",
+        "agenda": an_agenda().model_dump(mode="json"),
+        "nudges": [AgendaNudge(meeting_id="m-1", item_id="i-1", text="Nudge").model_dump()],
+    }
+
+    got = await client(Recorder(httpx.Response(status, json=body))).track_agenda("m-1")
+
+    assert [n.text for n in got.nudges] == ["Nudge"]
+
+
+async def test_an_agenda_tick_is_not_retried_within_the_tick():
+    recorder = Recorder(504, 200)
+
+    with pytest.raises(BrainUnavailable):
+        await client(recorder).track_agenda("m-1")
+    assert len(recorder.requests) == 1
+
+
+async def test_a_fact_check_tick_returns_the_checks():
+    response = FactCheckResponse(
+        checks=[
+            FactCheck(
+                id="f-1",
+                claim="PR 41 shipped",
+                speaker_name="Bob",
+                verdict="contradicted",
+                confidence=0.9,
+                severity="high",
+            )
+        ]
+    )
+    recorder = Recorder(json_response(response))
+
+    got = await client(recorder).fact_check("m-1")
+
+    assert got == response
+    assert str(recorder.requests[0].url) == "http://brain.test/internal/meetings/m-1/fact-check"
+
+
+async def test_a_failed_fact_check_tick_is_a_rejection_or_unavailable():
+    with pytest.raises(BrainRejected):
+        await client(Recorder(409)).fact_check("m-1")
+    with pytest.raises(BrainUnavailable):
+        await client(Recorder(503)).fact_check("m-1")
