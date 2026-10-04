@@ -658,9 +658,9 @@ function Tasks({
       onJump={onJump}
       canPush={me.is_admin === true}
       blocked={
-        destination === "jira" && settings && !settings.jira.connected ? (
+        destination === "jira" && settings && !settings.jira.connected && !settings.jira.project ? (
           <>
-            No Jira account is connected. Connect one in{" "}
+            No Jira project is connected. Connect one in{" "}
             <Link className="link" href="/settings">
               Settings
             </Link>
