@@ -119,6 +119,18 @@ async def test_the_answer_step_sees_numbered_lines_as_quoted_data(store, fake_gi
     assert "github_code" in llm.calls[0].prompt
 
 
+async def test_the_answer_step_sees_code_with_its_indentation(store, fake_github):
+    await configure(store)
+    llm = scripted(code(), answer=citing(REFUNDS))
+
+    await orchestrator(llm, store, fake_github).ask(question())
+
+    prompt = llm.calls[1].prompt
+    fenced = prompt[prompt.index(BEGIN_DATA) : prompt.index(END_DATA)]
+    body = REFUNDS_PY.splitlines().index("    return charged_days_ago <= REFUND_WINDOW_DAYS") + 1
+    assert f"{body:>4} |     return charged_days_ago <= REFUND_WINDOW_DAYS" in fenced
+
+
 async def test_the_model_picks_the_highlighted_lines_inside_the_snippet(store, fake_github):
     await configure(store)
 

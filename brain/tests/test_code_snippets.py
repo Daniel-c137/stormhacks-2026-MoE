@@ -228,3 +228,13 @@ async def test_code_evidence_reads_each_hit(fake_github):
     assert {s.path for s in found} == {REFUNDS, "api/billing/fees.py"}
     fees = next(s for s in found if s.path == "api/billing/fees.py")
     assert fees.code == lines(FEES_PY, fees.start_line, fees.end_line)
+
+
+def test_lines_are_numbered_as_github_numbers_them():
+    # GitHub breaks lines only at newlines; a form feed or a Windows line ending is not a line.
+    text = "first = 1\r\n\x0c\n# page two\nlast = 2\n"
+    snippet = snippet_from_file(code_file(text), 3, 4)
+
+    assert code_file(text).lines() == ["first = 1", "\x0c", "# page two", "last = 2"]
+    assert snippet.code == "# page two\nlast = 2"
+    assert snippet.github_url.endswith("#L3-L4")
