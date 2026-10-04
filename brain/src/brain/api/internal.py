@@ -315,7 +315,7 @@ async def track_agenda_tick(
     store: Store = Depends(get_store),
     make_llm: Callable[[], LLM] = Depends(get_llm_factory),
 ) -> AgendaTrackResponse:
-    """The worker's timer tick (every 30-60 s, never per utterance) for a live meeting. Reads the
+    """The worker's timer tick (every 10 s or so, never per utterance) for a live meeting. Reads the
     final segments since the last tick from the store, so the worker sends none. The worker
     publishes the agenda on Topic.AGENDA and each nudge on Topic.AGENDA_NUDGE; nothing is spoken.
 
