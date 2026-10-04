@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from api_support import ALEX, OUTSIDER, SARAH, TEAM, WORKER_TOKEN, create
@@ -284,3 +285,45 @@ def test_an_unconfigured_model_is_a_503(app, client_as, memory):
 
     assert response.status_code == 503
     assert "Gemini is not configured" in response.json()["detail"]
+
+
+# limits and wiring
+
+
+def test_overlong_questions_and_histories_are_rejected(client_as, worker, memory, llm):
+    meeting = create(client_as(ALEX))
+    long_question = "x" * 2001
+    turns = [{"role": "user", "text": "earlier"}] * 21
+    sarah = client_as(SARAH)
+
+    responses = [
+        sarah.post("/ask", json={"question": long_question, "visibility": "public"}),
+        sarah.post("/ask", json={"question": WAITLIST, "visibility": "public", "history": turns}),
+        sarah.post(
+            f"/meetings/{meeting['id']}/ask",
+            json={"question": long_question, "visibility": "private"},
+        ),
+        sarah.post(
+            f"/meetings/{meeting['id']}/ask",
+            json={"question": WAITLIST, "visibility": "private", "history": turns},
+        ),
+        worker.post(
+            f"/internal/meetings/{meeting['id']}/invoke",
+            json={"invocation": invocation(meeting["id"], question=long_question)},
+        ),
+    ]
+
+    assert [r.status_code for r in responses] == [422] * 5
+    assert llm.calls == []
+
+
+def test_memory_with_the_wrong_embedding_size_is_unavailable_not_an_error():
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(db_pool=object())))
+    settings = Settings(
+        _env_file=None,
+        gemini_api_key="not-a-real-key",
+        gemini_embedding_model="some-embedding-model",
+        gemini_embedding_dim=3072,
+    )
+
+    assert get_memory(request, settings) is None

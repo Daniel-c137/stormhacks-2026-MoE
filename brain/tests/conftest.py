@@ -1,3 +1,4 @@
+import re
 import socket
 import threading
 import time
@@ -128,10 +129,24 @@ def fake_jira() -> FakeJira:
 
 class FakeGitHub:
     """Stand-in for GitHub's MCP server: issue and pull request search and reads in GitHub's REST
-    shapes, plus add_issue_comment, a write the agent must never call. Searches match every word
-    of the query (qualifiers like is:open ignored) against titles."""
+    shapes, plus add_issue_comment, a write the agent must never call.
+
+    Searches scope like the real server's prepareSearchArgs: a repo: qualifier in the query wins,
+    otherwise owner/repo scope it; org: and user: narrow to an owner. Then every other word must
+    be in the title. `elsewhere` holds items of other repositories the server's token can also
+    read; `ignore_scope` makes searches return them regardless, like a misbehaving server."""
 
     def __init__(self):
+        self.ignore_scope = False
+        self.elsewhere: list[dict[str, Any]] = [
+            {
+                "number": 7,
+                "title": "Secret roadmap for the acquisition",
+                "state": "open",
+                "html_url": "https://github.com/otherorg/private-repo/issues/7",
+                "body": "Confidential.",
+            }
+        ]
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.comments: list[dict[str, Any]] = []
         self.issues: dict[int, dict[str, Any]] = {
@@ -155,9 +170,20 @@ class FakeGitHub:
         }
         self.server = MCPServer("github")
 
-        def search(items: dict[int, dict[str, Any]], query: str) -> dict[str, Any]:
+        def search(
+            items: dict[int, dict[str, Any]], query: str, owner: str | None, repo: str | None
+        ) -> dict[str, Any]:
+            scope = re.search(r"\brepo:(\S+)", query)
+            prefix = scope.group(1) if scope else (f"{owner}/{repo}" if owner and repo else "")
+            if not scope and (org := re.search(r"\b(?:org|user):(\S+)", query)):
+                prefix = org.group(1)
             words = [w for w in query.lower().split() if ":" not in w]
-            found = [i for i in items.values() if all(w in i["title"].lower() for w in words)]
+            found = [
+                i
+                for i in [*items.values(), *self.elsewhere]
+                if all(w in i["title"].lower() for w in words)
+                and (self.ignore_scope or f"github.com/{prefix}/" in i["html_url"])
+            ]
             return {"total_count": len(found), "items": found}
 
         @self.server.tool()
@@ -165,7 +191,7 @@ class FakeGitHub:
             query: str, owner: str | None = None, repo: str | None = None
         ) -> dict[str, Any]:
             self.calls.append(("search_issues", {"query": query, "owner": owner, "repo": repo}))
-            return search(self.issues, query)
+            return search(self.issues, query, owner, repo)
 
         @self.server.tool()
         def search_pull_requests(
@@ -174,7 +200,7 @@ class FakeGitHub:
             self.calls.append(
                 ("search_pull_requests", {"query": query, "owner": owner, "repo": repo})
             )
-            return search(self.pulls, query)
+            return search(self.pulls, query, owner, repo)
 
         @self.server.tool()
         def issue_read(method: str, owner: str, repo: str, issue_number: int) -> dict[str, Any]:
