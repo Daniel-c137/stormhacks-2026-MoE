@@ -491,6 +491,7 @@ def jira_account(team_id: str, by: Person, **changes) -> JiraAccount:
         team_id=team_id,
         site="acme.atlassian.net",
         project="DS",
+        issue_type_id="10001",
         email="admin@acme.example",
         sealed_token="sealed-1",
         connected_by=by.id,
@@ -508,7 +509,12 @@ async def test_a_teams_jira_account_is_saved_replaced_and_removed(store):
     assert await store.jira_account(other.id) is None
 
     second = jira_account(
-        team.id, alex, project="OPS", email="ops@acme.example", sealed_token="sealed-2"
+        team.id,
+        alex,
+        project="OPS",
+        issue_type_id=None,
+        email="ops@acme.example",
+        sealed_token="sealed-2",
     )
     await store.save_jira_account(second)
     assert await store.jira_account(team.id) == second

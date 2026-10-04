@@ -25,3 +25,13 @@ def test_another_key_or_a_changed_text_does_not_open_it():
         unseal(sealed[:-4] + "AAAA", SECRET)
     with pytest.raises(Unsealable):
         unseal("not sealed at all", SECRET)
+
+
+def test_a_secret_sealed_for_one_owner_does_not_open_for_another():
+    sealed = seal("jira-api-token", SECRET, "team-1")
+
+    assert unseal(sealed, SECRET, "team-1") == "jira-api-token"
+    with pytest.raises(Unsealable):
+        unseal(sealed, SECRET, "team-2")
+    with pytest.raises(Unsealable):
+        unseal(sealed, SECRET)
