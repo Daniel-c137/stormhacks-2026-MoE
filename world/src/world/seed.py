@@ -8,11 +8,14 @@ pushes nothing: no Jira issue or GitHub write is ever made. Meetings go in date 
 meeting's decisions can supersede an earlier one's.
 
 Running it again changes nothing: a meeting already seeded is skipped, and one a failed run left
-part-way is finished. `--reset` first removes the seeded team and everything under it."""
+part-way is finished. `--reset` first removes the seeded team and everything under it. Each
+person gets a login with their seeded email: WORLD_SEED_PASSWORD for everyone, or else a generated
+password each, printed once."""
 
 import argparse
 import asyncio
 import re
+import secrets
 import sys
 import time
 from collections import deque
@@ -23,6 +26,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from brain.agent.pipeline import INDEX, REPORT_STEPS, ReportPipeline
+from brain.auth import MAX_PASSWORD, MIN_PASSWORD, hash_password
 from brain.config import Settings as BrainSettings
 from brain.db import migrate, open_pool
 from brain.llm import (
@@ -129,6 +133,29 @@ async def seed_team(store: Store, people: Sequence[Person], *, jira_site: str = 
             )
         )
     return await store.team(tid)
+
+
+async def seed_logins(
+    store: Store, people: Sequence[Person], *, password: str | None = None
+) -> list[tuple[Person, str | None]]:
+    """A login for each person who has none, with their seeded email: `password` for everyone
+    (WORLD_SEED_PASSWORD), or else a generated one each, returned so it can be shown once. A
+    login that exists, perhaps changed in the app since, is left alone."""
+    if password is not None and not MIN_PASSWORD <= len(password) <= MAX_PASSWORD:
+        raise SeedError(f"WORLD_SEED_PASSWORD must be {MIN_PASSWORD} to {MAX_PASSWORD} characters")
+    created: list[tuple[Person, str | None]] = []
+    for person in people:
+        try:
+            await store.login(person.id)
+            continue
+        except NotFound:
+            pass
+        assert person.email, f"seeded person {person.id} has no email"
+        generated = None if password else secrets.token_urlsafe(18)
+        hashed = await asyncio.to_thread(hash_password, password or generated)
+        await store.set_login(person.id, person.email, hashed)
+        created.append((person, generated))
+    return created
 
 
 async def reset_team(store: Store, memory: MeetingMemory) -> int:
@@ -410,7 +437,8 @@ def main(argv: list[str] | None = None) -> int:
             f" {DIM}-dimension vectors"
         )
     meetings = snapshot_meetings(args.snapshot)
-    if per_minute := Settings().world_seed_embeds_per_minute:
+    world = Settings()
+    if per_minute := world.world_seed_embeds_per_minute:
         embedder = PacedEmbedder(embedder, per_minute=per_minute)
     jira_site = settings.jira_base_url or JIRA_SITE
 
@@ -426,6 +454,14 @@ def main(argv: list[str] | None = None) -> int:
             if args.reset:
                 removed = await reset_team(store, memory)
                 print(f"reset: removed {world_spec().company} and its {removed} meetings")
+            # people can sign in even if a write-up below stops the seed
+            people = seed_people(meetings)
+            await seed_team(store, people, jira_site=jira_site)
+            for person, generated in await seed_logins(
+                store, people, password=world.world_seed_password
+            ):
+                shown = f"; one-time password, shown only now: {generated}" if generated else ""
+                print(f"login: {person.name} signs in as {person.email}{shown}", flush=True)
             results = await seed_world(
                 store,
                 memory,

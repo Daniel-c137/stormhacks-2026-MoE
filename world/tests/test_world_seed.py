@@ -511,12 +511,16 @@ def test_the_command_migrates_then_seeds_and_says_what_it_did(
     monkeypatch.setenv("DATABASE_URL", pg_dsn)
     lines = [f"{d.isoformat()} {t}" for d, t in zip(DAYS, TITLES, strict=True)]
 
+    monkeypatch.setenv("WORLD_SEED_PASSWORD", "demo-password-1")
+    people = seed_people(snapshot_meetings("demo"))
+
     assert seed.main(["--snapshot", "demo"]) == 0
     out = capsys.readouterr().out.splitlines()
     assert any(line.startswith("applied ") for line in out)
-    assert [line for line in out if not line.startswith("applied ")][:4] == [
-        f"seeded: {line} (model mock)" for line in lines
-    ]
+    rest = [line for line in out if not line.startswith("applied ")]
+    assert rest[: len(people)] == [f"login: {p.name} signs in as {p.email}" for p in people]
+    assert rest[len(people) : len(people) + 4] == [f"seeded: {line} (model mock)" for line in lines]
+    assert not any("demo-password-1" in line for line in out)
 
     assert seed.main(["--snapshot", "demo"]) == 0
     out = capsys.readouterr().out.splitlines()
@@ -525,7 +529,7 @@ def test_the_command_migrates_then_seeds_and_says_what_it_did(
     assert seed.main(["--snapshot", "demo", "--reset"]) == 0
     out = capsys.readouterr().out.splitlines()
     assert out[0].startswith("reset: removed DropSubs")
-    assert out[1:5] == [f"seeded: {line} (model mock)" for line in lines]
+    assert out[1:5] == [f"seeded: {line} (model mock)" for line in lines]  # logins are kept
 
 
 def test_the_command_needs_a_database(monkeypatch, mock_models):

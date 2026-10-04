@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     world_overlay_dir: Path = OVERLAY_DIR
     # world-seed: at most this many texts embedded a minute (Gemini's free tier allows 100)
     world_seed_embeds_per_minute: int | None = Field(default=None, ge=1)
+    # world-seed: one demo password for every seeded person; unset generates one each
+    world_seed_password: str | None = None
 
 
 def world_spec() -> WorldSpec:
