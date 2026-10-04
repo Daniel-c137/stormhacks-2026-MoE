@@ -1,6 +1,7 @@
 """Reading GitHub through an MCP server that wants a bearer token, as GitHub's hosted server
 does, and what a pull request read carries: its checks and reviews when the server gives them."""
 
+import json
 import logging
 from typing import Any
 
@@ -8,6 +9,7 @@ import pytest
 from github_cloud_support import OTHER_TOKEN, TOKEN, github_server, serve_with_token
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import CallToolResult, TextContent
 
 from brain.agent.team_tools import github_finding
 from brain.connectors import connector_status
@@ -80,18 +82,21 @@ def pr_server(**answers: Any) -> MCPServer:
     server = MCPServer("github")
 
     @server.tool()
-    def pull_request_read(method: str, owner: str, repo: str, pullNumber: int) -> Any:
+    def pull_request_read(method: str, owner: str, repo: str, pullNumber: int) -> CallToolResult:
         if method == "get":
-            return {
+            answer: Any = {
                 "number": pullNumber,
                 "title": "Retry failed refunds",
                 "state": "open",
                 "html_url": f"https://github.com/{owner}/{repo}/pull/{pullNumber}",
                 "body": "Retries a refund three times.",
             }
-        if method not in answers:
+        elif method in answers:
+            answer = answers[method]
+        else:
             raise ToolError(f"{method} is not available")
-        return answers[method]
+        # as GitHub's server answers: the JSON as one text block
+        return CallToolResult(content=[TextContent(type="text", text=json.dumps(answer))])
 
     return server
 

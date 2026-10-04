@@ -1,8 +1,9 @@
 """Read the team's GitHub repository's issues, pull requests and code through the GitHub MCP
 server.
 
-Tool names and arguments follow GitHub's official MCP server; GITHUB_MCP_URL decides which server
-answers. Every call goes through the read allowlist.
+Tool names and arguments follow GitHub's official MCP server. A team whose admin connected a
+token reads GitHub's hosted server with it (GITHUB_HOSTED_MCP_URL); any other team reads
+GITHUB_MCP_URL with no credentials. Every call goes through the read allowlist.
 """
 
 import re
@@ -10,11 +11,11 @@ from datetime import datetime
 from typing import Any, Literal
 from urllib.parse import quote, unquote, urlparse
 
-from mcp.server.mcpserver import MCPServer
+import anyio
 from mcp.types import BlobResourceContents, EmbeddedResource, TextResourceContents
 from pydantic import BaseModel
 
-from brain.integrations import McpReader, McpToolError, ToolRefused, search_words
+from brain.integrations import McpReader, McpTarget, McpToolError, ToolRefused, search_words
 from brain.jira import root_cause
 
 GitHubKind = Literal["issue", "pr"]
@@ -111,6 +112,10 @@ class GitHubItem(BaseModel):
     merged_at: datetime | None = None
     body: str | None = None
     url: str | None = None
+    # A pull request's read only, when the server gives them: e.g. "2 passed, 1 failed (lint)"
+    # and "sam approved, ada commented"
+    checks: str | None = None
+    reviews: str | None = None
 
 
 class GitHubRelease(BaseModel):
@@ -124,7 +129,7 @@ class GitHubRelease(BaseModel):
 class GitHubReader:
     host: CodeHost = "github"
 
-    def __init__(self, repo: str, target: str | MCPServer, ref: str | None = None):
+    def __init__(self, repo: str, target: McpTarget, ref: str | None = None):
         owner, _, name = repo.strip().partition("/")
         if not owner or not name or "/" in name:
             raise ValueError(f"the repository must be owner/name, not {repo!r}")
@@ -172,7 +177,32 @@ class GitHubReader:
         item = self.item(data, kind) if isinstance(data, dict) else None
         if item is None:
             raise GitHubError(f"GitHub returned nothing for {self.full_name}#{number}")
+        if item.kind == "pr":
+            item = item.model_copy(update=await self._checks_and_reviews(item.number))
         return item
+
+    async def _checks_and_reviews(self, number: int) -> dict[str, str | None]:
+        """A pull request's commit statuses, check runs and reviews, read at the same time. Each
+        is left out when the server cannot give it (the demo's mock has no reviews or check
+        runs, and a token without the permission is refused)."""
+        found: dict[str, Any] = {}
+
+        async def read(method: str) -> None:
+            arguments = {"method": method, "owner": self.owner, "repo": self.repo}
+            try:
+                found[method] = await self.reader.call(
+                    "pull_request_read", arguments | {"pullNumber": number}
+                )
+            except Exception:
+                found[method] = None
+
+        async with anyio.create_task_group() as group:
+            for method in ("get_status", "get_check_runs", "get_reviews"):
+                group.start_soon(read, method)
+        return {
+            "checks": checks_summary(found["get_status"], found["get_check_runs"]),
+            "reviews": reviews_summary(found["get_reviews"]),
+        }
 
     async def releases(self, limit: int = 5) -> list[GitHubRelease]:
         """The repository's latest releases, newest first. What a release contains is what is
@@ -302,3 +332,74 @@ def release(raw: dict[str, Any]) -> GitHubRelease | None:
         body=body.strip()[:MAX_BODY] if isinstance(body, str) and body.strip() else None,
         url=raw.get("html_url") if isinstance(raw.get("html_url"), str) else None,
     )
+
+
+PASSED = {"success", "neutral"}
+FAILED = {"failure", "error", "cancelled", "timed_out", "action_required", "startup_failure"}
+NAMED_FAILURES = 3
+
+
+def checks_summary(status: Any, runs: Any) -> str | None:
+    """Commit statuses and check runs counted as passed, failed (named) and pending; skipped
+    ones are left out. None when there are none."""
+    outcomes: list[tuple[str, str]] = []  # (outcome, name)
+    for raw in listed(status, "statuses"):
+        state = str(raw.get("state") or "").lower()
+        if state:
+            outcome = {"success": "passed", "pending": "pending"}.get(state, "failed")
+            outcomes.append((outcome, str(raw.get("context") or "")))
+    for raw in listed(runs, "check_runs"):
+        name = str(raw.get("name") or "")
+        conclusion = str(raw.get("conclusion") or "").lower()
+        if raw.get("status") != "completed" or not conclusion:
+            outcomes.append(("pending", name))
+        elif conclusion in PASSED:
+            outcomes.append(("passed", name))
+        elif conclusion in FAILED:
+            outcomes.append(("failed", name))
+    if not outcomes:
+        return None
+    parts = []
+    for outcome in ("passed", "failed", "pending"):
+        names = [name for found, name in outcomes if found == outcome]
+        if not names:
+            continue
+        part = f"{len(names)} {outcome}"
+        if outcome == "failed" and (shown := [n for n in names if n][:NAMED_FAILURES]):
+            part += f" ({', '.join(shown)})"
+        parts.append(part)
+    return ", ".join(parts)
+
+
+def listed(data: Any, key: str) -> list[dict[str, Any]]:
+    """The objects listed under `key` of a result, or none."""
+    found = data.get(key) if isinstance(data, dict) else None
+    return [raw for raw in found if isinstance(raw, dict)] if isinstance(found, list) else []
+
+
+REVIEW_STATES = {
+    "APPROVED": "approved",
+    "CHANGES_REQUESTED": "requested changes",
+    "COMMENTED": "commented",
+    "DISMISSED": "review dismissed",
+}
+
+
+def reviews_summary(reviews: Any) -> str | None:
+    """Each reviewer's latest review, in the order they first reviewed; a reviewer's comment
+    after an approval or a change request does not replace it. None when there are none."""
+    if isinstance(reviews, dict):  # a list may come wrapped as {"result": [...]}
+        reviews = next((reviews[k] for k in ("result", "reviews", "items") if k in reviews), None)
+    latest: dict[str, str] = {}
+    for raw in reviews if isinstance(reviews, list) else ():
+        if not isinstance(raw, dict):
+            continue
+        user = raw.get("user")
+        login = user.get("login") if isinstance(user, dict) else user
+        state = REVIEW_STATES.get(str(raw.get("state") or "").upper())
+        if not isinstance(login, str) or not login or state is None:
+            continue
+        if state == "commented" and latest.get(login, "commented") != "commented":
+            continue
+        latest[login] = state
+    return ", ".join(f"{login} {state}" for login, state in latest.items()) or None

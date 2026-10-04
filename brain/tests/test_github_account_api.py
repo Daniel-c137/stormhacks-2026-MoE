@@ -88,7 +88,7 @@ def test_an_admin_connects_github_with_a_token(client_as, store, github, repos):
     assert response.json()["github"]["account_login"] == LOGIN
     saved = account(store)
     assert (saved.login, saved.connected_by) == (LOGIN, ALEX.id)
-    paths = github.paths()
+    paths = [path.rstrip("/") for path in github.paths()]
     assert paths[0] == "/user"
     for repo in (REPO, SITE):
         for part in ("", "/issues", "/pulls", "/contents"):

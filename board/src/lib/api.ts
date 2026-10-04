@@ -12,6 +12,7 @@ import type {
   CreateAccountRequest,
   CreateAccountResponse,
   ConnectorsUpdate,
+  GitHubAccountConnect,
   JiraAccountConnect,
   CreateMeetingRequest,
   Decision,
@@ -185,4 +186,8 @@ export const updateConnectors = (body: ConnectorsUpdate) => request<TeamSettings
 export const connectJiraAccount = (body: JiraAccountConnect) => request<TeamSettings>("PUT", "/settings/jira/account", body);
 /** Admins only: forgets the team's Jira account and its token. */
 export const disconnectJiraAccount = () => request<TeamSettings>("DELETE", "/settings/jira/account");
+/** Admins only: connects GitHub with a fine-grained token. The brain checks it with GitHub first. */
+export const connectGitHubAccount = (body: GitHubAccountConnect) => request<TeamSettings>("PUT", "/settings/github/account", body);
+/** Admins only: forgets the team's GitHub token; its repositories are then read without it. */
+export const disconnectGitHubAccount = () => request<TeamSettings>("DELETE", "/settings/github/account");
 export const listVoices = () => get<Voice[]>("/voices");

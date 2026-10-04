@@ -19,6 +19,10 @@ export interface CodeRepo {
 
 export interface GitHubSettings {
   repos: CodeRepo[]; // owner/name each
+  /** The GitHub account whose token an admin connected (PUT /settings/github/account), by its
+   * login: the team's reads then go to GitHub's hosted MCP server with that token. null: the
+   * server's GITHUB_MCP_URL, with no credentials. The token never leaves the brain. */
+  account_login?: string | null;
 }
 
 export interface GitLabSettings {
@@ -80,6 +84,13 @@ export interface JiraAccountConnect {
   email: string;
   api_token: string;
   project: string;
+}
+
+/** PUT /settings/github/account (admins only): a fine-grained personal access token with read
+ * access to the team's repositories. The brain checks it with GitHub before saving; it is stored
+ * encrypted and never returned. */
+export interface GitHubAccountConnect {
+  token: string;
 }
 
 /** PUT /settings/connectors (admins only): the whole choice, replacing the saved one.

@@ -665,7 +665,7 @@
   .conn-account h3 { grid-column: 1 / -1; font-size: 15px; font-weight: 700; }
   .conn-account .label { min-width: 0; }
   .conn-account .field { height: 40px; border-radius: 10px; font-size: 14px; }
-  .conn-account .note, .conn-account .err, .conn-account-actions { grid-column: 1 / -1; }
+  .conn-account .note, .conn-account .err, .conn-account-actions, .conn-account .label.wide { grid-column: 1 / -1; }
   .conn-account-actions { display: flex; gap: 8px; align-items: center; }
   .voices { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
   .voice { border: 1.5px solid var(--line); border-radius: 18px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; transition: border-color .15s; }
