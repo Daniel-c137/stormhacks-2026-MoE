@@ -473,6 +473,53 @@ async def test_someone_calling_polaris_while_it_speaks_is_listened_to_once_it_st
     assert bus.states()[-1] == "capturing"
 
 
+async def test_speak_works_while_polaris_listens_to_someone(agent, bus, tts):
+    card = await card_for(agent, bus)
+    await agent.on_listening(ALEX)
+
+    await bus.deliver(Topic.RESPONSE_ACTION, act(card, "speak"), "u-sarah")
+
+    assert len(tts.calls) == 1
+    assert bus.states()[-3:] == ["capturing", "speaking", "capturing"]
+
+
+async def test_a_question_asked_while_polaris_speaks_shows_working_not_speaking(
+    agent, bus, brain, speaker
+):
+    card = await card_for(agent, bus)
+    speaker.hold = asyncio.Event()
+    speaking = asyncio.create_task(
+        bus.deliver(Topic.RESPONSE_ACTION, act(card, "speak"), "u-sarah")
+    )
+    await until(lambda: bus.states()[-1] == "speaking")
+    answered = asyncio.Event()
+    invoke = brain.invoke
+
+    async def slow_invoke(inv, recent):
+        await answered.wait()
+        return await invoke(inv, recent)
+
+    brain.invoke = slow_invoke
+    working = asyncio.create_task(agent.on_invocation(invocation()))
+    await until(lambda: bus.states()[-1] == "working")
+    speaker.hold.set()
+    await speaking
+    assert bus.states()[-1] == "working"
+
+    answered.set()
+    await working
+    assert bus.states()[-1] == "hand_raised"
+
+
+async def test_a_chat_question_leaves_polaris_listening_to_its_asker_by_voice(agent, bus):
+    """The voice wait belongs to the transcription; only a spoken question ends it."""
+    await agent.on_listening(ALEX)
+
+    await agent.on_invocation(invocation(via="chat"))
+
+    assert bus.states()[-1] == "capturing"
+
+
 async def test_the_ask_button_and_a_voice_call_together_show_the_ask(agent, bus):
     await bus.deliver(Topic.ASK, AskSignal(by_id="u-sarah"), "u-sarah")
     await agent.on_listening(ALEX)

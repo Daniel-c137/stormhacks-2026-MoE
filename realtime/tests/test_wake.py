@@ -865,3 +865,34 @@ def test_the_agents_own_partials_are_never_listened_to(detector):
     detector.on_partial(partial("OmniMan here.", by=AGENT_PARTICIPANT_ID, name="OmniMan"))
 
     assert detector.listening(11.0) == {}
+
+
+def test_a_partial_long_after_the_name_alone_is_not_listened_to(detector):
+    """A partial's start is where the speaker's last final ended, not where they began
+    speaking again: the wait is judged by when the partial was heard."""
+    detector.on_segment(final("OmniMan.", t=4.0, end=5.0))
+    detector.on_partial(partial("Okay, moving on to the next item", seg="utt-2", t=5.0, end=30.0))
+
+    assert detector.listening(30.0) == {}
+
+
+def test_a_question_begun_within_the_wait_is_listened_to_until_its_end(detector):
+    detector.on_segment(final("OmniMan.", end=10.6))
+    detector.on_partial(partial("What's the status", seg="utt-2", t=10.6, end=18.0))
+    detector.on_partial(partial("What's the status of DS-104", seg="utt-2", t=10.6, end=19.5))
+
+    assert detector.listening(19.5) == {"u-alex": "Alex Chen"}
+
+
+@pytest.mark.parametrize("text", ["OmniMan is down again", "OmniMan was right about that"])
+def test_a_partial_saying_the_name_is_something_is_not_listened_to(detector, text):
+    detector.on_partial(partial(text))
+
+    assert detector.listening(11.0) == {}
+
+
+@pytest.mark.parametrize("text", ["OmniMan, is DS-104 merged", "OmniMan is DS-104 merged?"])
+def test_a_partial_asking_with_is_or_are_is_listened_to(detector, text):
+    detector.on_partial(partial(text))
+
+    assert detector.listening(11.0) == {"u-alex": "Alex Chen"}
