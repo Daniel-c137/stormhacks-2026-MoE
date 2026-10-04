@@ -523,9 +523,12 @@ def parse_iso(value: str, what: str) -> datetime:
 # Search: the official server's prepareSearchArgs, then a subset of GitHub's issue search
 
 
+# GitHub allows this many AND, OR and NOT operators in one search.
+MAX_OPERATORS = 5
 SEARCH_SUPPORTED = (
     "This server supports plain words and quoted phrases (every one must appear as whole words "
-    "in the title, body or comments, ignoring case) with the qualifiers repo:, org:, user:, "
+    "in the title, body or comments, ignoring case), or words joined only by OR (any one of them, "
+    f"at most {MAX_OPERATORS} operators), with the qualifiers repo:, org:, user:, "
     "is:issue|pr|open|closed|merged|unmerged|draft, type:issue|pr, state:open|closed, label:, "
     "author: and assignee:."
 )
@@ -557,6 +560,7 @@ def prepare_search_args(query: str, kind: str, owner: str | None, repo: str | No
 class SearchQuery:
     terms: list[str]  # words and phrases, lower case
     qualifiers: list[tuple[str, str]]  # (name, value), lower case
+    any_term: bool = False  # the terms were joined by OR: one of them is enough
 
 
 def unsupported_search(detail: str) -> ToolError:
@@ -566,17 +570,19 @@ def unsupported_search(detail: str) -> ToolError:
 def parse_search(query: str) -> SearchQuery:
     if query.count('"') % 2:
         raise ToolError(f"Invalid search query: unclosed quote in {query!r}")
-    terms: list[str] = []
+    words: list[str] = []  # the plain words and phrases, with OR kept where it was
     qualifiers: list[tuple[str, str]] = []
     for negated, name, value in SEARCH_TOKEN.findall(query):
         value = value.strip('"').casefold()
         if negated:
             raise unsupported_search(f"the exclusion -{name + ':' if name else ''}{value}")
         if not name:
-            if value.upper() in ("OR", "NOT"):
-                raise unsupported_search(f"the operator {value.upper()}")
-            if value.upper() != "AND" and value:
-                terms.append(value)
+            if value.upper() == "NOT":
+                raise unsupported_search("the operator NOT")
+            if value.upper() == "OR":
+                words.append("OR")
+            elif value.upper() != "AND" and value:
+                words.append(value)
             continue
         name = name.casefold()
         if name == "type":
@@ -588,7 +594,14 @@ def parse_search(query: str) -> SearchQuery:
         ):
             raise unsupported_search(f"{name}:{value}")
         qualifiers.append((name, "pr" if value == "pull-request" else value))
-    return SearchQuery(terms, qualifiers)
+    if "OR" not in words:
+        return SearchQuery(words, qualifiers)
+    terms = words[::2]
+    if words[1::2] != ["OR"] * (len(words) // 2) or "OR" in terms or len(words) % 2 == 0:
+        raise unsupported_search("OR mixed with other words; join every word with OR, or none")
+    if len(terms) - 1 > MAX_OPERATORS:
+        raise unsupported_search(f"more than {MAX_OPERATORS} operators")
+    return SearchQuery(terms, qualifiers, any_term=True)
 
 
 def has_words(text: str, phrase: str) -> bool:
@@ -624,7 +637,8 @@ def search_matches(world: World, record: Record, query: SearchQuery) -> bool:
             *(c["body"] for c in world.thread(record["number"])),
         ]
     )
-    return all(has_words(text, term) for term in query.terms)
+    found = any if query.any_term else all
+    return found(has_words(text, term) for term in query.terms)
 
 
 def in_scope(world: World, query: SearchQuery) -> bool:

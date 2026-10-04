@@ -104,7 +104,8 @@ async def test_an_empty_search_lists_the_latest_with_when_each_was_updated(reade
     assert [f.source.label for f in latest.content][:2] == [f"{REPO}#49", f"{REPO}#52"]
     assert "updated 2026-10-02" in latest.content[0].text
     assert [f.source.label for f in latest_prs.content][:2] == [f"{REPO}#50", f"{REPO}#54"]
-    assert [f.source.label for f in topic.content] == []  # a topic is searched for, not listed
+    # a topic is searched for, not listed: no issue says "latest", so the closest comes first
+    assert topic.content[0].source.label == f"{REPO}#36"
 
 
 async def test_read_returns_merge_state_and_time(reader):

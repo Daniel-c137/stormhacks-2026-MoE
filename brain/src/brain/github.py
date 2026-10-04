@@ -26,10 +26,54 @@ GITHUB_WEB = "https://github.com"
 
 # Code search operators; even as plain words they could negate or widen the repo: scope.
 OPERATORS = {"AND", "OR", "NOT"}
+# GitHub allows this many AND, OR and NOT operators in one search, so this many words in an OR.
+MAX_ANY_WORDS = 6
+# How many items of an OR search are ranked before the closest are kept.
+ANY_WORDS_POOL = 30
 COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
 # The official server names a file it read repo://owner/repo/sha/<commit>/contents/<path>, or
 # names the ref instead of a commit when it did not resolve one.
 PINNED_FILE = re.compile(r"repo://([^/]+)/([^/]+)/sha/([0-9a-f]{40})/contents/(.+)")
+
+
+def plain_forms(word: str) -> list[str]:
+    """The word and the forms it may be written in without its ending: approved, approve, fixes,
+    fix. Rough on purpose; a form that is no word matches nothing."""
+    w = word.casefold()
+    forms = [w]
+    if w.endswith("ed"):
+        forms += [w[:-1], w[:-2]]
+    elif w.endswith("ing"):
+        forms += [w[:-3] + "e", w[:-3]]
+    elif w.endswith("es"):
+        forms += [w[:-2], w[:-1]]
+    elif w.endswith("s") and not w.endswith("ss"):
+        forms.append(w[:-1])
+    return [f for f in dict.fromkeys(forms) if len(f) >= 3 or f == w]
+
+
+def any_words(terms: list[str]) -> list[str]:
+    """The words of an OR search: every term first, then their plain forms, up to
+    MAX_ANY_WORDS."""
+    words = [t.casefold() for t in terms]
+    words += [f for t in terms for f in plain_forms(t)[1:]]
+    return list(dict.fromkeys(words))[:MAX_ANY_WORDS]
+
+
+def has_word(text: str, word: str) -> bool:
+    return bool(re.search(rf"(?<!\w){re.escape(word)}(?!\w)", text, re.IGNORECASE))
+
+
+def closest(items: list["GitHubItem"], terms: list[str]) -> list["GitHubItem"]:
+    """Items with the most of the terms (in any of their plain forms) in the title or body
+    first, keeping the server's order among equals."""
+
+    def score(item: GitHubItem) -> int:
+        text = f"{item.title}\n{item.body or ''}"
+        return sum(any(has_word(text, f) for f in plain_forms(t)) for t in terms)
+
+    scored = [(score(item), i, item) for i, item in enumerate(items)]
+    return [item for n, _, item in sorted(scored, key=lambda x: (-x[0], x[1])) if n]
 
 
 class UnsafePath(ValueError):
@@ -152,7 +196,15 @@ class GitHubReader:
             return []
         tool = "search_pull_requests" if kind == "pr" else "search_issues"
         data = await self._call(tool, {"query": words, "owner": self.owner, "repo": self.repo})
-        return self.found(data, kind, limit)
+        found = self.found(data, kind, limit)
+        terms = [w for w in words.split() if w.upper() not in OPERATORS]
+        if found or len(terms) < 2:
+            return found
+        # No item has every word, which a search phrased as speech often asks ("approved check
+        # fix" for "Enforce the Approve check"): any of them will do, closest first.
+        query = " OR ".join(any_words(terms))
+        data = await self._call(tool, {"query": query, "owner": self.owner, "repo": self.repo})
+        return closest(self.found(data, kind, ANY_WORDS_POOL), terms)[:limit]
 
     async def latest(self, kind: GitHubKind, limit: int = 6) -> list[GitHubItem]:
         """The repository's most recently updated issues or pull requests, open or closed. The

@@ -39,6 +39,7 @@ import { askInMeeting, describeError, endMeeting } from "@/lib/api";
 import { hostOrAdmin } from "@/lib/roles";
 import { initialsOf, shortOf } from "@/lib/format";
 import { translationNote } from "@/lib/translation";
+import { postedAnswerText } from "@/lib/postedAnswer";
 import { publish } from "@/lib/room";
 import { AgendaTracker } from "./AgendaTracker";
 import { AgentPresence } from "./AgentPresence";
@@ -294,9 +295,19 @@ function RoomView({
   // private thread with the agent
   const messages = useMemo(() => {
     const fromRoom = publicChat.messages.map((m): PanelMessage => {
-      // An answer the agent posted to chat carries its card's sources and code with it.
-      const source = m.is_agent ? cards.find((c) => c.answer.text === m.text) : undefined;
-      return source ? { ...m, sources: source.answer.sources, snippet: source.answer.snippets[0] ?? null } : m;
+      // An answer the agent posted to chat carries its card's sources and code with it, as links
+      // in place of the plain Sources and Unavailable lines.
+      const text = m.is_agent ? postedAnswerText(m.text) : m.text;
+      const source = m.is_agent ? cards.find((c) => c.answer.text.trim() === text) : undefined;
+      return source
+        ? {
+            ...m,
+            text,
+            sources: source.answer.sources,
+            unavailable: source.answer.unavailable,
+            snippet: source.answer.snippets[0] ?? null,
+          }
+        : m;
     });
     return [...fromRoom, ...privateChat.messages, ...agentThread].sort((a, b) => a.ts.localeCompare(b.ts));
   }, [publicChat.messages, privateChat.messages, agentThread, cards]);
