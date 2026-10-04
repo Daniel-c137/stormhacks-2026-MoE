@@ -1,5 +1,8 @@
 """Live meeting lifecycle and in-meeting questions (board -> brain)."""
 
+import logging
+from datetime import timedelta
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from contracts import (
@@ -10,64 +13,72 @@ from contracts import (
     JoinMeetingResponse,
     Meeting,
     Person,
+    Team,
 )
 
 from ..config import Settings
+from ..livekit_rooms import Rooms
 from ..livekit_tokens import participant_token
 from ..store import NotFound, Store
 from .deps import (
+    app_settings,
     current_user,
-    get_settings,
+    get_rooms,
     get_store,
+    member_meeting,
     not_implemented,
-    team_meeting,
     user_team,
 )
 
+log = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/meetings", tags=["meetings"])
+
+
+MAX_TITLE = 200
 
 
 @router.post("")
 async def create_meeting(
     body: CreateMeetingRequest,
     user: Person = Depends(current_user),
+    team: Team = Depends(user_team),
     store: Store = Depends(get_store),
 ) -> Meeting:
     title = body.title.strip()
     if not title:
         raise HTTPException(status_code=422, detail="Title is required")
-    team = await user_team(store, user)
+    if len(title) > MAX_TITLE:
+        raise HTTPException(status_code=422, detail=f"Title is over {MAX_TITLE} characters")
     return await store.create_meeting(team.id, title, host_id=user.id)
 
 
 @router.get("")
 async def list_meetings(
-    user: Person = Depends(current_user), store: Store = Depends(get_store)
+    team: Team = Depends(user_team), store: Store = Depends(get_store)
 ) -> list[Meeting]:
-    team = await user_team(store, user)
+    """Newest first."""
     return await store.meetings(team.id)
 
 
 @router.get("/{meeting_id}")
-async def get_meeting(
-    meeting_id: str, user: Person = Depends(current_user), store: Store = Depends(get_store)
-) -> Meeting:
-    return await team_meeting(store, user, meeting_id)
+async def get_meeting(meeting: Meeting = Depends(member_meeting)) -> Meeting:
+    return meeting
 
 
 @router.post("/join/{code}")
 async def join_meeting(
     code: str,
     user: Person = Depends(current_user),
+    team: Team = Depends(user_team),
     store: Store = Depends(get_store),
-    settings: Settings = Depends(get_settings),
+    settings: Settings = Depends(app_settings),
 ) -> JoinMeetingResponse:
-    """Team members with a valid link join directly and get a LiveKit token."""
+    """Team members with a valid link join directly and get a short-lived LiveKit token."""
     try:
         meeting = await store.meeting_by_code(code)
     except NotFound:
         raise HTTPException(status_code=404, detail="Meeting not found") from None
-    team = await user_team(store, user)
     if meeting.team_id != team.id:
         raise HTTPException(status_code=403, detail="Only team members can join this meeting")
     if meeting.status != "live":
@@ -82,22 +93,30 @@ async def join_meeting(
         is_host=meeting.host_id == user.id,
         api_key=settings.livekit_api_key,
         api_secret=settings.livekit_api_secret,
+        ttl=timedelta(seconds=settings.livekit_token_ttl_seconds),
     )
     return JoinMeetingResponse(meeting=meeting, livekit_url=settings.livekit_url, token=token)
 
 
 @router.post("/{meeting_id}/end")
 async def end_meeting(
-    meeting_id: str, user: Person = Depends(current_user), store: Store = Depends(get_store)
+    meeting: Meeting = Depends(member_meeting),
+    user: Person = Depends(current_user),
+    store: Store = Depends(get_store),
+    rooms: Rooms = Depends(get_rooms),
 ) -> Meeting:
-    """Host only. Starts the post-meeting pipeline."""
-    meeting = await team_meeting(store, user, meeting_id)
+    """Host only. Closes the LiveKit room and starts the post-meeting pipeline, exactly once."""
     if meeting.host_id != user.id:
         raise HTTPException(status_code=403, detail="Only the host can end the meeting")
-    if meeting.status != "live":
-        return meeting
-    # The post-meeting pipeline hooks in here once it exists; status alone gates it to run once.
-    return await store.set_status(meeting.id, "processing")
+    ended = await store.end_meeting(meeting.id)
+    if ended is None:  # someone else's end already won
+        return await store.meeting(meeting.id)
+    try:
+        await rooms.close(meeting.id)
+    except Exception:
+        log.warning("Could not close LiveKit room %s", meeting.id, exc_info=True)
+    # The post-meeting pipeline starts here, only for the caller whose end won.
+    return ended
 
 
 @router.post("/{meeting_id}/ask")

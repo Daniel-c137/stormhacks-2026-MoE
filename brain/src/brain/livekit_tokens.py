@@ -1,10 +1,18 @@
+from datetime import timedelta
+
 from livekit.api import AccessToken, VideoGrants
 
 from contracts import Meeting, Person
 
 
 def participant_token(
-    meeting: Meeting, person: Person, *, is_host: bool, api_key: str, api_secret: str
+    meeting: Meeting,
+    person: Person,
+    *,
+    is_host: bool,
+    api_key: str,
+    api_secret: str,
+    ttl: timedelta | None = None,
 ) -> str:
     """LiveKit access token; identity is the account id so captions map to the right person."""
     grants = VideoGrants(
@@ -15,10 +23,12 @@ def participant_token(
         can_subscribe=True,
         can_publish_data=True,
     )
-    return (
+    token = (
         AccessToken(api_key, api_secret)
         .with_identity(person.id)
         .with_name(person.name)
         .with_grants(grants)
-        .to_jwt()
     )
+    if ttl is not None:
+        token = token.with_ttl(ttl)
+    return token.to_jwt()

@@ -3,7 +3,7 @@
 from api_support import ALEX, OUTSIDER, SARAH, WORKER_TOKEN, create
 from fastapi.testclient import TestClient
 
-from brain.api.deps import get_settings
+from brain.api.deps import app_settings
 from brain.config import Settings
 
 
@@ -57,7 +57,7 @@ def test_request_with_a_wrong_worker_token_is_refused(app, client_as):
 
 def test_internal_routes_are_unavailable_when_no_worker_token_is_configured(app, client_as):
     meeting = create(client_as(ALEX))
-    app.dependency_overrides[get_settings] = lambda: Settings(_env_file=None)
+    app.dependency_overrides[app_settings] = lambda: Settings(_env_file=None)
     worker = TestClient(app, headers={"X-Internal-Token": WORKER_TOKEN})
 
     response = ingest(worker, meeting["id"], segment(meeting["id"], 1))

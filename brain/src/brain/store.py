@@ -34,7 +34,15 @@ class Store(Protocol):
     async def meeting_by_code(self, code: str) -> Meeting: ...
     async def meetings(self, team_id: str) -> list[Meeting]: ...
     async def set_status(self, meeting_id: str, status: MeetingStatus) -> Meeting: ...
-    async def add_participant(self, meeting_id: str, person_id: str) -> Meeting: ...
+    async def end_meeting(self, meeting_id: str) -> Meeting | None:
+        """live -> processing as one conditional update, recording the duration. Returns the
+        ended meeting to exactly one caller; None if it was not live. In Postgres:
+        UPDATE ... SET status = 'processing', ... WHERE id = $1 AND status = 'live' RETURNING *"""
+        ...
+
+    async def add_participant(self, meeting_id: str, person_id: str) -> Meeting:
+        """Appends only if absent, atomically (array_append guarded by NOT ... = ANY)."""
+        ...
 
     async def add_segments(self, meeting_id: str, segments: list[TranscriptSegment]) -> None: ...
     async def transcript(self, meeting_id: str) -> list[TranscriptSegment]: ...
@@ -108,6 +116,17 @@ class InMemoryStore:
 
     async def set_status(self, meeting_id: str, status: MeetingStatus) -> Meeting:
         meeting = (await self.meeting(meeting_id)).model_copy(update={"status": status})
+        self._meetings[meeting_id] = meeting
+        return meeting
+
+    async def end_meeting(self, meeting_id: str) -> Meeting | None:
+        meeting = await self.meeting(meeting_id)
+        if meeting.status != "live":
+            return None
+        ran = datetime.now(UTC) - (meeting.started_at or datetime.now(UTC))
+        meeting = meeting.model_copy(
+            update={"status": "processing", "duration_min": round(ran.total_seconds() / 60)}
+        )
         self._meetings[meeting_id] = meeting
         return meeting
 

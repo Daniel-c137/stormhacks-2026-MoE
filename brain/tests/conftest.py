@@ -5,7 +5,14 @@ from typing import Any
 
 import pytest
 import uvicorn
-from api_support import app, client_as, settings, store, worker  # noqa: F401  (shared fixtures)
+from api_support import (  # noqa: F401  (shared fixtures)
+    app,
+    client_as,
+    rooms,
+    settings,
+    store,
+    worker,
+)
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
