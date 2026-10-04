@@ -2,7 +2,6 @@
 
 import {
   AGENT_PARTICIPANT_ID,
-  type Agenda,
   type ChatMessage,
   type CodeSnippet,
   type Participant,
@@ -18,7 +17,6 @@ import { Mark } from "@/components/ui/Mark";
 import { Sources, Unavailable } from "@/components/ui/Sources";
 import { useDismiss } from "@/hooks/useDismiss";
 import { fmtClock, initialsOf } from "@/lib/format";
-import { LiveAgenda } from "./LiveAgenda";
 
 /** A chat message plus what an agent answer carries with it. */
 export interface PanelMessage extends ChatMessage {
@@ -35,20 +33,12 @@ export interface SidePanelProps {
   personOf: (participant: Participant) => Person;
   agentTyping: boolean;
   error: string;
-  agenda: Agenda | null;
-  agendaError: Error | null;
   /** to=null sends to everyone; otherwise a private message to that participant (or the agent). */
   onSend: (text: string, to: string | null) => void;
   onClose: () => void;
 }
 
 const PREVIEW_LINES = 4;
-
-type Tab = "chat" | "agenda";
-const TABS: [Tab, string][] = [
-  ["chat", "Chat"],
-  ["agenda", "Agenda"],
-];
 
 function ChatSnippet({ snippet }: { snippet: CodeSnippet }) {
   const [expanded, setExpanded] = useState(false);
@@ -79,22 +69,10 @@ function ChatSnippet({ snippet }: { snippet: CodeSnippet }) {
   );
 }
 
-/** Meeting chat (public messages, private messages including the agent's fact-checks, private
- * questions to the agent) and the live agenda. */
-export function SidePanel({
-  messages,
-  me,
-  people,
-  personOf,
-  agentTyping,
-  error,
-  agenda,
-  agendaError,
-  onSend,
-  onClose,
-}: SidePanelProps) {
+/** Meeting chat: public messages, private messages (the agent's fact-checks among them) and
+ * private questions to the agent. */
+export function SidePanel({ messages, me, people, personOf, agentTyping, error, onSend, onClose }: SidePanelProps) {
   const agent = identity.agent_name;
-  const [tab, setTab] = useState<Tab>("chat");
   const [text, setText] = useState("");
   const [to, setTo] = useState<string | null>(null);
   const [toOpen, setToOpen] = useState(false);
@@ -108,7 +86,7 @@ export function SidePanel({
 
   useEffect(() => {
     if (log.current) log.current.scrollTop = log.current.scrollHeight;
-  }, [messages.length, agentTyping, tab]);
+  }, [messages.length, agentTyping]);
 
   const byId = new Map(people.map((p) => [p.id, p]));
   const nameOf = (id: string) => {
@@ -135,30 +113,14 @@ export function SidePanel({
   return (
     <aside className="chatcard" aria-label="Meeting panel">
       <div className="chat-tabs" role="tablist" aria-label="Panel">
-        {TABS.map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            className="chat-tab"
-            role="tab"
-            id={`tab-${id}`}
-            aria-controls={`panel-${id}`}
-            aria-selected={tab === id}
-            onClick={() => setTab(id)}
-          >
-            {label}
-          </button>
-        ))}
+        <button type="button" className="chat-tab" role="tab" id="tab-chat" aria-controls="panel-chat" aria-selected="true">
+          Chat
+        </button>
         <button type="button" className="icon-btn" onClick={onClose} aria-label="Hide panel">
           <Icon name="panel-right-close" />
         </button>
       </div>
-      {tab === "agenda" && (
-        <div className="msgs" role="tabpanel" id="panel-agenda" aria-labelledby="tab-agenda">
-          <LiveAgenda agenda={agenda} error={agendaError} />
-        </div>
-      )}
-      <div className="chat-pane" role="tabpanel" id="panel-chat" aria-labelledby="tab-chat" hidden={tab !== "chat"}>
+      <div className="chat-pane" role="tabpanel" id="panel-chat" aria-labelledby="tab-chat">
         <div ref={log} className="msgs" role="log" aria-live="polite" aria-label="Chat messages">
           {messages.length === 0 && !agentTyping && (
             <p className="msgs-empty">
