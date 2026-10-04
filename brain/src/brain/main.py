@@ -40,12 +40,35 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await pool.close()
 
 
+SECRET_FIELDS = frozenset({"api_token", "password", "current_password", "new_password"})
+HIDDEN = "(hidden)"
+
+
+def without_secrets(value: object) -> object:
+    """An echoed input with its passwords and tokens hidden, at any depth."""
+    if isinstance(value, dict):
+        return {
+            key: HIDDEN if key in SECRET_FIELDS else without_secrets(inner)
+            for key, inner in value.items()
+        }
+    if isinstance(value, list):
+        return [without_secrets(inner) for inner in value]
+    return value
+
+
 async def validation_failed(request: Request, exc: RequestValidationError) -> JSONResponse:
     """FastAPI's 422, except that a non-finite number in the echoed input (JSON bodies may say
-    Infinity or NaN, but responses cannot) is shown as text instead of failing with a 500."""
+    Infinity or NaN, but responses cannot) is shown as text instead of failing with a 500, and a
+    password or API token in it is never sent back."""
     finite = {float: lambda x: x if math.isfinite(x) else str(x)}
-    errors = jsonable_encoder(exc.errors(), custom_encoder=finite)
-    return JSONResponse(status_code=422, content={"detail": errors})
+    errors = []
+    for error in exc.errors():
+        secret = bool(error.get("loc")) and error["loc"][-1] in SECRET_FIELDS
+        shown = HIDDEN if secret else without_secrets(error.get("input"))
+        errors.append({**error, "input": shown} if "input" in error else error)
+    return JSONResponse(
+        status_code=422, content={"detail": jsonable_encoder(errors, custom_encoder=finite)}
+    )
 
 
 def create_app() -> FastAPI:

@@ -26,9 +26,17 @@ export interface GitLabSettings {
 }
 
 export interface JiraSettings {
+  /** The project the agent reads (answers, agenda suggestions, fact checks) and its site. */
   site?: string | null;
   project?: string | null;
+  /** The account an admin connected for pushing (PUT /settings/jira/account): approved task
+   * drafts become issues in `account_project` on `account_site`, as `account_email`. Its own
+   * site and project, so connecting it changes nothing the agent reads. Its API token never
+   * leaves the brain. */
   connected: boolean;
+  account_email?: string | null;
+  account_site?: string | null;
+  account_project?: string | null;
 }
 
 export interface Voice {
@@ -64,8 +72,19 @@ export interface JiraChoice {
   project?: string | null;
 }
 
+/** PUT /settings/jira/account (admins only): the Jira Cloud site (name.atlassian.net), the
+ * Atlassian account's email and API token, and the project issues are created in. The brain
+ * checks them against Jira before saving; the token is stored encrypted and never returned. */
+export interface JiraAccountConnect {
+  site: string;
+  email: string;
+  api_token: string;
+  project: string;
+}
+
 /** PUT /settings/connectors (admins only): the whole choice, replacing the saved one.
- * Repositories already connected keep their connection and index state. */
+ * Repositories already connected keep their connection and index state. The Jira account
+ * connected for pushing is separate and stays as it is. */
 export interface ConnectorsUpdate {
   github: CodeRepoChoice[];
   gitlab: CodeRepoChoice[];

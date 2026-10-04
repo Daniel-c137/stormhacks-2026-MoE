@@ -84,9 +84,10 @@ export function TaskList() {
                   <Link href={`/meetings/${t.meeting_id}`}>{meetingOf(t.meeting_id)?.title ?? "Meeting"}</Link>
                 </div>
               </div>
+              {/* The link saved when it was pushed; older tasks fall back to the team's Jira site. */}
               {t.key &&
-                (site ? (
-                  <a className="jump" href={jiraIssueUrl(site, t.key) ?? undefined} target="_blank" rel="noopener noreferrer">
+                ((t.url ?? jiraIssueUrl(site, t.key)) ? (
+                  <a className="jump" href={t.url ?? jiraIssueUrl(site, t.key) ?? undefined} target="_blank" rel="noopener noreferrer">
                     {t.key}
                   </a>
                 ) : (

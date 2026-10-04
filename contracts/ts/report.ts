@@ -43,6 +43,7 @@ export interface TaskDraft {
   quote?: string | null;
   include: boolean;
   key?: string | null; // external key once pushed
+  url?: string | null; // where the pushed issue opens, when the site's address was known
   jira_status: JiraStatus;
 }
 

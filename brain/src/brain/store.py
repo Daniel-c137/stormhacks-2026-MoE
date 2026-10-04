@@ -43,6 +43,21 @@ class ReportAudio(NamedTuple):
     data: bytes
 
 
+class JiraAccount(BaseModel):
+    """The Atlassian account an admin connected for a team's pushes, and the project its issues
+    are created in. The API token is kept only sealed (brain.sealing); it never leaves the
+    brain."""
+
+    team_id: str
+    site: str  # name.atlassian.net
+    project: str
+    issue_type_id: str | None = None  # the project's type tasks are created as; None: "Task"
+    email: str
+    sealed_token: str
+    connected_by: str  # the admin's person id
+    connected_at: datetime
+
+
 class Login(BaseModel):
     """A person's email and password sign-in. Only the argon2 hash is kept; it never leaves the
     brain."""
@@ -111,6 +126,18 @@ class Store(Protocol):
         ...
 
     async def save_settings(self, settings: TeamSettings) -> TeamSettings: ...
+
+    async def jira_account(self, team_id: str) -> JiraAccount | None:
+        """The team's connected Jira account, or None."""
+        ...
+
+    async def save_jira_account(self, account: JiraAccount) -> JiraAccount:
+        """Inserts or replaces the team's account. NotFound when the team is missing."""
+        ...
+
+    async def delete_jira_account(self, team_id: str) -> None:
+        """Removing none is not an error."""
+        ...
 
     # logins
 
@@ -358,6 +385,7 @@ class InMemoryStore:
         self._people = {p.id: _copy(p) for p in people}
         self._photos: dict[str, tuple[str, bytes]] = {}
         self._settings: dict[str, TeamSettings] = {}
+        self._jira_accounts: dict[str, JiraAccount] = {}
         self._logins: dict[str, Login] = {}
         self._meetings: dict[str, Meeting] = {}
         self._segments: dict[str, dict[str, TranscriptSegment]] = {}
@@ -400,6 +428,7 @@ class InMemoryStore:
             for row_id in [i for i, row in rows.items() if row.meeting_id in gone]:
                 del rows[row_id]
         self._settings.pop(team_id, None)
+        self._jira_accounts.pop(team_id, None)
         del self._teams[team_id]
 
     async def team_for_user(self, user_id: str) -> Team:
@@ -464,6 +493,18 @@ class InMemoryStore:
         self._team(settings.team_id)
         self._settings[settings.team_id] = _copy(settings)
         return _copy(settings)
+
+    async def jira_account(self, team_id: str) -> JiraAccount | None:
+        saved = self._jira_accounts.get(team_id)
+        return _copy(saved) if saved else None
+
+    async def save_jira_account(self, account: JiraAccount) -> JiraAccount:
+        self._team(account.team_id)
+        self._jira_accounts[account.team_id] = _copy(account)
+        return _copy(account)
+
+    async def delete_jira_account(self, team_id: str) -> None:
+        self._jira_accounts.pop(team_id, None)
 
     # logins
 
