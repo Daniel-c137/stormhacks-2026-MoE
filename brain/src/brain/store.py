@@ -127,6 +127,11 @@ class Store(Protocol):
         """NotFound when the person has no login."""
         ...
 
+    async def invited_people(self, email: str) -> list[Person]:
+        """People an admin invited with this email (ignoring case): on a team, with that email,
+        and no login yet. Several when several teams invited it; the API refuses those."""
+        ...
+
     # meetings
 
     async def create_meeting(
@@ -484,6 +489,17 @@ class InMemoryStore:
         if saved is None:
             raise NotFound(f"login for person {person_id}")
         return _copy(saved)
+
+    async def invited_people(self, email: str) -> list[Person]:
+        wanted = email.strip().lower()
+        on_a_team = {i for team in self._teams.values() for i in team.member_ids}
+        return [
+            _copy(p)
+            for p in self._people.values()
+            if p.id in on_a_team
+            and p.id not in self._logins
+            and (p.email or "").strip().lower() == wanted
+        ]
 
     # meetings
 

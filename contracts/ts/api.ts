@@ -6,15 +6,16 @@ import type { TranscriptSegment } from "./transcript";
 
 export type AskTurnRole = "user" | "agent";
 
-/** POST /auth/login. There is no public sign-up; accounts come from `brain add-user` or an admin (POST /team/accounts). */
+/** POST /auth/login. Accounts come from `brain add-user`, an admin (POST /team/accounts), or an invited email signing up (SignupRequest). */
 export interface LoginRequest {
   email: string;
   password: string;
 }
 
 /**
- * POST /auth/signup (#128): only an email the admin invited (a member of the sign-up team with
- * no login yet) creates an account. Answered with a LoginResponse: signed in at once.
+ * POST /auth/signup (#128): only an email an admin invited (a person on a team with that email
+ * and no login yet) creates an account, on that team. Answered with a LoginResponse: signed in
+ * at once.
  */
 export interface SignupRequest {
   name: string;
@@ -22,7 +23,7 @@ export interface SignupRequest {
   password: string;
 }
 
-/** GET /auth/options: what the sign-in page can offer (sign-up open; Google configured). */
+/** GET /auth/options: what the sign-in page can offer (invite-only sign-up; Google configured). */
 export interface AuthOptions {
   signup: boolean;
   google: boolean;
@@ -52,12 +53,13 @@ export interface CreateAccountRequest {
   email: string;
   title?: string | null;
   is_admin?: boolean;
+  invite?: boolean; // no login: the person creates it on the sign-in page (SignupRequest)
 }
 
-/** The generated password is returned only this once; nothing is emailed. */
+/** The generated password is returned only this once; nothing is emailed. Null for an invite. */
 export interface CreateAccountResponse {
   person: Person;
-  password: string;
+  password: string | null;
 }
 
 /** Without scheduled_start the meeting starts now; with it, the meeting waits as scheduled. */

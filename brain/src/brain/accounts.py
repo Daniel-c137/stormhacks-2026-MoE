@@ -1,5 +1,6 @@
 """Accounts: a person on a team with an email and password login, and who is an admin. Shared by
-`brain add-user`, `brain set-admin`, POST /team/accounts and invite-only sign-up (#128)."""
+`brain add-user`, `brain set-admin`, POST /team/accounts and invite-only sign-up (#128). An
+invited person is on a team with an email and no login yet, until they sign up (#143)."""
 
 import re
 import secrets
@@ -20,6 +21,10 @@ class InvalidAccount(ValueError):
 
 class LastAdmin(Exception):
     """Revoking would leave the team without an admin."""
+
+
+class InvitedTwice(Exception):
+    """More than one team invited the email, so whose account it is isn't clear."""
 
 
 def clean_name(name: str) -> str:
@@ -64,17 +69,36 @@ async def existing_person(store: Store, team: Team, email: str) -> Person | None
     return None
 
 
-async def invited_person(store: Store, team: Team, email: str) -> Person | None:
-    """The team's member with this email (ignoring case) who has no login yet: someone the admin
-    invited. None for anyone else, including a member who already signs in."""
-    for member in await store.members(team.id):
-        if member.email and member.email.strip().lower() == email.lower():
-            try:
-                await store.login(member.id)
-            except NotFound:
-                return member
-            return None
-    return None
+async def invited_person(store: Store, email: str) -> tuple[Person, Team] | None:
+    """The person an admin invited with this email (ignoring case), and the team they join: on
+    a team with no login yet. None for anyone else, including someone who already signs in.
+    Raises InvitedTwice when several teams invited the email."""
+    found = await store.invited_people(email)
+    if not found:
+        return None
+    if len(found) > 1:
+        raise InvitedTwice(email)
+    try:
+        return found[0], await store.team_for_user(found[0].id)
+    except NotFound:  # only a race with the team's removal gets here
+        return None
+
+
+async def invite_person(
+    store: Store,
+    team: Team,
+    *,
+    name: str,
+    email: str,
+    title: str | None = None,
+    is_admin: bool = False,
+) -> Person:
+    """A new person on the team with the name and email and no login: they create it themselves
+    with sign-up or Google."""
+    person = Person(
+        id=str(uuid.uuid4()), **name_fields(name), email=email, title=title, is_admin=is_admin
+    )
+    return await store.upsert_person(person, team.id)
 
 
 async def save_account(

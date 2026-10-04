@@ -48,7 +48,7 @@ export function TeamAccounts() {
   };
 
   const copy = async () => {
-    if (!created) return;
+    if (!created?.password) return;
     setProblem("");
     try {
       await navigator.clipboard.writeText(created.password);

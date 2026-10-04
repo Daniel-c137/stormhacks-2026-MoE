@@ -318,6 +318,19 @@ class PostgresStore:
             raise NotFound(f"login for person {person_id}")
         return Login.model_validate(_utc(row))
 
+    async def invited_people(self, email: str) -> list[Person]:
+        async with self._tx() as cur:
+            rows = await self._all(
+                cur,
+                f"select {PERSON} from people p"
+                " where lower(btrim(p.email)) = lower(btrim(%s))"
+                " and not exists (select 1 from logins l where l.person_id = p.id)"
+                " and exists (select 1 from memberships m where m.person_id = p.id)"
+                " order by p.id",
+                [email],
+            )
+        return [Person.model_validate(r) for r in rows]
+
     # meetings
 
     async def create_meeting(

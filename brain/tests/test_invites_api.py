@@ -10,7 +10,6 @@ import httpx
 import pytest
 from api_support import ALEX, AUTH_SECRET, OTHER_TEAM, OUTSIDER, SARAH, TEAM
 from fastapi.testclient import TestClient
-from test_auth import bearer
 from test_google_auth_api import CLIENT_ID, CLIENT_SECRET, REDIRECT_URL, FakeGoogle
 
 from brain.api.deps import get_http_transport, get_settings
@@ -126,17 +125,15 @@ def test_a_bad_invite_is_422(client_as, store, changes):
 # signing up
 
 
-def test_the_invited_person_signs_up_with_a_password_once(app, client_as):
+def test_the_invited_person_signs_up_with_a_password_once(app, client_as, store):
     person = invite(client_as(ALEX)).json()["person"]
 
     first = sign_up(app, email="PRIYA@example.com")
     second = sign_up(app, password="another-password-2")
 
     assert first.status_code == 201, first.text
-    session = first.json()
-    assert session["person"]["id"] == person["id"]
-    me = TestClient(app).get("/team", headers=bearer(session["token"]))
-    assert me.json()["id"] == TEAM.id
+    assert first.json()["person"]["id"] == person["id"]
+    assert run(store.team_for_user(person["id"])).id == TEAM.id
     assert second.status_code == 409
     login = TestClient(app).post(
         "/auth/login", json={"email": "priya@example.com", "password": PASSWORD}
@@ -144,15 +141,14 @@ def test_the_invited_person_signs_up_with_a_password_once(app, client_as):
     assert login.status_code == 200, login.text
 
 
-def test_someone_invited_by_another_team_joins_that_team(app, client_as):
+def test_someone_invited_by_another_team_joins_that_team(app, client_as, store):
     person = invite(client_as(OLGA_ADMIN), email="sam@example.com").json()["person"]
 
     response = sign_up(app, email="sam@example.com")
 
     assert response.status_code == 201, response.text
-    token = response.json()["token"]
     assert response.json()["person"]["id"] == person["id"]
-    assert TestClient(app).get("/team", headers=bearer(token)).json()["id"] == OTHER_TEAM.id
+    assert run(store.team_for_user(person["id"])).id == OTHER_TEAM.id
 
 
 def test_an_email_nobody_invited_is_403(app, client_as):

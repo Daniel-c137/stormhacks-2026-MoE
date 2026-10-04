@@ -39,7 +39,8 @@ UNSAFE = re.compile(r"[\\\x00-\x1f\x7f]")  # a backslash or an ASCII control cha
 
 class GoogleSignInFailed(Exception):
     """The callback can't be trusted or Google's answer doesn't check out. `reason` goes back to
-    the sign-in page: state, cancelled, failed, unverified or not_invited."""
+    the sign-in page: state, cancelled, failed, unverified, not_invited or ambiguous (two teams
+    invited the email)."""
 
     def __init__(self, reason: str, detail: str = ""):
         super().__init__(detail or reason)

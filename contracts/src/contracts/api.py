@@ -22,8 +22,9 @@ class LoginRequest(BaseModel):
 
 
 class SignupRequest(BaseModel):
-    """POST /auth/signup (#128): only an email the admin invited (a member of the sign-up team
-    with no login yet) creates an account. Answered with a LoginResponse: signed in at once."""
+    """POST /auth/signup (#128): only an email an admin invited (a person on a team with that
+    email and no login yet) creates an account, on that team. Answered with a LoginResponse:
+    signed in at once."""
 
     name: str
     email: str
@@ -31,9 +32,9 @@ class SignupRequest(BaseModel):
 
 
 class AuthOptions(BaseModel):
-    """GET /auth/options: what the sign-in page can offer. signup: SIGNUP_TEAM_ID is set;
-    google: the brain has a Google OAuth client and its public callback (GOOGLE_CLIENT_ID,
-    GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URL)."""
+    """GET /auth/options: what the sign-in page can offer. signup: the brain signs sessions
+    (AUTH_SECRET); sign-up is always invite-only. google: the brain has a Google OAuth client
+    and its public callback (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URL)."""
 
     signup: bool
     google: bool
@@ -62,19 +63,23 @@ class PasswordChange(BaseModel):
 
 
 class CreateAccountRequest(BaseModel):
-    """POST /team/accounts, admin only: a person on the admin's own team with an email login."""
+    """POST /team/accounts, admin only: a person on the admin's own team with an email login.
+    With invite, the person gets no login: they create it themselves on the sign-in page, with
+    a password or Google (SignupRequest)."""
 
     name: str
     email: str
     title: str | None = None
     is_admin: bool = False
+    invite: bool = False
 
 
 class CreateAccountResponse(BaseModel):
-    """The generated password is returned only this once; nothing is emailed."""
+    """The generated password is returned only this once; nothing is emailed. None for an
+    invite."""
 
     person: Person
-    password: str
+    password: str | None
 
 
 class CreateMeetingRequest(BaseModel):

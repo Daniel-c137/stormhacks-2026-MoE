@@ -1,6 +1,7 @@
-"""Sign-in checked by the brain (board -> brain): email and password, and creating an account.
-Accounts come from `brain add-user`, an admin (POST /team/accounts), or an invited email signing
-up (#128): a member of SIGNUP_TEAM_ID with no login yet. There is no open sign-up."""
+"""Sign-in checked by the brain (board -> brain): email and password, Google, and creating an
+account. Accounts come from `brain add-user`, an admin (POST /team/accounts), or an invited email
+signing up (#128): a person an admin put on their team with that email and no login yet (#143).
+There is no open sign-up."""
 
 import secrets
 from urllib.parse import urlencode, urlsplit
@@ -20,7 +21,14 @@ from contracts import (
     SignupRequest,
 )
 
-from ..accounts import InvalidAccount, clean_email, clean_name, invited_person, save_account
+from ..accounts import (
+    InvalidAccount,
+    InvitedTwice,
+    clean_email,
+    clean_name,
+    invited_person,
+    save_account,
+)
 from ..auth import (
     MAX_PASSWORD,
     MIN_PASSWORD,
@@ -63,7 +71,7 @@ MAX_EMAIL = 320
 WRONG_LOGIN = "Wrong email or password"
 NOT_INVITED = "This email hasn't been invited. Ask your team's admin to add you."
 ALREADY_SIGNED_UP = "An account already uses this email. Sign in instead."
-SIGNUP_NOT_CONFIGURED = "Sign-up isn't configured: set SIGNUP_TEAM_ID"
+INVITED_TWICE = "More than one team invited this email. Ask your team's admin."
 
 
 def google_configured(settings: Settings) -> bool:
@@ -144,10 +152,7 @@ async def login(
 async def options(settings: Settings = Depends(get_settings)) -> AuthOptions:
     """What the sign-in page can offer, so it shows only what will work."""
     ready = signing_secret(settings) is not None
-    return AuthOptions(
-        signup=ready and bool(settings.signup_team_id),
-        google=ready and google_configured(settings),
-    )
+    return AuthOptions(signup=ready, google=ready and google_configured(settings))
 
 
 @router.post("/signup", status_code=201)
@@ -157,18 +162,13 @@ async def sign_up(
     store: Store = Depends(get_store),
     limiter: LoginLimiter = Depends(get_login_limiter),
 ) -> LoginResponse:
-    """An invited email (a member of SIGNUP_TEAM_ID with no login yet) sets a password and is
-    signed in. Anyone else gets 403, and repeated refusals lock the email (429) like failed
-    logins; an email that already has an account gets 409. The mailbox isn't verified: the
-    invitation is what admits the email (Google sign-in does verify it)."""
+    """An invited email (a person on a team with that email and no login yet) sets a password
+    and is signed in, on the team that invited them. Anyone else gets 403, and repeated refusals
+    lock the email (429) like failed logins; an email that already has an account, or that two
+    teams invited, gets 409. The mailbox isn't verified: the invitation is what admits the email
+    (Google sign-in does verify it)."""
     if signing_secret(settings) is None:
         raise HTTPException(status_code=503, detail=NOT_CONFIGURED)
-    if not settings.signup_team_id:
-        raise HTTPException(status_code=503, detail=SIGNUP_NOT_CONFIGURED)
-    try:
-        team = await store.team(settings.signup_team_id)
-    except NotFound:
-        raise HTTPException(status_code=503, detail=SIGNUP_NOT_CONFIGURED) from None
     try:
         name = clean_name(body.name)
         email = clean_email(body.email)
@@ -183,14 +183,18 @@ async def sign_up(
         raise HTTPException(status_code=409, detail=ALREADY_SIGNED_UP)
     except NotFound:
         pass
-    invited = await invited_person(store, team, email)
+    try:
+        invited = await invited_person(store, email)
+    except InvitedTwice:
+        raise HTTPException(status_code=409, detail=INVITED_TWICE) from None
     if invited is None:
         limiter.fail(email)
         raise HTTPException(status_code=403, detail=NOT_INVITED)
+    person, team = invited
     hashed = await run_in_threadpool(hash_password, body.password)
     try:
         person = await save_account(
-            store, team, name=name, email=email, password_hash=hashed, person=invited
+            store, team, name=name, email=email, password_hash=hashed, person=person
         )
     except Conflict:  # only a race with another sign-up for the same email gets here
         raise HTTPException(status_code=409, detail=ALREADY_SIGNED_UP) from None
@@ -270,7 +274,7 @@ async def google_callback(
                 keys=keys,
                 http=http,
             )
-        person = await google_person(store, settings, identity.email)
+        person = await google_person(store, identity.email)
         if person is None:
             raise GoogleSignInFailed("not_invited", identity.email)
     except GoogleSignInFailed as e:
@@ -280,29 +284,28 @@ async def google_callback(
     return back(google=codes.issue(session), next=flow.next)
 
 
-async def google_person(store: Store, settings: Settings, email: str) -> Person | None:
-    """Whoever signs in with this email, else the sign-up team's invited member with it, whose
-    login is then reserved with a password nobody knows: the account is theirs through Google,
-    and nobody can sign up for that email with a password. None for anyone else."""
+async def google_person(store: Store, email: str) -> Person | None:
+    """Whoever signs in with this email, else the person invited with it, whose login is then
+    reserved with a password nobody knows: the account is theirs through Google, and nobody can
+    sign up for that email with a password. None for anyone else. Raises GoogleSignInFailed
+    ("ambiguous") when two teams invited the email."""
     try:
         return await store.person((await store.login_by_email(email)).person_id)
     except NotFound:
         pass
-    if not settings.signup_team_id:
-        return None
     try:
-        team = await store.team(settings.signup_team_id)
-    except NotFound:
-        return None
-    invited = await invited_person(store, team, email)
+        invited = await invited_person(store, email)
+    except InvitedTwice:
+        raise GoogleSignInFailed("ambiguous", email) from None
     if invited is None:
         return None
+    person, _ = invited
     unusable = await run_in_threadpool(hash_password, secrets.token_urlsafe(32))
     try:
-        await store.set_login(invited.id, invited.email or email, unusable)
+        await store.set_login(person.id, person.email or email, unusable)
     except Conflict:  # someone signed up for the email meanwhile
         return None
-    return invited
+    return person
 
 
 @router.post("/google/exchange")
