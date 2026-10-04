@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Sequence
 from typing import Any
 
@@ -8,8 +9,15 @@ from pydantic import BaseModel, ValidationError
 from .base import Embeddings, EmbedTask, LLMError
 
 # Overload and transient server errors: retried briefly on the same model, then the next model.
-# Anything else (bad request, auth, unknown model) is a problem no other model will fix.
 RETRYABLE_CODES = (429, 500, 502, 503, 504)
+# A model that is retired or not offered to this key: not retried, but the next model may work.
+# Anything else (bad request, auth, invalid schema) is a problem no other model will fix.
+MISSING_MODEL_CODE = 404
+
+logger = logging.getLogger(__name__)
+
+# Models already reported missing in this process, so a stale config warns once, not per call.
+warned_missing: set[str] = set()
 
 
 def fail_fast_client(api_key: str | None, attempts: int, max_delay: float) -> genai.Client:
@@ -31,9 +39,25 @@ def describe(model: str, e: errors.APIError) -> str:
     return f"{model}: {e.code} {e.status or ''}".rstrip() + f" ({e.message})"
 
 
+def next_model_may_help(model: str, e: errors.APIError) -> bool:
+    """Whether to try the next model after `e`; warns the first time `model` is missing."""
+    if e.code == MISSING_MODEL_CODE:
+        if model not in warned_missing:
+            warned_missing.add(model)
+            logger.warning(
+                "Gemini model %s is not available to this key (%s); trying the next model. "
+                "Update the configured model chain.",
+                model,
+                describe(model, e),
+            )
+        return True
+    return e.code in RETRYABLE_CODES
+
+
 class GeminiLLM:
-    """Tries `models` in order (primary first), moving on only when a model is overloaded or
-    failing transiently. `last_model` is the model that answered the latest call."""
+    """Tries `models` in order (primary first), moving on only when a model is overloaded,
+    failing transiently, or missing for this key. `last_model` is the model that answered the
+    latest call."""
 
     def __init__(
         self,
@@ -92,7 +116,7 @@ class GeminiLLM:
                     model=model, contents=prompt, config=config
                 )
             except errors.APIError as e:
-                if e.code not in RETRYABLE_CODES:
+                if not next_model_may_help(model, e):
                     raise LLMError(f"Gemini request to {model} failed: {e}") from e
                 tried.append(describe(model, e))
                 last_error = e
@@ -111,9 +135,9 @@ EMBED_TASK_TYPES: dict[EmbedTask, str] = {
 
 
 class GeminiEmbedder:
-    """Embeds with the first of `models` that is not overloaded, at `dim` dimensions. Every
-    vector of one call comes from one model: if a model fails part-way, the next model embeds
-    all the texts again."""
+    """Embeds with the first of `models` that is not overloaded or missing, at `dim` dimensions.
+    Every vector of one call comes from one model: if a model fails part-way, the next model
+    embeds all the texts again."""
 
     def __init__(
         self,
@@ -148,7 +172,7 @@ class GeminiEmbedder:
                     batch = texts[start : start + self.batch_size]
                     vectors += await self._embed_batch(model, batch, config)
             except errors.APIError as e:
-                if e.code not in RETRYABLE_CODES:
+                if not next_model_may_help(model, e):
                     raise LLMError(f"Gemini embedding request to {model} failed: {e}") from e
                 tried.append(describe(model, e))
                 last_error = e

@@ -2,8 +2,9 @@
 
 1. Plan: the model picks up to MAX_TOOL_CALLS read-only tools, with arguments, from a fixed menu.
 2. Execute: the tools run at the same time, each with a timeout, scoped to the asker's team. What
-   they find is numbered as evidence, each item with its Source; a tool that is unconfigured or
-   fails goes into Answer.unavailable.
+   they find, and what people said in the meeting, is numbered as evidence, each item with its
+   Source; a tool that is unconfigured or fails goes into Answer.unavailable. The agent's own
+   words are context, never evidence.
 3. Answer: the model writes the answer and names the evidence it relies on. Only evidence that
    exists is cited, and inference is marked as such. With no evidence the answer says so.
 
@@ -24,7 +25,7 @@ from brain.config import Settings
 from brain.llm import LLM
 from brain.memory import MeetingMemory
 from brain.report.decisions import terms
-from brain.report.extraction import clock, speaker
+from brain.report.extraction import by_agent, clock, speaker
 from brain.store import Store
 from brain.zones import team_zone
 from contracts import (
@@ -225,6 +226,7 @@ class ToolOrchestrator:
         members = list(toolbox.members.values())
         meeting = await toolbox.meeting(question.meeting_id) if question.meeting_id else None
         recent = recent_segments(question, meeting)
+        own = [s for s in recent if by_agent(s)]
         context = render_context(question, meeting, members, today)
 
         plan = await self.llm.generate_structured(
@@ -240,6 +242,7 @@ class ToolOrchestrator:
                     source=meeting_source(meeting, s.t_start),
                 )
                 for s in recent
+                if not by_agent(s)
             ]
             groups.insert(0, said)
         evidence, omitted = number(groups, self.max_evidence, newest_first=meeting is not None)
@@ -255,7 +258,7 @@ class ToolOrchestrator:
                 unavailable=unavailable,
             )
         draft = await self.llm.generate_structured(
-            render_answer_prompt(context, question, evidence, unavailable),
+            render_answer_prompt(context, question, evidence, unavailable, own),
             DraftAnswer,
             system=answer_system(question.visibility),
         )
@@ -338,16 +341,24 @@ def number(
 
 
 FIGURES = re.compile(r"[\w.]*\d[\w.]*")
+# Words that say where an answer came from rather than what it says, and the filler around them.
+# The label for answers from the conversation is added in code, so they never count.
+META_WORDS = frozenset(
+    "earlier previously already conversation chat mentioned stated said discussed told noted as "
+    "i that was were".split()
+)
 NEGATIONS = re.compile(r"\b(?:not|no|never|none|nothing|nobody|neither|nor|cannot)\b|n't\b")
 
 
 def backed_by(text: str, history: Sequence[AskTurn]) -> bool:
     """Whether the answer restates what the agent itself said earlier: nearly all its words, and
     every figure (version, date, count) and negation, were in the agent's earlier turns. The
-    asker's own turns never count, so a premise in a question cannot back an answer."""
+    asker's own turns never count, so a premise in a question cannot back an answer. Words that
+    only say where the answer came from (META_WORDS, the agent's name) are left out."""
     said = " ".join(turn.text for turn in history if turn.role == "agent").casefold()
     answer = text.casefold()
-    words, known = terms(answer), terms(said)
+    words = terms(answer) - META_WORDS - terms(get_identity().agent_name)
+    known = terms(said)
     if not (words and known) or len(words & known) < 0.8 * len(words):
         return False
     return figures(answer) <= figures(said) and set(NEGATIONS.findall(answer)) <= set(
@@ -427,7 +438,10 @@ purpose. Choose the read-only lookups that would find the facts to answer it.
 
 Rules:
 - Pick at most {max_calls} calls, using only tool names from the menu.
-- Pick none when the conversation or the recent transcript already answers the question.
+- Pick none when the conversation or what people said in the recent transcript already answers
+  the question.
+- Lines {agent} spoke in the transcript are your own earlier answers, not a source. To answer
+  from them, look the facts up again.
 {DATA_RULE}
 - "I", "me" and "my" mean the asker. For the asker's own tasks call tasks with owner_id "me".
 - What the team said or decided lives in its meetings and decisions; the live state of issues
@@ -453,7 +467,11 @@ Rules:
 - Use only the numbered evidence and the conversation. Never add facts, names, dates, numbers or
   links that the evidence does not contain.
 - If the earlier conversation already answers the question (a rephrase or a follow-up about an
-  earlier answer), answer from it and set from_conversation to true.
+  earlier answer), answer from it and set from_conversation to true. Then give only the facts:
+  do not say they come from the conversation or from you; the app adds that label itself.
+- Never refer to yourself or to what you said before ("as mentioned earlier", "{agent} stated").
+  What you said earlier in the meeting is context only: it is not evidence, so never cite it or
+  rely on it for a fact.
 {DATA_RULE}
 - Put the id of every evidence item the answer relies on in evidence_ids. Never write ids or
   brackets in the text.
@@ -514,9 +532,21 @@ def render_tool(spec: ToolSpec, unavailable: str | None) -> str:
 
 
 def render_answer_prompt(
-    context: list[str], question: Question, evidence: list[Evidence], unavailable: list[str]
+    context: list[str],
+    question: Question,
+    evidence: list[Evidence],
+    unavailable: list[str],
+    own: Sequence[TranscriptSegment] = (),
 ) -> str:
-    lines = [*context, "", f"Question: {oneline(question.text)}", ""]
+    lines = list(context)
+    if own:
+        lines += [
+            "",
+            "What you said earlier in this meeting ([time] text). Context only, not evidence: "
+            "never cite it or rely on it for a fact:",
+        ]
+        lines += fenced(f"[{clock(s.t_start)}] {clip(s.text)}" for s in own)
+    lines += ["", f"Question: {oneline(question.text)}", ""]
     if evidence:
         lines.append("Evidence ([id] source: content; code as numbered lines):")
         lines += fenced(line for item in evidence for line in render_evidence(item))
