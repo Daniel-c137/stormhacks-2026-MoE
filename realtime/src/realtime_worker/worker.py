@@ -159,6 +159,8 @@ class MeetingSession:
             detector=detector,
             spoken_max_chars=settings.spoken_answer_max_chars,
             agenda_tick_seconds=settings.agenda_tick_seconds,
+            agenda_after_captions=settings.agenda_after_captions,
+            agenda_check_delay=settings.agenda_check_delay_seconds,
             fact_check_tick_seconds=settings.fact_check_tick_seconds,
             clock=clock,
         )
@@ -177,6 +179,7 @@ class MeetingSession:
             detector=detector,
             on_invocation=agent.on_invocation,
             on_listening=agent.on_listening,
+            on_saved=lambda saved: agent.caption_saved(max(s.t_end for s in saved)),
             clock=clock,
             translate=speech_translator(brain, meeting),
             provisional_seconds=settings.translation_provisional_seconds,

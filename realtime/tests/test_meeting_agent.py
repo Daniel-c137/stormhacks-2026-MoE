@@ -579,8 +579,9 @@ async def test_a_caption_that_settles_later_gets_its_own_check(make_agent, brain
     agent = make_agent(agenda_after_captions=True, agenda_check_delay=0.05, clock=clock)
 
     agent.caption_saved(clock())
-    agent.caption_saved(clock() + 0.2)
+    agent.caption_saved(clock() + meeting_agent.AGENDA_GATHER_S + 0.1)
 
+    await until(lambda: brain.agenda_calls == 1)
     await until(lambda: brain.agenda_calls == 2)
 
 

@@ -43,9 +43,17 @@ class Settings(BaseSettings):
     # The agenda's is short so a finished item is ticked within seconds: the brain asks its model
     # only once a tick's new stretch holds enough talk.
     agenda_tick_seconds: float = Field(default=10, gt=0)
+    # The brain's JEV_MODEL: with Jev keeping time the agenda is also checked after every caption,
+    # this long after it ends, once it has settled in the brain (at least the brain's JEV_SETTLE_S).
+    jev_model: str | None = None
+    agenda_check_delay_seconds: float = Field(default=2.5, gt=0)
     fact_check_tick_seconds: float = Field(default=60, gt=0)
     # A spoken answer stops after the last whole sentence within this many characters.
     spoken_answer_max_chars: int = Field(default=600, gt=0)
+
+    @property
+    def agenda_after_captions(self) -> bool:
+        return bool(self.jev_model)
 
 
 def missing(settings: Settings) -> list[str]:
