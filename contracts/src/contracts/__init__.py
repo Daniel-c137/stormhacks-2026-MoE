@@ -13,11 +13,18 @@ from .agent import (
     Source,
 )
 from .api import (
+    AgendaItemInput,
+    AgendaRewriteRequest,
+    AgendaRewriteResponse,
+    AgendaUpdate,
     AskRequest,
+    AskTurn,
     CreateMeetingRequest,
+    InviteRequest,
     InvokeRequest,
     InvokeResponse,
     JoinMeetingResponse,
+    ProfileUpdate,
     SegmentsIngest,
 )
 from .chat import ChatMessage
@@ -34,7 +41,7 @@ from .report import (
     TaskPushRequest,
     TaskPushResult,
 )
-from .settings import GitHubSettings, JiraSettings, TeamSettings, Voice
+from .settings import ConnectorStatus, GitHubSettings, JiraSettings, TeamSettings, Voice
 from .transcript import TranscriptSegment
 
 __all__ = [
@@ -42,18 +49,25 @@ __all__ = [
     "TOPIC_PAYLOADS",
     "Agenda",
     "AgendaItem",
+    "AgendaItemInput",
     "AgendaNudge",
+    "AgendaRewriteRequest",
+    "AgendaRewriteResponse",
+    "AgendaUpdate",
     "AgentState",
     "Answer",
     "AskRequest",
+    "AskTurn",
     "ChatMessage",
     "CodeSnippet",
+    "ConnectorStatus",
     "CreateMeetingRequest",
     "Decision",
     "DecisionRelation",
     "FactCheck",
     "GitHubSettings",
     "Identity",
+    "InviteRequest",
     "Invocation",
     "InvokeRequest",
     "InvokeResponse",
@@ -62,6 +76,7 @@ __all__ = [
     "Meeting",
     "Participant",
     "Person",
+    "ProfileUpdate",
     "QuestionAnswered",
     "Report",
     "ReportProgress",

@@ -71,6 +71,7 @@ class ReportProgress(BaseModel):
     steps: list[str]
     current: int
     done: bool
+    error: str | None = None  # why the pipeline stopped at the current step
 
 
 class TaskPushRequest(BaseModel):
