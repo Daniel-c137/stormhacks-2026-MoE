@@ -9,10 +9,8 @@ from fastapi.testclient import TestClient
 from test_auth import bearer
 
 from brain.api.deps import current_user
-from brain.api.team import CONNECTOR_FIELDS, connectors_changed
 from brain.auth import hash_password, verify_password
 from brain.store import NotFound
-from contracts import GitHubSettings, JiraSettings, TeamSettings
 
 ADMIN_ONLY = "Only an admin can do this"
 
@@ -210,7 +208,7 @@ def test_granting_admin_takes_effect_on_the_next_request(app, store):
     )
 
 
-# connectors are the admin's
+# team settings are the admin's; a person's own profile stays theirs
 
 
 def team_settings(client: TestClient, **changes) -> dict:
@@ -225,6 +223,7 @@ def linked(client_as):
         alex,
         github={"repo": "acme/checkout", "ref": "main"},
         jira={"site": "acme.atlassian.net", "project": "DS"},
+        who_can_allow="host",
     )
     response = alex.put("/settings", json=body)
     assert response.status_code == 200, response.text
@@ -232,112 +231,54 @@ def linked(client_as):
 
 
 @pytest.mark.parametrize(
-    "connector, field, value",
+    "changes",
     [
-        ("github", "repo", "evil/fork"),
-        ("github", "repo", None),
-        ("github", "ref", "release"),
-        ("jira", "site", "evil.atlassian.net"),
-        ("jira", "project", "EVIL"),
-        ("jira", "project", ""),
+        {"voice": "voice-2"},
+        {"wake_phrase": "Hey Star"},
+        {"sensitivity": "eager"},
+        {"interrupt_minutes": 9},
+        {"who_can_allow": "everyone"},
+        {"timezone": "Europe/Berlin"},
+        {"github": {"repo": "evil/fork", "ref": "main"}},
+        {"jira": {"site": "acme.atlassian.net", "project": "EVIL"}},
+        {},
     ],
 )
-def test_a_member_cannot_change_a_connector(client_as, linked, connector, field, value):
+def test_a_member_cannot_change_any_team_setting(client_as, linked, changes):
     sarah = client_as(SARAH)
-    body = team_settings(sarah, voice="voice-2")
-    body[connector] = body[connector] | {field: value}
 
-    response = sarah.put("/settings", json=body)
+    response = sarah.put("/settings", json=team_settings(sarah, **changes))
 
     assert response.status_code == 403
     assert response.json()["detail"] == ADMIN_ONLY
-    assert client_as(ALEX).get("/settings").json() == linked
+    assert sarah.get("/settings").json() == linked
 
 
-def test_a_member_still_saves_everything_else(client_as, linked):
-    sarah = client_as(SARAH)
-    body = team_settings(
-        sarah,
-        voice="voice-2",
-        wake_phrase="Hey Star",
-        sensitivity="quiet",
-        interrupt_minutes=7,
-        who_can_allow="host",
-        timezone="Europe/Berlin",
-    )
-
-    response = sarah.put("/settings", json=body)
-
-    assert response.status_code == 200, response.text
-    saved = client_as(ALEX).get("/settings").json()
-    assert (saved["voice"], saved["wake_phrase"], saved["sensitivity"]) == (
-        "voice-2",
-        "Hey Star",
-        "quiet",
-    )
-    assert (saved["interrupt_minutes"], saved["who_can_allow"], saved["timezone"]) == (
-        7,
-        "host",
-        "Europe/Berlin",
-    )
-    assert (saved["github"], saved["jira"]) == (linked["github"], linked["jira"])
-
-
-def test_a_member_may_send_the_connectors_back_untrimmed_or_with_server_state(client_as, linked):
-    sarah = client_as(SARAH)
-    body = team_settings(sarah, voice="voice-2")
-    body["github"] = body["github"] | {"repo": " acme/checkout ", "connected": True, "files": 9}
-    body["jira"] = body["jira"] | {"project": "DS ", "connected": True}
-
-    response = sarah.put("/settings", json=body)
-
-    assert response.status_code == 200, response.text
-    assert response.json()["github"] == linked["github"]
-    assert response.json()["jira"] == linked["jira"]
-
-
-def test_a_member_saves_when_no_connector_was_ever_set(client_as):
-    outsider = client_as(OUTSIDER)
-
-    response = outsider.put("/settings", json=team_settings(outsider, voice="voice-3"))
-
-    assert response.status_code == 200, response.text
-    assert response.json()["voice"] == "voice-3"
-
-
-def test_the_admin_changes_connectors(client_as, linked):
+def test_the_admin_changes_team_settings(client_as, linked):
     alex = client_as(ALEX)
-    body = team_settings(alex)
+    body = team_settings(alex, who_can_allow="everyone", voice="voice-2")
     body["github"] = body["github"] | {"repo": "acme/payments", "ref": None}
-    body["jira"] = body["jira"] | {"project": "PAY"}
 
     response = alex.put("/settings", json=body)
 
     assert response.status_code == 200, response.text
-    assert (response.json()["github"]["repo"], response.json()["github"]["ref"]) == (
-        "acme/payments",
-        None,
-    )
-    assert response.json()["jira"]["project"] == "PAY"
+    saved = client_as(SARAH).get("/settings").json()
+    assert (saved["who_can_allow"], saved["voice"]) == ("everyone", "voice-2")
+    assert (saved["github"]["repo"], saved["github"]["ref"]) == ("acme/payments", None)
 
 
-def settings_with(github: dict | None = None, jira: dict | None = None) -> TeamSettings:
-    return TeamSettings(
-        team_id=TEAM.id,
-        github=GitHubSettings(**({"repo": "acme/checkout", "ref": "main"} | (github or {}))),
-        jira=JiraSettings(**({"site": "acme.atlassian.net", "project": "DS"} | (jira or {}))),
-    )
+def test_a_member_still_reads_the_team_settings_and_connectors(client_as, linked):
+    sarah = client_as(SARAH)
+
+    assert sarah.get("/settings").json() == linked
+    assert sarah.get("/settings/connectors").status_code == 200
 
 
-def test_connectors_changed_compares_only_the_editable_values():
-    current = settings_with()
+def test_a_member_still_changes_their_own_profile_and_photo(client_as):
+    sarah = client_as(SARAH)
 
-    assert CONNECTOR_FIELDS == ("github", "jira")
-    assert not connectors_changed(current, settings_with())
-    assert not connectors_changed(current, current.model_copy(update={"voice": "v"}))
-    assert not connectors_changed(current, settings_with(github={"connected": True, "files": 3}))
-    assert not connectors_changed(current, settings_with(github={"repo": " acme/checkout "}))
-    assert connectors_changed(current, settings_with(github={"repo": "acme/other"}))
-    assert connectors_changed(current, settings_with(github={"ref": None}))
-    assert connectors_changed(current, settings_with(jira={"site": "x.atlassian.net"}))
-    assert connectors_changed(current, settings_with(jira={"project": "OPS"}))
+    assert sarah.patch("/me", json={"name": "Sarah K"}).json()["name"] == "Sarah K"
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+    photo = sarah.post("/me/photo", files={"file": ("me.png", png, "image/png")})
+    assert photo.status_code == 200, photo.text
+    assert sarah.get("/me").json()["is_admin"] is False
