@@ -84,15 +84,22 @@ class RoomChat:
         return info.stream_id
 
 
-def speech_translator(settings: Settings, brain, meeting_id: str) -> Translate | None:
-    """translate(text, language) through the brain for this meeting, or None when off (#106)."""
-    if not settings.translate_speech:
+def speech_translator(brain, meeting: Meeting) -> Translate | None:
+    """translate(text, language) through the brain, only for a meeting whose host switched
+    live translation on (#106); None otherwise, so nothing is ever sent to the model."""
+    if not meeting.translate:
         return None
 
     async def translate(text: str, language: str | None) -> TranslateResponse:
-        return await brain.translate(meeting_id, text, language)
+        return await brain.translate(meeting.id, text, language)
 
     return translate
+
+
+def scribe_language(settings: Settings, meeting: Meeting) -> str | None:
+    """None lets Scribe detect each utterance's language, which translation needs; otherwise
+    it is pinned (ELEVENLABS_STT_LANGUAGE, English by default), as without translation."""
+    return None if meeting.translate else settings.elevenlabs_stt_language
 
 
 def meeting_clock(meeting: Meeting) -> Callable[[], float]:
@@ -161,7 +168,7 @@ class MeetingSession:
                 api_key=settings.elevenlabs_api_key or "",
                 model=settings.elevenlabs_stt_model or "",
                 keyterms=keyterms,
-                language=settings.elevenlabs_stt_language,
+                language=scribe_language(settings, meeting),
                 url=settings.elevenlabs_api_url,
             ),
             bus=bus,
@@ -169,7 +176,7 @@ class MeetingSession:
             detector=detector,
             on_invocation=agent.on_invocation,
             clock=clock,
-            translate=speech_translator(settings, brain, meeting.id),
+            translate=speech_translator(brain, meeting),
             provisional_seconds=settings.translation_provisional_seconds,
         )
         agent.transcription = transcription
