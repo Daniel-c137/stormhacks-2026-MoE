@@ -15,12 +15,15 @@ class AgendaItem(BaseModel):
     owner_id: str | None = None
     sources: list[Source] = []
     status: AgendaItemStatus = "pending"
+    minutes: int | None = None  # timebox
+    added_by: str | None = None  # person id; None when the agent proposed it
 
 
 class Agenda(BaseModel):
     meeting_id: str
     items: list[AgendaItem]
     generated_at: datetime
+    updated_at: datetime | None = None  # last human edit
 
 
 class AgendaNudge(BaseModel):

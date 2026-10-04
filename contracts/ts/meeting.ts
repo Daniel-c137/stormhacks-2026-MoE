@@ -1,4 +1,4 @@
-export type MeetingStatus = "live" | "processing" | "needs_review" | "pushed";
+export type MeetingStatus = "scheduled" | "live" | "processing" | "needs_review" | "pushed";
 export type ParticipantRole = "host" | "member";
 
 /** A team member account. */
@@ -8,6 +8,8 @@ export interface Person {
   short: string;
   initials: string;
   title?: string | null;
+  email?: string | null;
+  photo_url?: string | null;
 }
 
 export interface Team {
@@ -18,6 +20,7 @@ export interface Team {
   jira_project?: string | null;
 }
 
+/** A scheduled meeting has scheduled_start and no started_at until someone starts it. */
 export interface Meeting {
   id: string;
   team_id: string;
@@ -26,9 +29,13 @@ export interface Meeting {
   code: string;
   host_id: string;
   participant_ids: string[];
+  invitee_ids: string[];
+  scheduled_start?: string | null; // ISO 8601
   started_at?: string | null; // ISO 8601
+  ended_at?: string | null; // ISO 8601
   duration_min?: number | null;
   jira_keys: string[];
+  transcript_deleted_at?: string | null; // ISO 8601; set once retention removed the segments
 }
 
 /** Live participant view; id is the account id and the LiveKit identity. */

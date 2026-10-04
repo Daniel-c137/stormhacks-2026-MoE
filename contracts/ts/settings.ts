@@ -1,5 +1,7 @@
 export type Sensitivity = "quiet" | "balanced" | "eager";
 export type WhoCanAllow = "everyone" | "host";
+export type ConnectorName = "github" | "jira";
+export type ConnectorState = "connected" | "not_configured" | "failing";
 
 export interface GitHubSettings {
   repo?: string | null;
@@ -31,4 +33,11 @@ export interface TeamSettings {
   sensitivity: Sensitivity;
   interrupt_minutes: number;
   who_can_allow: WhoCanAllow;
+}
+
+/** Whether an integration can be used right now. Failing and unconfigured are never hidden. */
+export interface ConnectorStatus {
+  name: ConnectorName;
+  state: ConnectorState;
+  detail?: string | null;
 }

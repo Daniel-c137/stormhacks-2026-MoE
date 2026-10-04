@@ -6,7 +6,11 @@ from .agent import Visibility
 
 
 class ChatMessage(BaseModel):
-    """Public messages are saved with the meeting. Private ones are ephemeral and never stored."""
+    """Public messages are saved with the meeting. Private ones are ephemeral and never stored.
+
+    A private message has visibility "private" and its recipient_id; a private question to the
+    agent uses the agent's id (AGENT_PARTICIPANT_ID) as recipient_id.
+    """
 
     id: str
     meeting_id: str

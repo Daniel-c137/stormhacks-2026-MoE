@@ -5,6 +5,8 @@ from pydantic import BaseModel
 
 Sensitivity = Literal["quiet", "balanced", "eager"]
 WhoCanAllow = Literal["everyone", "host"]
+ConnectorName = Literal["github", "jira"]
+ConnectorState = Literal["connected", "not_configured", "failing"]
 
 
 class GitHubSettings(BaseModel):
@@ -37,3 +39,11 @@ class TeamSettings(BaseModel):
     sensitivity: Sensitivity = "balanced"
     interrupt_minutes: int = 5
     who_can_allow: WhoCanAllow = "everyone"
+
+
+class ConnectorStatus(BaseModel):
+    """Whether an integration can be used right now. Failing and unconfigured are never hidden."""
+
+    name: ConnectorName
+    state: ConnectorState
+    detail: str | None = None

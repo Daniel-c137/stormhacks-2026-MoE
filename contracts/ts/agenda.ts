@@ -9,12 +9,15 @@ export interface AgendaItem {
   owner_id?: string | null;
   sources: Source[];
   status: AgendaItemStatus;
+  minutes?: number | null; // timebox
+  added_by?: string | null; // person id; null when the agent proposed it
 }
 
 export interface Agenda {
   meeting_id: string;
   items: AgendaItem[];
   generated_at: string; // ISO 8601
+  updated_at?: string | null; // ISO 8601; last human edit
 }
 
 /** A reminder that an agenda item has not come up yet. */
