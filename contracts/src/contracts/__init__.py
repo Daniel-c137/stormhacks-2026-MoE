@@ -1,6 +1,6 @@
 """Shared contract. contracts/ts mirrors these modules; change both in the same commit."""
 
-from .agenda import Agenda, AgendaItem, AgendaNudge
+from .agenda import Agenda, AgendaItem, AgendaNudge, AgendaSuggestions
 from .agent import (
     AgentState,
     Answer,
@@ -13,11 +13,23 @@ from .agent import (
     Source,
 )
 from .api import (
+    AgendaItemInput,
+    AgendaRewriteRequest,
+    AgendaRewriteResponse,
+    AgendaTrackRequest,
+    AgendaTrackResponse,
+    AgendaUpdate,
     AskRequest,
+    AskTurn,
     CreateMeetingRequest,
+    FactCheckRequest,
+    FactCheckResponse,
+    InviteRequest,
     InvokeRequest,
     InvokeResponse,
     JoinMeetingResponse,
+    KeytermsResponse,
+    ProfileUpdate,
     SegmentsIngest,
 )
 from .chat import ChatMessage
@@ -34,7 +46,7 @@ from .report import (
     TaskPushRequest,
     TaskPushResult,
 )
-from .settings import GitHubSettings, JiraSettings, TeamSettings, Voice
+from .settings import ConnectorStatus, GitHubSettings, JiraSettings, TeamSettings, Voice
 from .transcript import TranscriptSegment
 
 __all__ = [
@@ -42,26 +54,40 @@ __all__ = [
     "TOPIC_PAYLOADS",
     "Agenda",
     "AgendaItem",
+    "AgendaItemInput",
     "AgendaNudge",
+    "AgendaRewriteRequest",
+    "AgendaRewriteResponse",
+    "AgendaSuggestions",
+    "AgendaTrackRequest",
+    "AgendaTrackResponse",
+    "AgendaUpdate",
     "AgentState",
     "Answer",
     "AskRequest",
+    "AskTurn",
     "ChatMessage",
     "CodeSnippet",
+    "ConnectorStatus",
     "CreateMeetingRequest",
     "Decision",
     "DecisionRelation",
     "FactCheck",
+    "FactCheckRequest",
+    "FactCheckResponse",
     "GitHubSettings",
     "Identity",
+    "InviteRequest",
     "Invocation",
     "InvokeRequest",
     "InvokeResponse",
     "JiraSettings",
     "JoinMeetingResponse",
+    "KeytermsResponse",
     "Meeting",
     "Participant",
     "Person",
+    "ProfileUpdate",
     "QuestionAnswered",
     "Report",
     "ReportProgress",

@@ -1,0 +1,530 @@
+[
+  {
+    "sha": "e6940d25df99e4859b4a18b7549b3beac9b561bc",
+    "html_url": "https://github.com/dropsubs/dropsubs/commit/e6940d25df99e4859b4a18b7549b3beac9b561bc",
+    "commit": {
+      "message": "Enforce the Approve check inside the cancel service (#50)",
+      "author": {
+        "name": "Hossein",
+        "email": "hossein@dropsubs.example",
+        "date": "2026-10-02T23:40:00Z"
+      },
+      "committer": {
+        "name": "Hossein",
+        "email": "hossein@dropsubs.example",
+        "date": "2026-10-02T23:40:00Z"
+      }
+    },
+    "author": {
+      "login": "hossein-dropsubs",
+      "id": 99392202,
+      "type": "User",
+      "html_url": "https://github.com/hossein-dropsubs"
+    },
+    "_pr_number": 50
+  },
+  {
+    "sha": "e20e7e57ed620b2c968659677cc7b8067d6e1462",
+    "html_url": "https://github.com/dropsubs/dropsubs/commit/e20e7e57ed620b2c968659677cc7b8067d6e1462",
+    "commit": {
+      "message": "AI: state cancellation terms only from provider terms or emails (#48)",
+      "author": {
+        "name": "Hossein",
+        "email": "hossein@dropsubs.example",
+        "date": "2026-10-01T22:20:00Z"
+      },
+      "committer": {
+        "name": "Hossein",
+        "email": "hossein@dropsubs.example",
+        "date": "2026-10-01T22:20:00Z"
+      }
+    },
+    "author": {
+      "login": "hossein-dropsubs",
+      "id": 99392202,
+      "type": "User",
+      "html_url": "https://github.com/hossein-dropsubs"
+    },
+    "_pr_number": 48
+  },
+  {
+    "sha": "83f12fb0f7c89bead93ede0c0642be304ff970cf",
+    "html_url": "https://github.com/dropsubs/dropsubs/commit/83f12fb0f7c89bead93ede0c0642be304ff970cf",
+    "commit": {
+      "message": "Inbox sync: check for a repeated page token before appending (#46)",
+      "author": {
+        "name": "Mohammad Reza",
+        "email": "mohammadreza@dropsubs.example",
+        "date": "2026-10-01T18:00:00Z"
+      },
+      "committer": {
+        "name": "Mohammad Reza",
+        "email": "mohammadreza@dropsubs.example",
+        "date": "2026-10-01T18:00:00Z"
+      }
+    },
+    "author": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "_pr_number": 46
+  },
+  {
+    "sha": "65e249e6d0a9f001b800fe9f60081d473889ea01",
+    "html_url": "https://github.com/dropsubs/dropsubs/commit/65e249e6d0a9f001b800fe9f60081d473889ea01",
+    "commit": {
+      "message": "Read full email bodies, not just subject and snippet (#44)",
+      "author": {
+        "name": "Hossein",
+        "email": "hossein@dropsubs.example",
+        "date": "2026-09-29T23:00:00Z"
+      },
+      "committer": {
+        "name": "Hossein",
+        "email": "hossein@dropsubs.example",
+        "date": "2026-09-29T23:00:00Z"
+      }
+    },
+    "author": {
+      "login": "hossein-dropsubs",
+      "id": 99392202,
+      "type": "User",
+      "html_url": "https://github.com/hossein-dropsubs"
+    },
+    "_pr_number": 44
+  },
+  {
+    "sha": "85a462628ce2c5f5028f4d6fec52fea8fbf744d3",
+    "html_url": "https://github.com/dropsubs/dropsubs/commit/85a462628ce2c5f5028f4d6fec52fea8fbf744d3",
+    "commit": {
+      "message": "Move renewal warning job from midnight to 6am (#40)",
+      "author": {
+        "name": "Mohammad Reza",
+        "email": "mohammadreza@dropsubs.example",
+        "date": "2026-09-25T22:30:00Z"
+      },
+      "committer": {
+        "name": "Mohammad Reza",
+        "email": "mohammadreza@dropsubs.example",
+        "date": "2026-09-25T22:30:00Z"
+      }
+    },
+    "author": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "_pr_number": 40
+  },
+  {
+    "sha": "e0fb190ea6e811c86fea8c8e3049ea2d391c7d20",
+    "html_url": "https://github.com/dropsubs/dropsubs/commit/e0fb190ea6e811c86fea8c8e3049ea2d391c7d20",
+    "commit": {
+      "message": "Eval set: expand to 200 emails (#34)",
+      "author": {
+        "name": "Hossein",
+        "email": "hossein@dropsubs.example",
+        "date": "2026-09-18T23:00:00Z"
+      },
+      "committer": {
+        "name": "Hossein",
+        "email": "hossein@dropsubs.example",
+        "date": "2026-09-18T23:00:00Z"
+      }
+    },
+    "author": {
+      "login": "hossein-dropsubs",
+      "id": 99392202,
+      "type": "User",
+      "html_url": "https://github.com/hossein-dropsubs"
+    },
+    "_pr_number": 34
+  },
+  {
+    "sha": "51e882cd5a7578bb0776f33a934f42d6b2bccb02",
+    "html_url": "https://github.com/dropsubs/dropsubs/commit/51e882cd5a7578bb0776f33a934f42d6b2bccb02",
+    "commit": {
+      "message": "Weekly email: compute totals at send time (#33)",
+      "author": {
+        "name": "Mohammad Reza",
+        "email": "mohammadreza@dropsubs.example",
+        "date": "2026-09-17T19:00:00Z"
+      },
+      "committer": {
+        "name": "Mohammad Reza",
+        "email": "mohammadreza@dropsubs.example",
+        "date": "2026-09-17T19:00:00Z"
+      }
+    },
+    "author": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "_pr_number": 33
+  },
+  {
+    "sha": "2f2ead7676187e58af951d2a6dcc832d1ea2c4ae",
+    "html_url": "https://github.com/dropsubs/dropsubs/commit/2f2ead7676187e58af951d2a6dcc832d1ea2c4ae",
+    "commit": {
+      "message": "Dashboard: Cancel button with Approve modal (#30)",
+      "author": {
+        "name": "Reyhaneh",
+        "email": "reyhaneh@dropsubs.example",
+        "date": "2026-09-11T00:00:00Z"
+      },
+      "committer": {
+        "name": "Reyhaneh",
+        "email": "reyhaneh@dropsubs.example",
+        "date": "2026-09-11T00:00:00Z"
+      }
+    },
+    "author": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "_pr_number": 30
+  },
+  {
+    "sha": "a1dbc24d0f417d5dd64bd137ac409f9c1ac780ff",
+    "html_url": "https://github.com/dropsubs/dropsubs/commit/a1dbc24d0f417d5dd64bd137ac409f9c1ac780ff",
+    "commit": {
+      "message": "Fix iPhone login crash (keychain race) (#28)",
+      "author": {
+        "name": "Reyhaneh",
+        "email": "reyhaneh@dropsubs.example",
+        "date": "2026-09-04T18:00:00Z"
+      },
+      "committer": {
+        "name": "Reyhaneh",
+        "email": "reyhaneh@dropsubs.example",
+        "date": "2026-09-04T18:00:00Z"
+      }
+    },
+    "author": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "_pr_number": 28
+  },
+  {
+    "sha": "befd7fec477d9b2a5dd5eb169cf55bbdb84133d6",
+    "html_url": "https://github.com/dropsubs/dropsubs/commit/befd7fec477d9b2a5dd5eb169cf55bbdb84133d6",
+    "commit": {
+      "message": "AI: ask the user to Approve before any cancellation (#27)",
+      "author": {
+        "name": "Hossein",
+        "email": "hossein@dropsubs.example",
+        "date": "2026-09-02T21:00:00Z"
+      },
+      "committer": {
+        "name": "Hossein",
+        "email": "hossein@dropsubs.example",
+        "date": "2026-09-02T21:00:00Z"
+      }
+    },
+    "author": {
+      "login": "hossein-dropsubs",
+      "id": 99392202,
+      "type": "User",
+      "html_url": "https://github.com/hossein-dropsubs"
+    },
+    "_pr_number": 27
+  },
+  {
+    "sha": "3cae0ce42339bb8fa18f089ab4bf0a1b7dfa79ee",
+    "html_url": "https://github.com/dropsubs/dropsubs/commit/3cae0ce42339bb8fa18f089ab4bf0a1b7dfa79ee",
+    "commit": {
+      "message": "Billing: migrate to payment provider API v2 (#26)",
+      "author": {
+        "name": "Mohammad Reza",
+        "email": "mohammadreza@dropsubs.example",
+        "date": "2026-08-31T19:30:00Z"
+      },
+      "committer": {
+        "name": "Mohammad Reza",
+        "email": "mohammadreza@dropsubs.example",
+        "date": "2026-08-31T19:30:00Z"
+      }
+    },
+    "author": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "_pr_number": 26
+  },
+  {
+    "sha": "0abe6e5bc556dbacb9736a4031ad60af3871e33c",
+    "html_url": "https://github.com/dropsubs/dropsubs/commit/0abe6e5bc556dbacb9736a4031ad60af3871e33c",
+    "commit": {
+      "message": "Eval set: expand to 120 emails (#24)",
+      "author": {
+        "name": "Hossein",
+        "email": "hossein@dropsubs.example",
+        "date": "2026-08-29T00:30:00Z"
+      },
+      "committer": {
+        "name": "Hossein",
+        "email": "hossein@dropsubs.example",
+        "date": "2026-08-29T00:30:00Z"
+      }
+    },
+    "author": {
+      "login": "hossein-dropsubs",
+      "id": 99392202,
+      "type": "User",
+      "html_url": "https://github.com/hossein-dropsubs"
+    },
+    "_pr_number": 24
+  },
+  {
+    "sha": "613ce6ff38f65779ec646994b7a5238fc4facc15",
+    "html_url": "https://github.com/dropsubs/dropsubs/commit/613ce6ff38f65779ec646994b7a5238fc4facc15",
+    "commit": {
+      "message": "Billing: 30% success fee (#22)",
+      "author": {
+        "name": "Mohammad Reza",
+        "email": "mohammadreza@dropsubs.example",
+        "date": "2026-08-28T22:00:00Z"
+      },
+      "committer": {
+        "name": "Mohammad Reza",
+        "email": "mohammadreza@dropsubs.example",
+        "date": "2026-08-28T22:00:00Z"
+      }
+    },
+    "author": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "_pr_number": 22
+  },
+  {
+    "sha": "778ad4100f1146ba77c70f044a632909ad802359",
+    "html_url": "https://github.com/dropsubs/dropsubs/commit/778ad4100f1146ba77c70f044a632909ad802359",
+    "commit": {
+      "message": "Show CAD for Canadian receipts (#21)",
+      "author": {
+        "name": "Reyhaneh",
+        "email": "reyhaneh@dropsubs.example",
+        "date": "2026-08-27T20:30:00Z"
+      },
+      "committer": {
+        "name": "Reyhaneh",
+        "email": "reyhaneh@dropsubs.example",
+        "date": "2026-08-27T20:30:00Z"
+      }
+    },
+    "author": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "_pr_number": 21
+  },
+  {
+    "sha": "fb66193a2d61399d0135e79a72b26df995d7d7e3",
+    "html_url": "https://github.com/dropsubs/dropsubs/commit/fb66193a2d61399d0135e79a72b26df995d7d7e3",
+    "commit": {
+      "message": "Fix Outlook OAuth redirect loop (#19)",
+      "author": {
+        "name": "Reyhaneh",
+        "email": "reyhaneh@dropsubs.example",
+        "date": "2026-08-26T21:05:00Z"
+      },
+      "committer": {
+        "name": "Reyhaneh",
+        "email": "reyhaneh@dropsubs.example",
+        "date": "2026-08-26T21:05:00Z"
+      }
+    },
+    "author": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "_pr_number": 19
+  },
+  {
+    "sha": "04bac41927574aea6dc10b4c8b7c6ba058453c21",
+    "html_url": "https://github.com/dropsubs/dropsubs/commit/04bac41927574aea6dc10b4c8b7c6ba058453c21",
+    "commit": {
+      "message": "PDF savings report export (#18)",
+      "author": {
+        "name": "Reyhaneh",
+        "email": "reyhaneh@dropsubs.example",
+        "date": "2026-08-25T23:00:00Z"
+      },
+      "committer": {
+        "name": "Reyhaneh",
+        "email": "reyhaneh@dropsubs.example",
+        "date": "2026-08-25T23:00:00Z"
+      }
+    },
+    "author": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "_pr_number": 18
+  },
+  {
+    "sha": "989e61e4a0ea3fd9f7bf9994e05fd21382783d65",
+    "html_url": "https://github.com/dropsubs/dropsubs/commit/989e61e4a0ea3fd9f7bf9994e05fd21382783d65",
+    "commit": {
+      "message": "Beta invite flow (#17)",
+      "author": {
+        "name": "Reyhaneh",
+        "email": "reyhaneh@dropsubs.example",
+        "date": "2026-08-24T01:00:00Z"
+      },
+      "committer": {
+        "name": "Reyhaneh",
+        "email": "reyhaneh@dropsubs.example",
+        "date": "2026-08-24T01:00:00Z"
+      }
+    },
+    "author": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "_pr_number": 17
+  },
+  {
+    "sha": "2a69d2b8f2443d9f703997a2d07800c3d8e531af",
+    "html_url": "https://github.com/dropsubs/dropsubs/commit/2a69d2b8f2443d9f703997a2d07800c3d8e531af",
+    "commit": {
+      "message": "Handle Spotify's new receipt format (#15)",
+      "author": {
+        "name": "Hossein",
+        "email": "hossein@dropsubs.example",
+        "date": "2026-08-19T23:00:00Z"
+      },
+      "committer": {
+        "name": "Hossein",
+        "email": "hossein@dropsubs.example",
+        "date": "2026-08-19T23:00:00Z"
+      }
+    },
+    "author": {
+      "login": "hossein-dropsubs",
+      "id": 99392202,
+      "type": "User",
+      "html_url": "https://github.com/hossein-dropsubs"
+    },
+    "_pr_number": 15
+  },
+  {
+    "sha": "67ee8730d16384603b1f843999df6fc8ba12d387",
+    "html_url": "https://github.com/dropsubs/dropsubs/commit/67ee8730d16384603b1f843999df6fc8ba12d387",
+    "commit": {
+      "message": "Set up Sentry for api and web (#8)",
+      "author": {
+        "name": "Mohammad Reza",
+        "email": "mohammadreza@dropsubs.example",
+        "date": "2026-08-06T18:00:00Z"
+      },
+      "committer": {
+        "name": "Mohammad Reza",
+        "email": "mohammadreza@dropsubs.example",
+        "date": "2026-08-06T18:00:00Z"
+      }
+    },
+    "author": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "_pr_number": 8
+  },
+  {
+    "sha": "72ea383247d3a83af7caf2da662062dd7ffa5879",
+    "html_url": "https://github.com/dropsubs/dropsubs/commit/72ea383247d3a83af7caf2da662062dd7ffa5879",
+    "commit": {
+      "message": "Dashboard subscription list (#6)",
+      "author": {
+        "name": "Reyhaneh",
+        "email": "reyhaneh@dropsubs.example",
+        "date": "2026-08-03T23:20:00Z"
+      },
+      "committer": {
+        "name": "Reyhaneh",
+        "email": "reyhaneh@dropsubs.example",
+        "date": "2026-08-03T23:20:00Z"
+      }
+    },
+    "author": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "_pr_number": 6
+  },
+  {
+    "sha": "db9995985e5c79622f5d60a0be0560bd915c7049",
+    "html_url": "https://github.com/dropsubs/dropsubs/commit/db9995985e5c79622f5d60a0be0560bd915c7049",
+    "commit": {
+      "message": "LLM receipt classifier + 50-email eval set (#4)",
+      "author": {
+        "name": "Hossein",
+        "email": "hossein@dropsubs.example",
+        "date": "2026-07-30T00:00:00Z"
+      },
+      "committer": {
+        "name": "Hossein",
+        "email": "hossein@dropsubs.example",
+        "date": "2026-07-30T00:00:00Z"
+      }
+    },
+    "author": {
+      "login": "hossein-dropsubs",
+      "id": 99392202,
+      "type": "User",
+      "html_url": "https://github.com/hossein-dropsubs"
+    },
+    "_pr_number": 4
+  },
+  {
+    "sha": "1b17227d90a95f446849ec230ef699f25898ddab",
+    "html_url": "https://github.com/dropsubs/dropsubs/commit/1b17227d90a95f446849ec230ef699f25898ddab",
+    "commit": {
+      "message": "Gmail inbox sync v1 (#2)",
+      "author": {
+        "name": "Mohammad Reza",
+        "email": "mohammadreza@dropsubs.example",
+        "date": "2026-07-22T22:10:00Z"
+      },
+      "committer": {
+        "name": "Mohammad Reza",
+        "email": "mohammadreza@dropsubs.example",
+        "date": "2026-07-22T22:10:00Z"
+      }
+    },
+    "author": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "_pr_number": 2
+  }
+]

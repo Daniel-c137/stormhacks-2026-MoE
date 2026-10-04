@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel
@@ -71,6 +71,8 @@ class ReportProgress(BaseModel):
     steps: list[str]
     current: int
     done: bool
+    error: str | None = None  # why the pipeline stopped at the current step
+    updated_at: datetime | None = None  # when the write-up last saved progress
 
 
 class TaskPushRequest(BaseModel):
@@ -86,3 +88,4 @@ class TaskPushResult(BaseModel):
     key: str | None = None
     url: str | None = None
     error: str | None = None
+    warning: str | None = None  # e.g. "created unassigned: ..." when it was created anyway

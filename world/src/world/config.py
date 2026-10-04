@@ -10,6 +10,7 @@ REPO_ROOT = WORLD_ROOT.parent
 SNAPSHOTS_DIR = WORLD_ROOT / "snapshots"
 MEETINGS_DIR = WORLD_ROOT / "meetings"
 OVERLAY_DIR = WORLD_ROOT / ".overlay"
+MOCK_DATA_DIR = REPO_ROOT / "mock-data"  # records in the real APIs' shapes, e.g. jira/issues.json
 
 SnapshotName = Literal["dev", "demo"]
 
@@ -33,6 +34,7 @@ class Settings(BaseSettings):
     world_today_override: datetime | None = None
     world_github_mcp_port: int = 8101
     world_jira_mcp_port: int = 8102
+    world_overlay_dir: Path = OVERLAY_DIR
 
 
 def world_spec() -> WorldSpec:

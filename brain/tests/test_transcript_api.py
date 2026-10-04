@@ -1,12 +1,14 @@
 """Final transcript segments: the worker saves them, team members read them back."""
 
+import asyncio
 import json
+from datetime import UTC, datetime
 
 import pytest
 from api_support import ALEX, OUTSIDER, SARAH, WORKER_TOKEN, create
 from fastapi.testclient import TestClient
 
-from brain.api.deps import app_settings
+from brain.api.deps import get_settings
 from brain.config import Settings
 
 
@@ -25,7 +27,8 @@ def segment(meeting_id: str, n: int, *, speaker=ALEX, t: float | None = None, **
 
 
 def started(client_as, *people) -> dict:
-    """A live meeting hosted by Alex that these people joined through the link."""
+    """A live meeting hosted by Alex that these people (Alex and Sarah by default) joined
+    through the link, as everyone does."""
     meeting = create(client_as(ALEX))
     for person in people or (ALEX, SARAH):
         assert client_as(person).post(f"/meetings/join/{meeting['code']}").status_code == 200
@@ -71,7 +74,7 @@ def test_request_with_a_wrong_worker_token_is_refused(app, client_as):
 
 def test_internal_routes_are_unavailable_when_no_worker_token_is_configured(app, client_as):
     meeting = started(client_as)
-    app.dependency_overrides[app_settings] = lambda: Settings(_env_file=None)
+    app.dependency_overrides[get_settings] = lambda: Settings(_env_file=None)
     worker = TestClient(app, headers={"X-Internal-Token": WORKER_TOKEN})
 
     response = ingest(worker, meeting["id"], segment(meeting["id"], 1))
@@ -90,7 +93,7 @@ def test_a_non_ascii_token_is_refused_not_an_error(app, client_as):
 
 def test_a_short_worker_token_counts_as_not_configured(app, client_as):
     meeting = started(client_as)
-    app.dependency_overrides[app_settings] = lambda: Settings(
+    app.dependency_overrides[get_settings] = lambda: Settings(
         _env_file=None, brain_internal_token="short"
     )
     worker = TestClient(app, headers={"X-Internal-Token": "short"})
@@ -189,6 +192,41 @@ def test_another_team_cannot_read_the_transcript(worker, client_as):
     response = transcript(client_as(OUTSIDER), meeting["id"])
 
     assert response.status_code == 404
+
+
+# after retention deleted the transcript
+
+DELETED_AT = datetime(2026, 10, 20, 3, 0, tzinfo=UTC)
+
+
+def deleted_by_retention(store, worker, client_as) -> dict:
+    alex = client_as(ALEX)
+    meeting = started(client_as)
+    ingest(worker, meeting["id"], segment(meeting["id"], 1), segment(meeting["id"], 2))
+    alex.post(f"/meetings/{meeting['id']}/end")
+    asyncio.run(store.delete_transcript(meeting["id"], DELETED_AT))
+    return meeting
+
+
+def test_a_deleted_transcript_reads_as_empty_and_the_meeting_says_when(store, worker, client_as):
+    meeting = deleted_by_retention(store, worker, client_as)
+    sarah = client_as(SARAH)
+
+    response = transcript(sarah, meeting["id"])
+
+    assert response.status_code == 200
+    assert response.json() == []
+    deleted_at = sarah.get(f"/meetings/{meeting['id']}").json()["transcript_deleted_at"]
+    assert datetime.fromisoformat(deleted_at) == DELETED_AT
+
+
+def test_a_late_resend_cannot_bring_a_deleted_transcript_back(store, worker, client_as):
+    meeting = deleted_by_retention(store, worker, client_as)
+
+    response = ingest(worker, meeting["id"], segment(meeting["id"], 1), segment(meeting["id"], 3))
+
+    assert response.status_code == 409
+    assert transcript(client_as(ALEX), meeting["id"]).json() == []
 
 
 # what is refused, so the record everything reads from stays clean

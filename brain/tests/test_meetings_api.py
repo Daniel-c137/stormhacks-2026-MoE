@@ -16,7 +16,7 @@ from api_support import (
 )
 from livekit.api import TokenVerifier
 
-from brain.api.deps import app_settings, get_rooms
+from brain.api.deps import get_rooms, get_settings
 from brain.config import Settings
 
 # test harness
@@ -192,7 +192,7 @@ def test_ended_meeting_cannot_be_joined(client_as):
 
 def test_join_without_livekit_credentials_is_unavailable_not_faked(app, client_as):
     meeting = create(client_as(ALEX))
-    app.dependency_overrides[app_settings] = lambda: Settings(_env_file=None)
+    app.dependency_overrides[get_settings] = lambda: Settings(_env_file=None)
 
     response = client_as(SARAH).post(f"/meetings/join/{meeting['code']}")
 
@@ -233,14 +233,13 @@ def test_ending_twice_is_harmless(client_as):
     assert response.json()["status"] == "processing"
 
 
-def test_ending_records_how_long_the_meeting_ran(client_as):
+def test_ending_records_when_the_meeting_ended(client_as):
     alex = client_as(ALEX)
     meeting = create(alex)
 
     ended = alex.post(f"/meetings/{meeting['id']}/end").json()
 
-    assert ended["duration_min"] is not None
-    assert ended["duration_min"] >= 0
+    assert ended["ended_at"] is not None
 
 
 def test_ending_closes_the_livekit_room_once(client_as, rooms):

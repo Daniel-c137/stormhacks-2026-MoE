@@ -1,0 +1,201 @@
+[
+  {
+    "id": 1008,
+    "tag_name": "v0.9.3",
+    "name": "v0.9.3",
+    "body": "AI reads full email bodies.\n\n## Included\n- Read full email bodies, not just subject and snippet (#44)",
+    "target_commitish": "65e249e6d0a9f001b800fe9f60081d473889ea01",
+    "draft": false,
+    "prerelease": false,
+    "created_at": "2026-09-30T22:00:00Z",
+    "published_at": "2026-09-30T22:00:00Z",
+    "author": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "html_url": "https://github.com/dropsubs/dropsubs/releases/tag/v0.9.3",
+    "_included_pull_requests": [
+      44
+    ]
+  },
+  {
+    "id": 1007,
+    "tag_name": "v0.9.1",
+    "name": "v0.9.1",
+    "body": "Renewal warnings move to 6am.\n\n## Included\n- Move renewal warning job from midnight to 6am (#40)",
+    "target_commitish": "85a462628ce2c5f5028f4d6fec52fea8fbf744d3",
+    "draft": false,
+    "prerelease": false,
+    "created_at": "2026-09-26T00:00:00Z",
+    "published_at": "2026-09-26T00:00:00Z",
+    "author": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "html_url": "https://github.com/dropsubs/dropsubs/releases/tag/v0.9.1",
+    "_included_pull_requests": [
+      40
+    ]
+  },
+  {
+    "id": 1006,
+    "tag_name": "v0.8.0",
+    "name": "v0.8.0",
+    "body": "200-email eval set.\n\n## Included\n- Eval set: expand to 200 emails (#34)",
+    "target_commitish": "e0fb190ea6e811c86fea8c8e3049ea2d391c7d20",
+    "draft": false,
+    "prerelease": false,
+    "created_at": "2026-09-22T23:00:00Z",
+    "published_at": "2026-09-22T23:00:00Z",
+    "author": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "html_url": "https://github.com/dropsubs/dropsubs/releases/tag/v0.8.0",
+    "_included_pull_requests": [
+      34
+    ]
+  },
+  {
+    "id": 1005,
+    "tag_name": "v0.7.0",
+    "name": "v0.7.0",
+    "body": "Weekly email fix.\n\n## Included\n- Weekly email: compute totals at send time (#33)",
+    "target_commitish": "51e882cd5a7578bb0776f33a934f42d6b2bccb02",
+    "draft": false,
+    "prerelease": false,
+    "created_at": "2026-09-17T23:00:00Z",
+    "published_at": "2026-09-17T23:00:00Z",
+    "author": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "html_url": "https://github.com/dropsubs/dropsubs/releases/tag/v0.7.0",
+    "_included_pull_requests": [
+      33
+    ]
+  },
+  {
+    "id": 1004,
+    "tag_name": "v0.6.0",
+    "name": "v0.6.0",
+    "body": "Cancel button with Approve modal.\n\n## Included\n- Dashboard: Cancel button with Approve modal (#30)",
+    "target_commitish": "2f2ead7676187e58af951d2a6dcc832d1ea2c4ae",
+    "draft": false,
+    "prerelease": false,
+    "created_at": "2026-09-11T23:00:00Z",
+    "published_at": "2026-09-11T23:00:00Z",
+    "author": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "html_url": "https://github.com/dropsubs/dropsubs/releases/tag/v0.6.0",
+    "_included_pull_requests": [
+      30
+    ]
+  },
+  {
+    "id": 1003,
+    "tag_name": "v0.5.0",
+    "name": "v0.5.0",
+    "body": "iPhone login fix, Approve rule.\n\n## Included\n- AI: ask the user to Approve before any cancellation (#27)\n- Fix iPhone login crash (keychain race) (#28)",
+    "target_commitish": "a1dbc24d0f417d5dd64bd137ac409f9c1ac780ff",
+    "draft": false,
+    "prerelease": false,
+    "created_at": "2026-09-04T23:00:00Z",
+    "published_at": "2026-09-04T23:00:00Z",
+    "author": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "html_url": "https://github.com/dropsubs/dropsubs/releases/tag/v0.5.0",
+    "_included_pull_requests": [
+      27,
+      28
+    ]
+  },
+  {
+    "id": 1002,
+    "tag_name": "v0.4.1",
+    "name": "v0.4.1",
+    "body": "CAD prices, Outlook fix, 30% fee, payments v2.\n\n## Included\n- PDF savings report export (#18)\n- Fix Outlook OAuth redirect loop (#19)\n- Show CAD for Canadian receipts (#21)\n- Billing: 30% success fee (#22)\n- Eval set: expand to 120 emails (#24)\n- Billing: migrate to payment provider API v2 (#26)",
+    "target_commitish": "3cae0ce42339bb8fa18f089ab4bf0a1b7dfa79ee",
+    "draft": false,
+    "prerelease": false,
+    "created_at": "2026-08-31T22:00:00Z",
+    "published_at": "2026-08-31T22:00:00Z",
+    "author": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "html_url": "https://github.com/dropsubs/dropsubs/releases/tag/v0.4.1",
+    "_included_pull_requests": [
+      18,
+      19,
+      21,
+      22,
+      24,
+      26
+    ]
+  },
+  {
+    "id": 1001,
+    "tag_name": "v0.4.0",
+    "name": "v0.4.0 - private beta",
+    "body": "Private beta opens.\n\n## Included\n- Handle Spotify's new receipt format (#15)\n- Beta invite flow (#17)",
+    "target_commitish": "989e61e4a0ea3fd9f7bf9994e05fd21382783d65",
+    "draft": false,
+    "prerelease": false,
+    "created_at": "2026-08-24T17:00:00Z",
+    "published_at": "2026-08-24T17:00:00Z",
+    "author": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "html_url": "https://github.com/dropsubs/dropsubs/releases/tag/v0.4.0",
+    "_included_pull_requests": [
+      15,
+      17
+    ]
+  },
+  {
+    "id": 1000,
+    "tag_name": "v0.3.0",
+    "name": "v0.3.0",
+    "body": "Dashboard, error tracking.\n\n## Included\n- Gmail inbox sync v1 (#2)\n- LLM receipt classifier + 50-email eval set (#4)\n- Dashboard subscription list (#6)\n- Set up Sentry for api and web (#8)",
+    "target_commitish": "67ee8730d16384603b1f843999df6fc8ba12d387",
+    "draft": false,
+    "prerelease": false,
+    "created_at": "2026-08-10T23:00:00Z",
+    "published_at": "2026-08-10T23:00:00Z",
+    "author": {
+      "login": "mohammadreza-dropsubs",
+      "id": 109862773,
+      "type": "User",
+      "html_url": "https://github.com/mohammadreza-dropsubs"
+    },
+    "html_url": "https://github.com/dropsubs/dropsubs/releases/tag/v0.3.0",
+    "_included_pull_requests": [
+      2,
+      4,
+      6,
+      8
+    ]
+  }
+]
