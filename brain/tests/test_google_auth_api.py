@@ -292,3 +292,23 @@ def test_a_failed_google_sign_in_leaves_no_login_behind(client, google, store):
 
     with pytest.raises(NotFound):
         asyncio.run(store.login(PRIYA.id))
+
+
+def test_behind_a_proxy_google_uses_the_public_callback_url_and_the_cookie_still_returns(
+    app, client, google, settings
+):
+    """In production the brain sits under the board's origin at /api: Google must send the
+    browser to the public URL, and the flow cookie must come back on that path too."""
+    public = f"{BOARD}/api/auth/google/callback"
+    app.dependency_overrides[get_settings] = lambda: settings.model_copy(
+        update={"google_redirect_url": public}
+    )
+
+    sent = start(client, google)
+    cookie = client.cookies.jar
+    back = landed(back_from_google(client, code="google-code", state=sent["state"]))
+
+    assert sent["redirect_uri"] == public
+    assert google.token_requests[0]["redirect_uri"] == public
+    assert all(c.path == "/" for c in cookie if c.name == "google_signin")
+    assert "google" in back
