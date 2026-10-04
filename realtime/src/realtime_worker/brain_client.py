@@ -15,6 +15,8 @@ from contracts import (
     KeytermsResponse,
     SegmentsIngest,
     TranscriptSegment,
+    TranslateRequest,
+    TranslateResponse,
     WorkerMeetingResponse,
 )
 
@@ -66,6 +68,10 @@ class BrainClient(Protocol):
 
     async def fact_check(self, meeting_id: str) -> FactCheckResponse: ...
 
+    async def translate(
+        self, meeting_id: str, text: str, language: str | None
+    ) -> TranslateResponse: ...
+
 
 class HttpBrainClient:
     """Retries only idempotent calls: network failures and transient statuses, with backoff.
@@ -83,6 +89,7 @@ class HttpBrainClient:
         backoff: float = 0.5,
         timeout: float = 5.0,
         invoke_timeout: float = 30.0,
+        translate_timeout: float = 4.0,
     ):
         self._http = httpx.AsyncClient(
             base_url=base_url,
@@ -93,6 +100,7 @@ class HttpBrainClient:
         self._attempts = max(1, attempts)
         self._backoff = backoff
         self._invoke_timeout = invoke_timeout
+        self._translate_timeout = translate_timeout
 
     async def ingest_segments(self, meeting_id: str, segments: list[TranscriptSegment]) -> None:
         if not segments:
@@ -161,6 +169,20 @@ class HttpBrainClient:
             timeout=self._invoke_timeout,
         )
         return FactCheckResponse.model_validate_json(response.content)
+
+    async def translate(
+        self, meeting_id: str, text: str, language: str | None
+    ) -> TranslateResponse:
+        """Speech into English for a live caption (#106). One attempt with a short timeout: a
+        caption that arrives late is worse than the original shown untranslated."""
+        body = TranslateRequest(text=text, language=language).model_dump(mode="json")
+        response = await self._post(
+            f"/internal/meetings/{meeting_id}/translate",
+            body,
+            idempotent=False,
+            timeout=self._translate_timeout,
+        )
+        return TranslateResponse.model_validate_json(response.content)
 
     async def aclose(self) -> None:
         await self._http.aclose()
