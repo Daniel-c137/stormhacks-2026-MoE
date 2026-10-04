@@ -27,6 +27,7 @@ NOT_FINE_GRAINED = (
     "Paste a fine-grained personal access token (it starts with github_pat_), with read access "
     "to the team's repositories"
 )
+RATE_LIMITED = "GitHub's rate limit was reached: try again in a few minutes"
 CONNECT_AGAIN = (
     "the connected token can't be read on this server: an admin must connect GitHub again"
 )
@@ -78,6 +79,8 @@ class GitHubApi:
             raise GitHubUnreachable(f"Could not reach GitHub: {type(e).__name__}") from None
         if response.status_code >= 500:
             raise GitHubUnreachable(f"GitHub answered {response.status_code}")
+        if rate_limited(response):  # not the token's fault: no answer about it yet
+            raise GitHubUnreachable(RATE_LIMITED)
         return response
 
     def _client(self) -> httpx.AsyncClient:
@@ -105,17 +108,24 @@ class GitHubApi:
         """Why the token cannot read what the brain reads of `repo` (owner/name), naming the
         permission it lacks; None when it can. An empty repository has no code to read."""
         path = "/repos/" + quote(repo, safe="/")
-        found: dict[Part, int] = {}
+        found: dict[Part, int | GitHubUnreachable] = {}
 
         async with self._client() as client:
 
             async def ask(part: Part) -> None:
-                found[part] = (await self._get(client, path + PARTS[part][0])).status_code
+                # Kept, not raised: the task group would wrap it in an ExceptionGroup.
+                try:
+                    found[part] = (await self._get(client, path + PARTS[part][0])).status_code
+                except GitHubUnreachable as e:
+                    found[part] = e
 
             async with anyio.create_task_group() as group:
                 for part in PARTS:
                     group.start_soon(ask, part)
 
+        for result in found.values():
+            if isinstance(result, GitHubUnreachable):
+                raise result
         if found["metadata"] == 401:
             raise GitHubRejected(401, "GitHub did not accept the token")
         if found["metadata"] != 200:
@@ -124,11 +134,25 @@ class GitHubApi:
             status = found[part]
             if status == 200 or (part == "contents" and status == 404):  # 404: no commits yet
                 continue
+            if part == "issues" and status == 410:  # Issues turned off: nothing to read
+                continue
             return (
                 f"This token can't read {repo}'s {permission.lower()}: give it read access to "
                 f"{permission}"
             )
         return None
+
+
+def rate_limited(response: httpx.Response) -> bool:
+    """GitHub's primary (no requests left) or secondary rate limit, which answer 403 or 429."""
+    if response.status_code == 429:
+        return True
+    if response.status_code != 403:
+        return False
+    return (
+        response.headers.get("x-ratelimit-remaining") == "0"
+        or "rate limit" in message(response).lower()
+    )
 
 
 def message(response: httpx.Response) -> str:
