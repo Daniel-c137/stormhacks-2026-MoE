@@ -684,3 +684,68 @@ def test_the_command_paces_embeddings_when_asked(pg_dsn, monkeypatch, capsys, mo
 
     assert [p.per_minute for p in made] == [100000]
     assert "seeded: 2026-09-23" in capsys.readouterr().out
+
+
+# logins
+
+
+async def test_every_seeded_person_gets_a_login_with_the_shared_password():
+    from brain.auth import verify_password
+    from world.seed import seed_logins
+
+    store, _ = in_memory()
+    people = seed_people()
+    await seed.seed_team(store, people)
+
+    created = await seed_logins(store, people, password="demo-password-1")
+
+    assert [p.id for p, _ in created] == [p.id for p in people]
+    assert all(generated is None for _, generated in created)
+    for person in people:
+        login = await store.login(person.id)
+        assert login.email == person.email
+        assert verify_password(login.password_hash, "demo-password-1")
+
+
+async def test_without_a_shared_password_each_person_gets_their_own_shown_once():
+    from brain.auth import verify_password
+    from world.seed import seed_logins
+
+    store, _ = in_memory()
+    people = seed_people()
+    await seed.seed_team(store, people)
+
+    created = await seed_logins(store, people)
+
+    passwords = [generated for _, generated in created]
+    assert all(p and len(p) >= 10 for p in passwords)
+    assert len(set(passwords)) == len(people)
+    for person, generated in created:
+        assert verify_password((await store.login(person.id)).password_hash, generated)
+
+
+async def test_an_existing_login_is_left_alone():
+    from brain.auth import hash_password, verify_password
+    from world.seed import seed_logins
+
+    store, _ = in_memory()
+    people = seed_people()
+    await seed.seed_team(store, people)
+    first = people[0]
+    await store.set_login(first.id, first.email, hash_password("changed-in-the-app"))
+
+    created = await seed_logins(store, people, password="demo-password-1")
+
+    assert first.id not in [p.id for p, _ in created]
+    assert verify_password((await store.login(first.id)).password_hash, "changed-in-the-app")
+
+
+async def test_a_short_shared_password_is_refused():
+    from world.seed import seed_logins
+
+    store, _ = in_memory()
+    people = seed_people()
+    await seed.seed_team(store, people)
+
+    with pytest.raises(SeedError, match="10"):
+        await seed_logins(store, people, password="short")
