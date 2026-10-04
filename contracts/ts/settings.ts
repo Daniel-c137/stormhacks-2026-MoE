@@ -33,6 +33,7 @@ export interface TeamSettings {
   sensitivity: Sensitivity;
   interrupt_minutes: number;
   who_can_allow: WhoCanAllow;
+  timezone: string; // IANA name, e.g. "America/Vancouver"; dates people see use it
 }
 
 /** Whether an integration can be used right now. Failing and unconfigured are never hidden. */

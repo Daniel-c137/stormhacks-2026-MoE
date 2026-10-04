@@ -22,7 +22,7 @@ the agent never speaks on its own.
 import math
 import re
 from collections.abc import Awaitable, Callable, Iterable, Sequence
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -325,8 +325,8 @@ class FactChecker:
             max_evidence=MAX_EVIDENCE,
             timeout=self.timeout,
         )
-        today = date.today()
-        toolbox = await tools.toolbox(meeting.team_id, "", today)
+        toolbox = await tools.toolbox(meeting.team_id, "")
+        today = toolbox.today
         code_unavailable = self._code_unavailable(toolbox)
         claims = render_claims(labelled)
         context = [f"Today: {today.isoformat()} ({today:%A})", f'Meeting: "{meeting.title}"']

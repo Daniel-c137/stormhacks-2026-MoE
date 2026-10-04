@@ -3,7 +3,7 @@ evidence they return, and an answer that cites only evidence that exists."""
 
 import asyncio
 import logging
-from datetime import date, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -519,7 +519,7 @@ async def test_another_teams_memory_decisions_and_tasks_never_reach_the_prompts(
 
 async def test_tasks_for_my_plate_are_the_askers(store, settings):
     meeting = await store.create_meeting(TEAM.id, "Planning", ALEX.id)
-    today = date.today()
+    today = datetime.now(UTC).date()  # the team's today; teams default to UTC
     await store.save_report(
         Report(
             meeting_id=meeting.id,
@@ -568,7 +568,7 @@ async def test_tasks_for_my_plate_are_the_askers(store, settings):
 
 async def test_overdue_tasks_and_owners_off_the_team(store, settings):
     meeting = await store.create_meeting(TEAM.id, "Planning", ALEX.id)
-    today = date.today()
+    today = datetime.now(UTC).date()  # the team's today; teams default to UTC
     await store.save_report(
         Report(
             meeting_id=meeting.id,

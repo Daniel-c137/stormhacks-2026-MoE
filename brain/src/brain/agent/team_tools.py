@@ -2,7 +2,7 @@
 one with the Source a person can check: a meeting moment, a Jira key or a GitHub item."""
 
 from collections.abc import Callable, Coroutine
-from datetime import date
+from datetime import UTC, date, tzinfo
 from typing import Any, Literal
 
 import anyio
@@ -16,6 +16,8 @@ from brain.memory import MeetingMemory
 from brain.report.decisions import terms
 from brain.report.extraction import clock
 from brain.store import NotFound, Store
+from brain.zones import local_date
+from brain.zones import today as team_today
 from contracts import CodeSnippet, Meeting, Person, Source, TeamSettings
 
 from .code import code_evidence
@@ -201,7 +203,7 @@ def github_reader(settings: Settings, team: TeamSettings, target: Any = None) ->
 
 class TeamToolbox:
     """Every tool reads only `team_id`'s data. Unconfigured tools stay on the menu, marked, so a
-    question that needs them can say they are unavailable."""
+    question that needs them can say they are unavailable. Dates are the team's, in `zone`."""
 
     def __init__(
         self,
@@ -215,6 +217,7 @@ class TeamToolbox:
         github: GitHubReader | str,
         timeout: float = DEFAULT_TIMEOUT,
         today: date | None = None,
+        zone: tzinfo = UTC,
     ):
         self.team_id = team_id
         self.asker_id = asker_id
@@ -224,7 +227,8 @@ class TeamToolbox:
         self.jira = jira
         self.github = github
         self.timeout = timeout
-        self.today = today or date.today()
+        self.zone = zone
+        self.today = today or team_today(zone)
         self._meetings: dict[str, Meeting | None] = {}
         self._tools: dict[str, Callable[..., Coroutine[Any, Any, list[Finding]]]] = {
             "search_meetings": self.search_meetings,
@@ -335,7 +339,7 @@ class TeamToolbox:
         found = []
         for meeting in (await self.store.meetings(self.team_id))[:LIST_LIMIT]:
             self._meetings[meeting.id] = meeting
-            when = day(meeting)
+            when = day(meeting, self.zone)
             text = f'Meeting "{meeting.title}" ({meeting.status.replace("_", " ")})'
             try:
                 summary = (await self.store.report(meeting.id)).summary.strip()
@@ -362,7 +366,7 @@ class TeamToolbox:
         if not (query or "").strip():
             return []
         items = await self.github.search(query, "pr" if kind == "pr" else "issue")
-        return [github_finding(self.github.full_name, item) for item in items]
+        return [github_finding(self.github.full_name, item, self.zone) for item in items]
 
     async def github_read(
         self, number: int | None = None, kind: str | None = None, **_: Any
@@ -371,13 +375,14 @@ class TeamToolbox:
         if number is None:
             return []
         item = await self.github.read(number, "pr" if kind == "pr" else "issue")
-        return [github_finding(self.github.full_name, item)]
+        return [github_finding(self.github.full_name, item, self.zone)]
 
     async def github_releases(self, **_: Any) -> list[Finding]:
         assert isinstance(self.github, GitHubReader)
         releases = await self.github.releases(RELEASE_LIMIT)
         return [
-            release_finding(self.github.full_name, r, latest=i == 0) for i, r in enumerate(releases)
+            release_finding(self.github.full_name, r, self.zone, latest=i == 0)
+            for i, r in enumerate(releases)
         ]
 
     async def github_code(self, query: str | None = None, **_: Any) -> list[Finding]:
@@ -400,7 +405,7 @@ class TeamToolbox:
         return self._meetings[meeting_id]
 
     def at(self, meeting: Meeting, t: float | None, text: str) -> Finding:
-        return Finding(text=text, source=meeting_source(meeting, t), when=day(meeting))
+        return Finding(text=text, source=meeting_source(meeting, t), when=day(meeting, self.zone))
 
     def name(self, person_id: str | None) -> str | None:
         person = self.members.get(person_id or "")
@@ -412,9 +417,9 @@ def meeting_source(meeting: Meeting, t: float | None) -> Source:
     return Source(kind="meeting", label=label, meeting_id=meeting.id, t=t)
 
 
-def day(meeting: Meeting) -> date | None:
-    when = meeting.started_at or meeting.scheduled_start
-    return when.date() if when else None
+def day(meeting: Meeting, zone: tzinfo = UTC) -> date | None:
+    """The meeting's day in the team's zone."""
+    return local_date(meeting.started_at or meeting.scheduled_start, zone)
 
 
 def jira_finding(issue: JiraIssue) -> Finding:
@@ -430,24 +435,26 @@ def jira_finding(issue: JiraIssue) -> Finding:
     return Finding(text=text, source=Source(kind="jira_issue", label=issue.key, url=issue.url))
 
 
-def github_finding(repo: str, item: GitHubItem) -> Finding:
+def github_finding(repo: str, item: GitHubItem, zone: tzinfo = UTC) -> Finding:
     label = f"{repo}#{item.number}"
     state = item.state or "unknown"
+    merged_on = local_date(item.merged_at, zone)
     if item.merged:
         state = "merged"
-        if item.merged_at:
-            state += f" {item.merged_at.date().isoformat()}"
+        if merged_on:
+            state += f" {merged_on.isoformat()}"
     noun = "Pull request" if item.kind == "pr" else "Issue"
     text = f"{noun} {label}: {item.title} ({state})"
     if item.body:
         text += f". {item.body}"
     kind = "github_pr" if item.kind == "pr" else "github_issue"
-    when = item.merged_at.date() if item.merged_at else None
-    return Finding(text=text, source=Source(kind=kind, label=label, url=item.url), when=when)
+    return Finding(text=text, source=Source(kind=kind, label=label, url=item.url), when=merged_on)
 
 
-def release_finding(repo: str, release: GitHubRelease, *, latest: bool) -> Finding:
-    published = release.published_at.date() if release.published_at else None
+def release_finding(
+    repo: str, release: GitHubRelease, zone: tzinfo = UTC, *, latest: bool
+) -> Finding:
+    published = local_date(release.published_at, zone)
     text = f"Release {release.tag}"
     if release.name and release.name != release.tag:
         text += f" ({release.name})"

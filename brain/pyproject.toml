@@ -17,6 +17,7 @@ dependencies = [
     "psycopg[binary]",
     "psycopg-pool",
     "python-multipart",
+    "tzdata>=2026.5",
 ]
 
 [project.scripts]

@@ -39,6 +39,7 @@ class TeamSettings(BaseModel):
     sensitivity: Sensitivity = "balanced"
     interrupt_minutes: int = 5
     who_can_allow: WhoCanAllow = "everyone"
+    timezone: str = "UTC"  # IANA name, e.g. "America/Vancouver"; dates people see use it
 
 
 class ConnectorStatus(BaseModel):

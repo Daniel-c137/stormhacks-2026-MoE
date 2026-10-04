@@ -26,6 +26,7 @@ from brain.memory import MeetingMemory
 from brain.report.decisions import terms
 from brain.report.extraction import clock, speaker
 from brain.store import Store
+from brain.zones import team_zone
 from contracts import (
     Answer,
     AskTurn,
@@ -202,8 +203,9 @@ class ToolOrchestrator:
             )
         )
 
-    async def toolbox(self, team_id: str, asker_id: str, today: date) -> TeamToolbox:
-        """The team's read-only tools, with its GitHub and Jira when configured."""
+    async def toolbox(self, team_id: str, asker_id: str) -> TeamToolbox:
+        """The team's read-only tools, with its GitHub and Jira when configured. Its dates and
+        today are the team's, in its time zone."""
         team_settings = await self.store.settings(team_id)
         return TeamToolbox(
             team_id,
@@ -214,12 +216,12 @@ class ToolOrchestrator:
             jira=jira_reader(self.settings, team_settings, self.jira_target),
             github=github_reader(self.settings, team_settings, self.github_target),
             timeout=self.timeout,
-            today=today,
+            zone=team_zone(team_settings.timezone),
         )
 
     async def ask(self, question: Question) -> Answer:
-        today = date.today()
-        toolbox = await self.toolbox(question.team_id, question.asker_id, today)
+        toolbox = await self.toolbox(question.team_id, question.asker_id)
+        today = toolbox.today
         members = list(toolbox.members.values())
         meeting = await toolbox.meeting(question.meeting_id) if question.meeting_id else None
         recent = recent_segments(question, meeting)

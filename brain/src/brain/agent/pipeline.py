@@ -16,7 +16,7 @@ The team sees a message chosen for them; the exception itself goes to the server
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 from typing import Protocol
 
 from contracts import Decision, Report, ReportProgress
@@ -25,6 +25,7 @@ from ..llm import LLM, LLMError, LLMUnavailable
 from ..memory import MeetingMemory, MemoryMisconfigured, UnusableMemory
 from ..report import TranscriptInput, build_report, link_decisions, memory_candidates
 from ..store import Store
+from ..zones import local_date, zone_of
 
 logger = logging.getLogger(__name__)
 
@@ -139,13 +140,14 @@ class ReportPipeline:
             await self.store.save_report_progress(progress)
             await self._settle()
             meeting, transcript, agenda = await self._read(meeting_id)
+            zone = await zone_of(self.store, meeting.team_id)
             superseded: list[Decision] = []
             if transcript.final_segments():
                 progress = await self._at(progress, WRITE)
                 llm = self.llm()
-                report = await build_report(llm, transcript, agenda=agenda)
+                report = await build_report(llm, transcript, agenda=agenda, zone=zone)
                 progress = await self._at(progress, LINK)
-                report, superseded = await self._links(llm, meeting.team_id, report)
+                report, superseded = await self._links(llm, meeting.team_id, report, zone)
             else:
                 report = Report(meeting_id=meeting_id, summary=NO_TRANSCRIPT)
             progress = await self._at(progress, SAVE)
@@ -182,19 +184,21 @@ class ReportPipeline:
         agenda = await self.store.agenda(meeting_id)
         return meeting, transcript, agenda.items if agenda else []
 
-    async def _links(self, llm: LLM, team_id: str, report: Report) -> tuple[Report, list[Decision]]:
+    async def _links(
+        self, llm: LLM, team_id: str, report: Report, zone: tzinfo
+    ) -> tuple[Report, list[Decision]]:
         """The report with its decisions' links, and the past decisions they retire. Past
         decisions are the team's from other meetings, as they were before any earlier save of
-        this meeting retired them, dated by their meetings."""
+        this meeting retired them, dated by their meetings' days in the team's `zone`."""
         stored = await self.store.decisions(team_id)
         earlier = {d.id for d in stored if d.meeting_id == report.meeting_id}
         past = [reopened(d, earlier) for d in stored if d.meeting_id != report.meeting_id]
         if not report.decisions or not past:
             return report, []
         dates = {
-            m.id: when.date()
+            m.id: day
             for m in await self.store.meetings(team_id)
-            if (when := m.started_at or m.scheduled_start)
+            if (day := local_date(m.started_at or m.scheduled_start, zone))
         }
         candidates = None
         if self.memory is not None:

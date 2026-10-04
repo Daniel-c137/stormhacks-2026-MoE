@@ -9,6 +9,7 @@ from ..config import Settings
 from ..connectors import connector_statuses
 from ..store import NotFound, Store
 from ..voices import VoicesFailed, VoicesUnavailable, fetch_voices
+from ..zones import is_zone
 from .deps import current_user, get_http_transport, get_settings, get_store, user_team
 
 router = APIRouter(tags=["team"])
@@ -139,6 +140,12 @@ async def write_team_settings(
             status_code=422,
             detail=f"interrupt_minutes must be {INTERRUPT_MINUTES[0]} to {INTERRUPT_MINUTES[-1]}",
         )
+    timezone = body.timezone.strip()
+    if not is_zone(timezone):
+        raise HTTPException(
+            status_code=422,
+            detail="timezone must be an IANA time zone name, e.g. America/Vancouver or UTC",
+        )
     team = await user_team(store, user)
     current = await store.settings(team.id)
     github = current.github.model_copy(
@@ -155,6 +162,7 @@ async def write_team_settings(
                 "jira": jira,
                 "voice": text(body.voice),
                 "wake_phrase": text(body.wake_phrase),
+                "timezone": timezone,
             }
         )
     )

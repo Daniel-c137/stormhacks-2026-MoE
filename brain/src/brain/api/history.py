@@ -240,6 +240,7 @@ async def push_tasks(
         meeting_id=meeting.id,
         title=meeting.title,
         started_at=meeting.started_at,
+        timezone=(await store.settings(meeting.team_id)).timezone,
         members=await store.members(meeting.team_id),
         report=report,
     )
