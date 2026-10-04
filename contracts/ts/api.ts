@@ -115,6 +115,21 @@ export interface SegmentsIngest {
   segments: TranscriptSegment[];
 }
 
+/**
+ * realtime -> brain: speech to put into English. `language` is Scribe's detected ISO 639-1
+ * code when it gave one; null asks the brain to detect it.
+ */
+export interface TranslateRequest {
+  text: string;
+  language?: string | null;
+}
+
+/** `language` is the detected (or given) language; `text` is English, unchanged when it already was. */
+export interface TranslateResponse {
+  language: string;
+  text: string;
+}
+
 export interface InvokeRequest {
   invocation: Invocation;
   recent_segments: TranscriptSegment[];

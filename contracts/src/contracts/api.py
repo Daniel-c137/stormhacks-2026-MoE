@@ -135,6 +135,22 @@ class SegmentsIngest(BaseModel):
     segments: list[TranscriptSegment]
 
 
+class TranslateRequest(BaseModel):
+    """realtime -> brain: speech to put into English. `language` is Scribe's detected ISO 639-1
+    code when it gave one; None asks the brain to detect it."""
+
+    text: str
+    language: str | None = None
+
+
+class TranslateResponse(BaseModel):
+    """`language` is the detected (or given) language; `text` is English, unchanged when the
+    speech already was."""
+
+    language: str
+    text: str
+
+
 class InvokeRequest(BaseModel):
     invocation: Invocation
     recent_segments: list[TranscriptSegment] = []

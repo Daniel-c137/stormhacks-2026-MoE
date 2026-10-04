@@ -34,6 +34,8 @@ from .api import (
     PasswordChange,
     ProfileUpdate,
     SegmentsIngest,
+    TranslateRequest,
+    TranslateResponse,
     WorkerMeetingResponse,
 )
 from .chat import ChatMessage
@@ -112,6 +114,8 @@ __all__ = [
     "TeamSettings",
     "Topic",
     "TranscriptSegment",
+    "TranslateRequest",
+    "TranslateResponse",
     "Voice",
     "WorkerMeetingResponse",
     "get_identity",
