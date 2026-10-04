@@ -432,7 +432,13 @@ export function TeamSettingsForm({ onClose }: { onClose: () => void }) {
                       {voices.data.map((v) => (
                         <div key={v.id} className="voice">
                           <label className="opt-label">
-                            <input type="radio" name="voice" checked={s.voice === v.id} onChange={() => set({ voice: v.id })} />
+                            <input
+                              type="radio"
+                              name="voice"
+                              // No saved choice means the agent's default voice, the one with a label.
+                              checked={s.voice ? s.voice === v.id : Boolean(v.default_label)}
+                              onChange={() => set({ voice: v.id })}
+                            />
                             <span>
                               <span className="opt-name">{v.name}</span>
                               <span className="opt-desc">{v.desc}</span>

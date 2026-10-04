@@ -5,12 +5,17 @@ import { useState } from "react";
 import { AuthGate } from "@/components/AuthProvider";
 import { useMeetings } from "@/hooks/useApi";
 import { ApiError, describeError, joinMeeting } from "@/lib/api";
+import { fmtClock, fmtDate } from "@/lib/format";
 import { type DeviceChoices, Lobby } from "./Lobby";
 import { Room } from "./Room";
 
 export interface MeetingEntryProps {
   code: string;
 }
+
+/** A scheduled meeting starts when its host joins; until then, say when it is planned. */
+const notStarted = (start: Date) =>
+  `This meeting hasn't started yet. It's planned for ${fmtDate(start)} at ${fmtClock(start)}, and opens when the host joins.`;
 
 function Entry({ code }: MeetingEntryProps) {
   // The lobby needs the meeting's title before joining; the team's meetings are where a code resolves.
@@ -31,7 +36,9 @@ function Entry({ code }: MeetingEntryProps) {
           ? "There's no meeting with that code."
           : err instanceof ApiError && err.status === 403
             ? "You can't join: you're not a member of this meeting's team."
-            : `You couldn't join. ${describeError(err)}`,
+            : err instanceof ApiError && err.status === 409 && meeting?.status === "scheduled" && meeting.scheduled_start
+              ? notStarted(new Date(meeting.scheduled_start))
+              : `You couldn't join. ${describeError(err)}`,
       );
     } finally {
       setJoining(false);

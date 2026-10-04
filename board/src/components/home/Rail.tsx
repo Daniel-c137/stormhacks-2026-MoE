@@ -42,9 +42,10 @@ const startMs = (m: Meeting) => meetingStart(m)?.getTime() ?? 0;
 function MeetingCard({ meeting, now }: { meeting: Meeting; now: Date }) {
   const { person } = useTeam();
   const host = person(meeting.host_id);
-  const others = meeting.participant_ids.filter((id) => id !== meeting.host_id).length;
   const live = meeting.status === "live";
   const scheduled = meeting.status === "scheduled";
+  // Who is coming, until the meeting starts; then who came.
+  const others = (scheduled ? meeting.invitee_ids : meeting.participant_ids).filter((id) => id !== meeting.host_id).length;
   const timeText = meetingTimeText(meeting, now);
   const label = STATUS_LABEL[meeting.status];
   const opens = live ? "Join" : scheduled ? "Open lobby" : "Open report";

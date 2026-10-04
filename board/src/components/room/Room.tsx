@@ -55,6 +55,10 @@ const CAPTION_HOLD_MS = 6000;
 /** How long to wait for the agent to acknowledge a button press or a chat mention. */
 const AGENT_WAIT_MS = 30_000;
 
+/** Errors from the browser's getUserMedia/getDisplayMedia: the room is fine, a device is not. */
+const DEVICE_ERRORS = new Set(["NotAllowedError", "NotFoundError", "NotReadableError", "OverconstrainedError", "SecurityError"]);
+const isDeviceError = (err: Error) => DEVICE_ERRORS.has(err.name);
+
 function useStickySpeaker(participants: Participant[]): string | null {
   const talking = participants.filter((p) => !p.is_agent && p.is_speaking && p.mic_on).map((p) => p.id);
   const [held, setHeld] = useState<string | null>(null);
@@ -77,6 +81,7 @@ export function Room({ join, choices }: RoomProps) {
   const ended = useRef(false);
   const wasConnected = useRef(false);
   const [connectError, setConnectError] = useState("");
+  const [deviceError, setDeviceError] = useState("");
   const options = useMemo<RoomOptions>(
     () => ({
       adaptiveStream: true,
@@ -92,7 +97,13 @@ export function Room({ join, choices }: RoomProps) {
   const onConnected = useCallback(() => {
     wasConnected.current = true;
   }, []);
-  const onError = useCallback((err: Error) => setConnectError(err.message), []);
+  // LiveKitRoom reports a microphone or camera that can't start through onError too; that is not a
+  // failed connection, so it is told as a device problem while the meeting carries on.
+  const onError = useCallback((err: Error) => {
+    if (isDeviceError(err)) setDeviceError(`Your microphone or camera couldn't start: ${err.message}`);
+    else setConnectError(err.message);
+  }, []);
+  const onMediaDeviceFailure = useCallback(() => setDeviceError("Your microphone or camera couldn't start."), []);
   const onDisconnected = useCallback(
     (reason?: DisconnectReason) => {
       // Never got in: stay here and say why, rather than bouncing home without a word.
@@ -119,11 +130,12 @@ export function Room({ join, choices }: RoomProps) {
       options={options}
       onConnected={onConnected}
       onError={onError}
+      onMediaDeviceFailure={onMediaDeviceFailure}
       onDisconnected={onDisconnected}
       style={{ display: "contents" }}
     >
       <RoomAudioRenderer />
-      <RoomView meeting={join.meeting} connectError={connectError} onEnded={onEnded} />
+      <RoomView meeting={join.meeting} connectError={connectError} deviceError={deviceError} onEnded={onEnded} />
     </LiveKitRoom>
   );
 }
@@ -131,10 +143,12 @@ export function Room({ join, choices }: RoomProps) {
 function RoomView({
   meeting,
   connectError,
+  deviceError,
   onEnded,
 }: {
   meeting: Meeting;
   connectError: string;
+  deviceError: string;
   onEnded: (ended: boolean) => void;
 }) {
   const agent = identity.agent_name;
@@ -180,6 +194,10 @@ function RoomView({
         : (members.find((m) => m.id === p.id) ?? { id: p.id, name: p.name, short: shortOf(p.name), initials: initialsOf(p.name) }),
     [me, members],
   );
+
+  useEffect(() => {
+    if (deviceError) setToast(deviceError);
+  }, [deviceError]);
 
   useEffect(() => {
     if (!toast) return;
