@@ -27,12 +27,13 @@ JIRA_ACCOUNTS: list[dict[str, str]] = [
 
 
 class FakeJira:
-    """Stand-in for the Jira MCP server's createJiraIssue, lookupJiraAccountId and
-    searchJiraIssuesUsingJql. A summary starting with FAIL is rejected the way Jira rejects an
-    invalid field. Searches return `issues` (in Atlassian's shape) or fail with `search_error`.
-    Lookups match any account whose name or email contains the search string; set
-    `lookup_error` to make the lookup tool fail. Lookups answer {"users": [...]}, the shape the
-    brain expects (unverified against Atlassian's server)."""
+    """Stand-in for the Jira MCP server's createJiraIssue, lookupJiraAccountId,
+    searchJiraIssuesUsingJql and getJiraIssue. A summary starting with FAIL is rejected the way
+    Jira rejects an invalid field. Searches return `issues` (in Atlassian's shape) or fail with
+    `search_error`; reads find an issue in `issues` by key. Lookups match any account whose name
+    or email contains the search string; set `lookup_error` to make the lookup tool fail. Lookups
+    answer {"users": [...]}, the shape the brain expects (unverified against Atlassian's
+    server)."""
 
     def __init__(self, first_number: int = 117, accounts: list[dict[str, str]] | None = None):
         self.created: list[dict[str, Any]] = []
@@ -42,6 +43,7 @@ class FakeJira:
         self.issues: list[dict[str, Any]] = []
         self.searches: list[dict[str, Any]] = []
         self.search_error: str | None = None
+        self.reads: list[str] = []
         self.server = MCPServer("jira")
 
         @self.server.tool()
@@ -74,6 +76,16 @@ class FakeJira:
             return {"issues": self.issues[: maxResults or None], "isLast": True}
 
         @self.server.tool()
+        def getJiraIssue(
+            cloudId: str, issueIdOrKey: str, fields: list[str] | None = None
+        ) -> dict[str, Any]:
+            self.reads.append(issueIdOrKey)
+            for issue in self.issues:
+                if issue["key"] == issueIdOrKey:
+                    return issue
+            raise ToolError(f"Issue {issueIdOrKey} does not exist")
+
+        @self.server.tool()
         def createJiraIssue(
             cloudId: str,
             projectKey: str,
@@ -104,6 +116,90 @@ class FakeJira:
 @pytest.fixture
 def fake_jira() -> FakeJira:
     return FakeJira()
+
+
+class FakeGitHub:
+    """Stand-in for GitHub's MCP server: issue and pull request search and reads in GitHub's REST
+    shapes, plus add_issue_comment, a write the agent must never call. Searches match every word
+    of the query (qualifiers like is:open ignored) against titles."""
+
+    def __init__(self):
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.comments: list[dict[str, Any]] = []
+        self.issues: dict[int, dict[str, Any]] = {
+            41: {
+                "number": 41,
+                "title": "Waitlist email goes out before the exploit fix ships",
+                "state": "open",
+                "html_url": "https://github.com/dropsubs/app/issues/41",
+                "body": "Hold the waitlist email until v0.9.4.",
+            }
+        }
+        self.pulls: dict[int, dict[str, Any]] = {
+            212: {
+                "number": 212,
+                "title": "Close the email exploit",
+                "state": "closed",
+                "merged": True,
+                "html_url": "https://github.com/dropsubs/app/pull/212",
+                "body": "Validates the signup address.",
+            }
+        }
+        self.server = MCPServer("github")
+
+        def search(items: dict[int, dict[str, Any]], query: str) -> dict[str, Any]:
+            words = [w for w in query.lower().split() if ":" not in w]
+            found = [i for i in items.values() if all(w in i["title"].lower() for w in words)]
+            return {"total_count": len(found), "items": found}
+
+        @self.server.tool()
+        def search_issues(
+            query: str, owner: str | None = None, repo: str | None = None
+        ) -> dict[str, Any]:
+            self.calls.append(("search_issues", {"query": query, "owner": owner, "repo": repo}))
+            return search(self.issues, query)
+
+        @self.server.tool()
+        def search_pull_requests(
+            query: str, owner: str | None = None, repo: str | None = None
+        ) -> dict[str, Any]:
+            self.calls.append(
+                ("search_pull_requests", {"query": query, "owner": owner, "repo": repo})
+            )
+            return search(self.pulls, query)
+
+        @self.server.tool()
+        def issue_read(method: str, owner: str, repo: str, issue_number: int) -> dict[str, Any]:
+            self.calls.append(
+                ("issue_read", {"method": method, "owner": owner, "repo": repo, "n": issue_number})
+            )
+            if issue_number not in self.issues:
+                raise ToolError("Not Found")
+            return self.issues[issue_number]
+
+        @self.server.tool()
+        def pull_request_read(
+            method: str, owner: str, repo: str, pullNumber: int
+        ) -> dict[str, Any]:
+            self.calls.append(
+                (
+                    "pull_request_read",
+                    {"method": method, "owner": owner, "repo": repo, "n": pullNumber},
+                )
+            )
+            if pullNumber not in self.pulls:
+                raise ToolError("Not Found")
+            return self.pulls[pullNumber]
+
+        @self.server.tool()
+        def add_issue_comment(owner: str, repo: str, issue_number: int, body: str) -> dict:
+            self.comments.append({"issue_number": issue_number, "body": body})
+            return {"id": 1}
+
+
+@pytest.fixture
+def fake_github() -> FakeGitHub:
+    return FakeGitHub()
 
 
 @contextmanager
