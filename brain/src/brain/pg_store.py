@@ -49,6 +49,7 @@ from teams t
 """
 TASK = "id, meeting_id, title, description, owner_id, due, t, quote, include, key, jira_status"
 DECISION = "id, meeting_id, text, made_by, t, quote, status, relation_type, relation_decision_id"
+AGENDA = "generated_at, updated_at, current_item_id, tracked_until, revision"
 SEGMENT = "seg_id, meeting_id, speaker_id, speaker_name, text, is_final, t_start, t_end"
 # Newest first by started_at, or scheduled_start before it starts; ties in creation order.
 NEWEST_MEETING_FIRST = "coalesce(m.started_at, m.scheduled_start) desc nulls last, m.seq"
@@ -457,8 +458,7 @@ class PostgresStore:
         async with self._tx() as cur:
             row = await self._one(
                 cur,
-                "select meeting_id, generated_at, updated_at, current_item_id, tracked_until"
-                " from agendas where meeting_id = %s",
+                f"select meeting_id, {AGENDA} from agendas where meeting_id = %s",
                 [meeting_id],
             )
             if row is None:
@@ -473,40 +473,44 @@ class PostgresStore:
 
     async def save_agenda(self, agenda: Agenda) -> Agenda:
         async with self._tx() as cur:
-            await cur.execute(
-                "insert into agendas"
-                " (meeting_id, generated_at, updated_at, current_item_id, tracked_until)"
-                " values (%(meeting_id)s, %(generated_at)s, %(updated_at)s, %(current_item_id)s,"
-                " %(tracked_until)s)"
+            # One upsert: overlapping saves queue on the row lock and each bumps the revision.
+            row = await self._one(
+                cur,
+                "insert into agendas (meeting_id, generated_at, updated_at, current_item_id,"
+                " tracked_until, revision) values (%(meeting_id)s, %(generated_at)s,"
+                " %(updated_at)s, %(current_item_id)s, %(tracked_until)s, 1)"
                 " on conflict (meeting_id) do update set generated_at = excluded.generated_at,"
                 " updated_at = excluded.updated_at, current_item_id = excluded.current_item_id,"
-                " tracked_until = excluded.tracked_until",
+                " tracked_until = excluded.tracked_until, revision = agendas.revision + 1"
+                " returning revision",
                 agenda.model_dump(exclude={"items"}),
             )
             await self._replace_agenda_items(cur, agenda)
-        return agenda.model_copy(deep=True)
+        return agenda.model_copy(deep=True, update={"revision": row["revision"]})
 
-    async def save_agenda_if(self, agenda: Agenda, *, tracked_until: float | None) -> Agenda:
-        async with self._tx() as cur:
-            # The row lock makes an overlapping save wait, then find tracked_until moved.
-            row = await self._one(
-                cur,
-                "update agendas set generated_at = %(generated_at)s, updated_at = %(updated_at)s,"
-                " current_item_id = %(current_item_id)s, tracked_until = %(tracked_until)s"
-                " where meeting_id = %(meeting_id)s"
-                " and tracked_until is not distinct from %(expected)s::double precision"
-                " returning meeting_id",
-                agenda.model_dump(exclude={"items"}) | {"expected": tracked_until},
+    async def save_agenda_if(self, agenda: Agenda) -> Agenda:
+        if agenda.revision == 0:  # none saved yet: create it, unless someone just did
+            sql = (
+                "insert into agendas (meeting_id, generated_at, updated_at, current_item_id,"
+                " tracked_until, revision) values (%(meeting_id)s, %(generated_at)s,"
+                " %(updated_at)s, %(current_item_id)s, %(tracked_until)s, 1)"
+                " on conflict (meeting_id) do nothing returning revision"
             )
+        else:  # the row lock makes an overlapping save wait, then miss the old revision
+            sql = (
+                "update agendas set generated_at = %(generated_at)s,"
+                " updated_at = %(updated_at)s, current_item_id = %(current_item_id)s,"
+                " tracked_until = %(tracked_until)s, revision = revision + 1"
+                " where meeting_id = %(meeting_id)s and revision = %(revision)s"
+                " returning revision"
+            )
+        async with self._tx() as cur:
+            row = await self._one(cur, sql, agenda.model_dump(exclude={"items"}))
             if row is None:
-                saved = await self._one(
-                    cur, "select 1 from agendas where meeting_id = %s", [agenda.meeting_id]
-                )
-                if saved is None:
-                    raise NotFound(f"agenda for meeting {agenda.meeting_id}")
-                raise Conflict(f"agenda for meeting {agenda.meeting_id} was tracked meanwhile")
+                await self._meeting(cur, agenda.meeting_id)  # NotFound when it is missing
+                raise Conflict(f"agenda for meeting {agenda.meeting_id} changed meanwhile")
             await self._replace_agenda_items(cur, agenda)
-        return agenda.model_copy(deep=True)
+        return agenda.model_copy(deep=True, update={"revision": row["revision"]})
 
     async def _replace_agenda_items(self, cur: Cursor, agenda: Agenda) -> None:
         await cur.execute("delete from agenda_items where meeting_id = %s", [agenda.meeting_id])
