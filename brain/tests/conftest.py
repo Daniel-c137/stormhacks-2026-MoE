@@ -10,6 +10,8 @@ import uvicorn
 from api_support import app, client_as, settings, store, worker  # noqa: F401  (shared fixtures)
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from memory_support import memory_pool  # noqa: F401  (shared fixtures)
+from pg_support import pg_dsn, pg_server  # noqa: F401  (shared fixtures)
 
 
 @pytest.fixture
@@ -17,13 +19,40 @@ def anyio_backend():
     return "asyncio"
 
 
-class FakeJira:
-    """Stand-in for the Jira MCP server's createJiraIssue. A summary starting with FAIL is
-    rejected the way Jira rejects an invalid field."""
+# The people a Jira site knows about. Names match the people in the test meetings.
+JIRA_ACCOUNTS: list[dict[str, str]] = [
+    {"accountId": "acc-alice", "displayName": "Alice Moreau", "emailAddress": "alice@dropsubs.dev"},
+    {"accountId": "acc-bob", "displayName": "Bob Okafor", "emailAddress": "bob@dropsubs.dev"},
+]
 
-    def __init__(self, first_number: int = 117):
+
+class FakeJira:
+    """Stand-in for the Jira MCP server's createJiraIssue and lookupJiraAccountId. A summary
+    starting with FAIL is rejected the way Jira rejects an invalid field. Lookups match any
+    account whose name or email contains the search string; set `lookup_error` to make the
+    lookup tool fail. Lookups answer {"users": [...]}, the shape the brain expects (unverified
+    against Atlassian's server)."""
+
+    def __init__(self, first_number: int = 117, accounts: list[dict[str, str]] | None = None):
         self.created: list[dict[str, Any]] = []
+        self.accounts = list(JIRA_ACCOUNTS if accounts is None else accounts)
+        self.lookups: list[str] = []
+        self.lookup_error: str | None = None
         self.server = MCPServer("jira")
+
+        @self.server.tool()
+        def lookupJiraAccountId(cloudId: str, searchString: str) -> dict[str, Any]:
+            self.lookups.append(searchString)
+            if self.lookup_error:
+                raise ToolError(self.lookup_error)
+            needle = searchString.strip().lower()
+            users = [
+                account
+                for account in self.accounts
+                if needle in account.get("displayName", "").lower()
+                or needle in account.get("emailAddress", "").lower()
+            ]
+            return {"users": users}
 
         @self.server.tool()
         def createJiraIssue(

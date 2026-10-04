@@ -107,4 +107,6 @@ def run_push(args: argparse.Namespace) -> int:
             if r.key
             else f"{r.task_id}: failed: {r.error}"
         )
+        if r.warning:
+            print(f"{r.task_id}: {r.warning}")
     return 0 if all(r.key for r in results) else 1

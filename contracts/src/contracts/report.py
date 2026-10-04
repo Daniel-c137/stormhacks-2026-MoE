@@ -87,3 +87,4 @@ class TaskPushResult(BaseModel):
     key: str | None = None
     url: str | None = None
     error: str | None = None
+    warning: str | None = None  # e.g. "created unassigned: ..." when it was created anyway
