@@ -2,6 +2,7 @@ import secrets
 from functools import cache
 from typing import NoReturn
 
+import httpx
 from fastapi import Depends, Header, HTTPException
 
 from contracts import Meeting, Person, Team
@@ -17,6 +18,11 @@ def not_implemented() -> NoReturn:
 @cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def get_http_transport() -> httpx.AsyncBaseTransport | None:
+    """The transport for outbound HTTP calls; None is the real network. Tests override it."""
+    return None
 
 
 async def get_store() -> Store:
