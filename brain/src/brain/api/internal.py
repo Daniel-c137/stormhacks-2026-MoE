@@ -13,6 +13,7 @@ from contracts import (
     AGENT_PARTICIPANT_ID,
     AgendaTrackRequest,
     AgendaTrackResponse,
+    CardPermissionResponse,
     CatchUpRequest,
     CatchUpResponse,
     ChatMessage,
@@ -47,6 +48,7 @@ from .deps import (
     get_orchestrator,
     get_settings,
     get_store,
+    is_host_or_admin,
     require_internal,
 )
 
@@ -124,6 +126,34 @@ async def worker_meeting(
         raise HTTPException(status_code=404, detail="Meeting not found") from None
     settings = await store.settings(meeting.team_id)
     return WorkerMeetingResponse(meeting=meeting, voice_id=settings.voice)
+
+
+@router.get("/meetings/{meeting_id}/card-permission")
+async def card_permission(
+    meeting_id: str, participant_id: str, store: Store = Depends(get_store)
+) -> CardPermissionResponse:
+    """Whether the participant may act on the meeting's shared answer card (Speak, Post in chat,
+    Dismiss). The worker asks before every action, with the LiveKit identity that sent it, so a
+    change to the team's settings or to someone's admin status during the meeting counts at
+    once. Only a participant of the meeting on its team may; with who_can_allow "host", only
+    the meeting's host or an admin. Never the agent: it does not act on its own answers."""
+    try:
+        meeting = await store.meeting(meeting_id)
+    except NotFound:
+        raise HTTPException(status_code=404, detail="Meeting not found") from None
+    if participant_id == AGENT_PARTICIPANT_ID or participant_id not in meeting.participant_ids:
+        return CardPermissionResponse(allowed=False)
+    try:
+        person = await store.person(participant_id)
+        team = await store.team_for_user(person.id)
+    except NotFound:
+        return CardPermissionResponse(allowed=False)
+    if team.id != meeting.team_id:
+        return CardPermissionResponse(allowed=False)
+    settings = await store.settings(meeting.team_id)
+    if settings.who_can_allow == "everyone":
+        return CardPermissionResponse(allowed=True)
+    return CardPermissionResponse(allowed=is_host_or_admin(meeting, person))
 
 
 @router.post("/meetings/{meeting_id}/agent-joined", status_code=204)

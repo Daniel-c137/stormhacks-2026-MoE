@@ -186,6 +186,14 @@ class KeytermsResponse(BaseModel):
     terms: list[str]
 
 
+class CardPermissionResponse(BaseModel):
+    """realtime -> brain before the worker acts on a shared answer card (Speak, Post in chat,
+    Dismiss) for a participant: whether TeamSettings.who_can_allow lets them. With "host", only
+    the meeting's host or an admin; with "everyone", any participant. Never the agent itself."""
+
+    allowed: bool
+
+
 class WorkerMeetingResponse(BaseModel):
     """realtime -> brain when the worker joins a meeting's room (the room is named by the meeting
     id) and before it speaks. Segment times are seconds from meeting.started_at. voice_id is the

@@ -50,6 +50,14 @@ MAX_DETAIL = 120
 CATCH_UP_DELAY_S = 3.0
 
 
+# What a refused sender is told, privately. {agent} is the agent's name.
+REFUSED: dict[str, str] = {
+    "speak": "Only the host or an admin can let {agent} speak in this meeting.",
+    "send_to_chat": "Only the host or an admin can post {agent}'s answers in chat in this meeting.",
+}
+REFUSED_UNCHECKED = "I couldn't check who may do that just now, so I didn't. Try again in a moment."
+
+
 class Transcription(Protocol):
     """The parts of TranscriptionManager the agent uses."""
 
@@ -222,9 +230,12 @@ class MeetingAgent:
                 sender,
             )
             return
-        card = self._cards.get(action.card_id)
-        if card is None or card.status != "pending":
-            log.info("Ignored %s on card %s: not a pending card", action.action, action.card_id)
+        if action.action == "show_on_stage":
+            return  # the board publishes Topic.STAGE itself
+        if self._pending(action) is None or not await self._may_act(action, sender):
+            return
+        card = self._pending(action)  # it may have changed while the brain was asked
+        if card is None:
             return
         if action.action == "speak":
             await self._speak(card)
@@ -235,7 +246,49 @@ class MeetingAgent:
         elif action.action == "dismiss":
             await self._set_status(card, "dismissed")
             await self._rest()
-        # show_on_stage: the board publishes Topic.STAGE itself
+
+    def _pending(self, action: ResponseAction) -> ResponseCard | None:
+        card = self._cards.get(action.card_id)
+        if card is None or card.status != "pending":
+            log.info("Ignored %s on card %s: not a pending card", action.action, action.card_id)
+            return None
+        return card
+
+    async def _may_act(self, action: ResponseAction, sender: str) -> bool:
+        """Whether the team's who_can_allow lets the sender (the identity LiveKit verified) act
+        on the card, asked of the brain each time, since the settings and who is an admin can
+        change during the meeting. A refusal, or no answer from the brain, changes nothing; the
+        sender is told privately, except for a Dismiss, which their board already hid for them.
+        Logs never carry the card's text."""
+        try:
+            allowed = await self.brain.card_permission(self.meeting_id, sender)
+        except Exception as e:
+            log.warning(
+                "Refused %s on card %s by %s: could not ask the brain who may act: %s",
+                action.action,
+                action.card_id,
+                sender,
+                e,
+            )
+            await self._tell_refused(sender, action, REFUSED_UNCHECKED)
+            return False
+        if not allowed:
+            log.info(
+                "Refused %s on card %s by %s: the team's settings do not let them",
+                action.action,
+                action.card_id,
+                sender,
+            )
+            await self._tell_refused(sender, action, REFUSED.get(action.action, ""))
+        return allowed
+
+    async def _tell_refused(self, sender: str, action: ResponseAction, text: str) -> None:
+        if action.action == "dismiss" or not text:
+            return
+        try:
+            await self.send_private(sender, text.format(agent=self._agent_name))
+        except Exception as e:
+            log.warning("Could not tell %s their %s was refused: %s", sender, action.action, e)
 
     async def _speak(self, card: ResponseCard) -> None:
         if self._speaking.locked():
