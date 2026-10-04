@@ -21,7 +21,9 @@ class AgendaItem(BaseModel):
     discussed_s: float = Field(default=0, ge=0)  # talk time attributed to this item so far
     nudged_t: float | None = None  # when the agent nudged that it had not come up; once at most
     # Who marked it covered: a person id, or AGENT_PARTICIPANT_ID when the tracker did. None
-    # while it is not covered. covered_t is when; None if the meeting had not started.
+    # while it is not covered. covered_t is when: for the tracker, when the item's discussion
+    # ended (not when it noticed); for a person, when they ticked it. None if the meeting had
+    # not started.
     covered_by: str | None = None
     covered_t: float | None = None
 

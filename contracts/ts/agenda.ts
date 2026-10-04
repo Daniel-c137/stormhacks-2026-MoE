@@ -15,7 +15,9 @@ export interface AgendaItem {
   discussed_s?: number; // talk time attributed to this item so far
   nudged_t?: number | null; // when the agent nudged that it had not come up; once at most
   // Who marked it covered: a person id, or AGENT_PARTICIPANT_ID when the tracker did. Null
-  // while it is not covered. covered_t is when; null if the meeting had not started.
+  // while it is not covered. covered_t is when: for the tracker, when the item's discussion
+  // ended (not when it noticed); for a person, when they ticked it. null if the meeting had
+  // not started.
   covered_by?: string | null;
   covered_t?: number | null;
 }

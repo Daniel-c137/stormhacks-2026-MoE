@@ -2,8 +2,11 @@
 
 The realtime worker calls this on a timer, never per utterance. Each tick labels the final
 segments since the last tracked point with the items they are about in one model call, gives each
-item the talk time of its own segments and marks items the team finished. Nudges are decided by
-fixed rules, not the model, and are only shown: the agent never speaks on its own.
+item the talk time of its own segments and marks items the team finished. The model also sees
+the last few lines before the stretch and how long each item has been discussed, so it can tell
+an item the talk has left from one still under way; an item discussed and then left for another
+is covered even when the model does not say so. Nudges are decided by fixed rules, not the model,
+and are only shown: the agent never speaks on its own.
 """
 
 import math
@@ -30,8 +33,14 @@ from .ask import DATA_RULE, clip, fenced
 
 SETTLE_S = 5.0  # segments ending this close to `now` wait a tick, so late finals are not skipped
 PAUSE_S = 15.0  # a pause up to this long between utterances still counts as discussion
-MIN_TALK_S = 20.0  # the model is asked once the new stretch holds this much talk,
-MAX_WAIT_S = 60.0  # or once this long has passed since the tracked point
+# With the worker's tick every 10 s, the sentence that finishes an item is asked about at the
+# next tick after it settles (within about 15 s), and a one-word closer at the one after that.
+# The worker's tick is what limits the model calls: at most one a tick, and none while nobody
+# has said anything new.
+MIN_TALK_S = 4.0  # the model is asked once the new stretch holds this much talk (a sentence),
+MAX_WAIT_S = 15.0  # or once this long has passed since the tracked point
+CONTEXT_SEGMENTS = 12  # lines before the stretch the model sees, to judge by but not to label
+MOVED_ON_MIN_S = 20.0  # talk an item needs before leaving it for another item covers it
 NOW_SLACK_S = 60.0  # how far a tick's `now` may run ahead of the brain's clock
 END_WARN_MIN = 5  # nudge about items that have not come up this close to the scheduled end
 MAX_BATCH = 200  # segments per classification; a longer backlog keeps the latest
@@ -58,8 +67,9 @@ class AgendaTrackDraft(BaseModel):
     )
     covered: list[str] = Field(
         default=[],
-        description="Labels of items the team clearly finished in this stretch: decided, "
-        "answered or explicitly closed. Empty when unsure.",
+        description="Labels of items whose discussion is over by the end of this stretch: "
+        "decided, answered, closed, or talked through and then left for something else. Not an "
+        "item still being discussed, nor one only named in passing.",
     )
 
 
@@ -74,8 +84,16 @@ Rules:
   first and last segment number and the item's label, or "{NO_ITEM}" for small talk, setup or a
   topic that is not on the agenda. A stretch often moves between items: label each segment by
   what it is about, not by the stretch as a whole. An item nobody discusses gets no segments.
-- "covered" lists items the team clearly finished in this stretch: they reached a decision or an
-  answer, or said it is done and moved on. Mentioning an item does not cover it.
+- "covered" lists the items whose discussion is over by the end of this stretch. An item is over
+  when the team decided or answered it, when someone says it is done, or when they talked it
+  through and have moved on to something else. One clear sentence can settle an item ("the
+  release moves to Monday").
+- The lines under "Earlier" came just before the stretch. Do not label them; use them, and how
+  long each item has been discussed, to judge. A short remark ("yes, agreed") is about what the
+  lines before it are about. An item discussed there that the talk has left in this stretch is
+  covered.
+- An item still being discussed when the stretch ends is not covered yet. Neither is one only
+  named in passing ("we'll get to the launch date later").
 - Use only labels from the agenda, or "{NO_ITEM}". Judge only from the transcript.
 {DATA_RULE}"""
 
@@ -85,21 +103,45 @@ def clock(t: float) -> str:
     return f"{minutes:02d}:{seconds:02d}"
 
 
+def discussed(seconds: float) -> str:
+    """How long an item has been talked about so far, e.g. "discussed 1 min 35 s"."""
+    if seconds < 1:
+        return "not discussed yet"
+    minutes, rest = divmod(int(seconds), 60)
+    return "discussed " + " ".join(
+        part for part in (f"{minutes} min" if minutes else "", f"{rest} s" if rest else "") if part
+    )
+
+
 def render_track_prompt(
-    agenda: Agenda, labels: dict[str, AgendaItem], segments: Sequence[TranscriptSegment]
+    agenda: Agenda,
+    labels: dict[str, AgendaItem],
+    segments: Sequence[TranscriptSegment],
+    earlier: Sequence[TranscriptSegment] = (),
 ) -> str:
+    """The agenda with each item's state, the lines just before the stretch (unnumbered: context
+    only) when there are any, and the stretch's segments, numbered to be labelled."""
+
     def describe(label: str, item: AgendaItem) -> str:
         timebox = f", {item.minutes} min" if item.minutes else ""
-        return f"[{label}] {item.title} ({item.status}{timebox})"
+        return f"[{label}] {item.title} ({item.status}{timebox}, {discussed(item.discussed_s)})"
 
     current = next((lb for lb, i in labels.items() if i.id == agenda.current_item_id), NO_ITEM)
+    context: list[str] = []
+    if earlier:
+        context = [
+            "Earlier, just before this stretch, for context only ([mm:ss] speaker: text):",
+            *fenced(f"[{clock(s.t_start)}] {s.speaker_name}: {clip(s.text)}" for s in earlier),
+            "",
+        ]
     return "\n".join(
         [
-            "Agenda ([label] title (status, timebox)):",
+            "Agenda ([label] title (status, timebox, time discussed so far)):",
             *fenced(describe(label, item) for label, item in labels.items()),
             "",
             f"Being discussed before this stretch: {current}",
             "",
+            *context,
             "Transcript stretch ([n] [mm:ss] speaker: text):",
             *fenced(
                 f"[{n}] [{clock(s.t_start)}] {s.speaker_name}: {clip(s.text)}"
@@ -118,13 +160,20 @@ class Labelled:
     covered: frozenset[str]
 
 
-async def classify(llm: LLM, agenda: Agenda, segments: Sequence[TranscriptSegment]) -> Labelled:
-    """Labels each segment (numbered from 1 in the order given) with an item. Labels not on the
-    agenda and segment numbers outside the stretch are ignored; where runs overlap, the later
-    one wins."""
+async def classify(
+    llm: LLM,
+    agenda: Agenda,
+    segments: Sequence[TranscriptSegment],
+    earlier: Sequence[TranscriptSegment] = (),
+) -> Labelled:
+    """Labels each segment (numbered from 1 in the order given) with an item; `earlier` is shown
+    for context and not labelled. Labels not on the agenda and segment numbers outside the
+    stretch are ignored; where runs overlap, the later one wins."""
     labels = {f"a{n}": item for n, item in enumerate(agenda.items, 1)}
     draft = await llm.generate_structured(
-        render_track_prompt(agenda, labels, segments), AgendaTrackDraft, system=track_system()
+        render_track_prompt(agenda, labels, segments, earlier),
+        AgendaTrackDraft,
+        system=track_system(),
     )
 
     def item_id(label: str) -> str | None:
@@ -252,12 +301,13 @@ def nudge(agenda: Agenda, meeting: Meeting, now: float) -> tuple[Agenda, list[Ag
 @dataclass(frozen=True)
 class Stretch:
     """What a tick learned: the point it tracked up to and, if the model was asked, the item
-    being discussed at its end, each item's talk time in it and which items it finished."""
+    being discussed at its end, each item's talk time in it and the items it finished, each with
+    when its discussion ended."""
 
     until: float
     asked: bool = False
     current: str | None = None
-    covered: frozenset[str] = frozenset()
+    covered: Mapping[str, float] = field(default_factory=dict)
     seconds: Mapping[str, float] = field(default_factory=dict)
 
 
@@ -275,13 +325,41 @@ def advance(agenda: Agenda, stretch: Stretch) -> Agenda:
             update |= {
                 "status": "covered",
                 "covered_by": AGENT_PARTICIPANT_ID,
-                "covered_t": stretch.until,
+                "covered_t": stretch.covered[item.id],
             }
         items.append(item.model_copy(update=update) if update else item)
     changes: dict = {"tracked_until": stretch.until, "items": items}
     if stretch.asked:
         changes["current_item_id"] = current
     return agenda.model_copy(update=changes)
+
+
+def left_behind(agenda: Agenda, said: Labelled, seconds: Mapping[str, float]) -> frozenset[str]:
+    """Pending items the team discussed and has left for another agenda item, whatever the model
+    said of them: the stretch ends on a different item, and the item was under way (the one
+    being discussed before the stretch, or one the stretch is partly about) with MOVED_ON_MIN_S
+    of talk in all. Drifting into talk about no item leaves nothing behind, and an item that was
+    not under way (one a person reopened earlier) is left as it is."""
+    if said.current is None:
+        return frozenset()
+    under_way = {agenda.current_item_id, *said.about} - {None, said.current}
+    return frozenset(
+        item.id
+        for item in agenda.items
+        if item.id in under_way
+        and item.status == "pending"
+        and item.discussed_s + seconds.get(item.id, 0.0) >= MOVED_ON_MIN_S
+    )
+
+
+def ended_at(
+    item_id: str, batch: Sequence[TranscriptSegment], about: Sequence[str | None]
+) -> float:
+    """When an item's discussion ended, for an item covered in this stretch: the end of the last
+    segment about it, or, when nothing in the stretch is about it, the start of the stretch's
+    first segment, which is when the talk had moved on."""
+    own = [s.t_end for s, item in zip(batch, about, strict=True) if item == item_id]
+    return max(own) if own else batch[0].t_start
 
 
 class ClassificationFailed(Exception):
@@ -304,7 +382,9 @@ async def track_agenda(
     """One tick at `now` seconds from the meeting start. The caller serialises ticks per meeting.
 
     The model is made and asked only when the stretch since the tracked point holds MIN_TALK_S
-    of talk or has run MAX_WAIT_S. The result is saved with a compare-and-set on the agenda's
+    of talk or has run MAX_WAIT_S. An item is covered when the model says its discussion is over
+    or when the talk has left it for another item (left_behind), as of when that discussion
+    ended, not of this tick. The result is saved with a compare-and-set on the agenda's
     revision; when someone else saved first (a lobby edit, another replica's tick), it is applied
     again to what they saved, without asking the model again. Raises ClassificationFailed when
     the model fails, and Conflict when the agenda kept changing under SAVE_ATTEMPTS saves."""
@@ -326,13 +406,19 @@ async def track_agenda(
     if talk == 0:
         stretch = Stretch(until)  # nothing said since: move on without the model
     elif batch and (talk >= MIN_TALK_S or until - (since or 0.0) >= MAX_WAIT_S):
+        earlier = sorted(
+            (s for s in transcript if since is not None and s.t_end <= since),
+            key=lambda s: s.t_start,
+        )[-CONTEXT_SEGMENTS:]
         try:
-            said = await classify(make_llm(), agenda, batch)
+            said = await classify(make_llm(), agenda, batch, earlier)
         except LLMError as e:
             failure = e
         else:
             seconds = split_talk(spans, batch, said.about)
-            stretch = Stretch(until, True, said.current, said.covered, seconds)
+            done = said.covered | left_behind(agenda, said, seconds)
+            covered = {item: ended_at(item, batch, said.about) for item in done}
+            stretch = Stretch(until, True, said.current, covered, seconds)
 
     response = await save(store, meeting, now, since, stretch)
     if failure is not None:

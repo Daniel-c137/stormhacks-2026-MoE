@@ -267,22 +267,22 @@ def test_segments_that_just_ended_wait_for_the_next_tick(worker, client_as, stor
 def test_ticks_every_few_seconds_do_not_ask_the_model_per_utterance(
     worker, client_as, store, model
 ):
-    """Three-second utterances, a tick after each: the model is asked when the stretch first
-    holds MIN_TALK_S of talk, not at every tick."""
+    """One-second remarks, a tick after each: the model is asked when the stretch first holds
+    MIN_TALK_S of talk, not at every tick."""
     meeting, (waitlist, *_) = standup(store, client_as)
-    asked_at = next(k for k in range(20) if 3 * k + 2 >= MIN_TALK_S)
+    asked_at = next(k for k in range(20) if 2 * k + 1 >= MIN_TALK_S)
     assert asked_at >= 2  # so several ticks pass without the model
     model.says("a1")
 
     for k in range(asked_at + 1):
-        ingest(worker, meeting, said(meeting, k, f"Waitlist point {k}", 3 * k, 3 * k + 2))
-        body = tracked(worker, meeting, now=3 * k + 3 + SETTLE_S)
+        ingest(worker, meeting, said(meeting, k, f"Waitlist point {k}", 2 * k, 2 * k + 1))
+        body = tracked(worker, meeting, now=2 * k + 2 + SETTLE_S)
         assert len(model.prompts) == (1 if k == asked_at else 0)
 
     [prompt] = model.prompts
     assert f"Waitlist point {asked_at}" in prompt
-    assert body["agenda"]["tracked_until"] == 3 * asked_at + 3
-    assert by_id(body["agenda"])[waitlist]["discussed_s"] == 3 * asked_at + 2
+    assert body["agenda"]["tracked_until"] == 2 * asked_at + 2
+    assert by_id(body["agenda"])[waitlist]["discussed_s"] == 2 * asked_at + 1
 
 
 def test_a_few_seconds_of_talk_are_tracked_at_the_next_tick(worker, client_as, store, model):
@@ -295,24 +295,28 @@ def test_a_few_seconds_of_talk_are_tracked_at_the_next_tick(worker, client_as, s
 
     body = tracked(worker, meeting, now=10 + SETTLE_S)
 
-    assert 10 >= MIN_TALK_S and MAX_WAIT_S <= 30
+    assert 10 >= MIN_TALK_S
     assert by_id(body["agenda"])[waitlist]["status"] == "covered"
 
 
 def test_a_short_remark_is_classified_once_the_stretch_is_long_enough(
     worker, client_as, store, model
 ):
+    """A two-second "done, next" is too little talk to ask about at once; it is asked about once
+    MAX_WAIT_S has passed, so a closing word never waits long."""
     meeting, (waitlist, *_) = standup(store, client_as)
-    ingest(worker, meeting, said(meeting, 1, "Quick waitlist question", 10, 14))
-    model.says("a1")
+    assert 2 < MIN_TALK_S and 12 < MAX_WAIT_S <= 20
+    ingest(worker, meeting, said(meeting, 1, "Waitlist is done, next", 10, 12))
+    model.says("a1", covered=("a1",))
 
-    waiting = tracked(worker, meeting, now=MAX_WAIT_S)
+    waiting = tracked(worker, meeting, now=12 + SETTLE_S)
     due = tracked(worker, meeting, now=MAX_WAIT_S + SETTLE_S)
 
     assert waiting["agenda"]["tracked_until"] is None
     assert len(model.prompts) == 1
     assert due["agenda"]["tracked_until"] == MAX_WAIT_S
-    assert by_id(due["agenda"])[waitlist]["discussed_s"] == 4
+    assert by_id(due["agenda"])[waitlist]["discussed_s"] == 2
+    assert covered_by(by_id(due["agenda"])[waitlist]) == (AGENT_PARTICIPANT_ID, 12)
 
 
 # time attribution
@@ -626,7 +630,7 @@ def test_an_item_covered_after_the_talk_left_it_is_timed_at_the_move(
     worker, client_as, store, model
 ):
     """Nothing in this stretch is about the item: it is covered as of when the talk moved on."""
-    meeting, (waitlist, refunds, _) = standup(store, client_as)
+    meeting, (waitlist, *_) = standup(store, client_as)
     ingest(worker, meeting, said(meeting, 1, "Short waitlist note", 0, 10))
     model.says("a1").says("a2", covered=("a1",))
     tracked(worker, meeting, now=20)
@@ -672,7 +676,7 @@ def test_moving_on_across_two_ticks_covers_the_item_left_behind(worker, client_a
 
 
 def test_an_item_only_touched_on_is_not_covered_by_moving_on(worker, client_as, store, model):
-    meeting, (waitlist, refunds, _) = standup(store, client_as)
+    meeting, (waitlist, *_) = standup(store, client_as)
     ingest(
         worker,
         meeting,
