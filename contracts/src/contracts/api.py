@@ -14,11 +14,35 @@ AskTurnRole = Literal["user", "agent"]
 
 
 class LoginRequest(BaseModel):
-    """POST /auth/login. There is no public sign-up; accounts come from `brain add-user` or an
-    admin (POST /team/accounts)."""
+    """POST /auth/login. Accounts come from `brain add-user`, an admin (POST /team/accounts), or
+    an invited email signing up (SignupRequest)."""
 
     email: str
     password: str
+
+
+class SignupRequest(BaseModel):
+    """POST /auth/signup (#128): only an email the admin invited (a member of the sign-up team
+    with no login yet) creates an account. Answered with a LoginResponse: signed in at once."""
+
+    name: str
+    email: str
+    password: str
+
+
+class AuthOptions(BaseModel):
+    """GET /auth/options: what the sign-in page can offer. signup: SIGNUP_TEAM_ID is set;
+    google: the brain has a Google OAuth client (GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)."""
+
+    signup: bool
+    google: bool
+
+
+class GoogleExchangeRequest(BaseModel):
+    """POST /auth/google/exchange: the one-time code the brain's Google callback sent the board,
+    swapped for a session (a LoginResponse). The session token is never put in a URL."""
+
+    code: str
 
 
 class LoginResponse(BaseModel):

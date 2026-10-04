@@ -1,5 +1,5 @@
 """Accounts: a person on a team with an email and password login, and who is an admin. Shared by
-`brain add-user`, `brain set-admin` and POST /team/accounts; there is no public sign-up."""
+`brain add-user`, `brain set-admin`, POST /team/accounts and invite-only sign-up (#128)."""
 
 import re
 import secrets
@@ -61,6 +61,19 @@ async def existing_person(store: Store, team: Team, email: str) -> Person | None
     for member in await store.members(team.id):
         if member.email and member.email.lower() == email.lower():
             return member
+    return None
+
+
+async def invited_person(store: Store, team: Team, email: str) -> Person | None:
+    """The team's member with this email (ignoring case) who has no login yet: someone the admin
+    invited. None for anyone else, including a member who already signs in."""
+    for member in await store.members(team.id):
+        if member.email and member.email.strip().lower() == email.lower():
+            try:
+                await store.login(member.id)
+            except NotFound:
+                return member
+            return None
     return None
 
 

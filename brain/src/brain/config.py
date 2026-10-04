@@ -17,6 +17,15 @@ class Settings(BaseSettings):
     # HS256 key for the session tokens the brain issues at login; under 32 characters is unset
     auth_secret: str | None = None
     session_hours: int = Field(default=12, ge=1)
+    # Sign-up (#128): only an email the admin invited, a member of this team with no login yet,
+    # creates an account. Unset, there is no sign-up.
+    signup_team_id: str | None = None
+    # Google sign-in: an OAuth client from Google Cloud ("Web application"), with
+    # <brain>/auth/google/callback as an authorised redirect URI. board_url is where the board is
+    # served, so the callback can send the browser back to its /login page.
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    board_url: str = "http://localhost:3000"
 
     gemini_api_key: str | None = None
     gemini_model: str | None = None

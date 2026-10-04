@@ -12,6 +12,27 @@ export interface LoginRequest {
   password: string;
 }
 
+/**
+ * POST /auth/signup (#128): only an email the admin invited (a member of the sign-up team with
+ * no login yet) creates an account. Answered with a LoginResponse: signed in at once.
+ */
+export interface SignupRequest {
+  name: string;
+  email: string;
+  password: string;
+}
+
+/** GET /auth/options: what the sign-in page can offer (sign-up open; Google configured). */
+export interface AuthOptions {
+  signup: boolean;
+  google: boolean;
+}
+
+/** POST /auth/google/exchange: the one-time code from the brain's Google callback, for a session. */
+export interface GoogleExchangeRequest {
+  code: string;
+}
+
 /** The board sends `token` as `Authorization: Bearer <token>` until `expires_at`. */
 export interface LoginResponse {
   token: string;
