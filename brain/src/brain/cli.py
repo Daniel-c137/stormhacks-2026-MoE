@@ -1,5 +1,6 @@
 """`brain report` turns a transcript into a review file of the report and task drafts.
-`brain push` creates Jira issues for the drafts a named person approved."""
+`brain push` creates Jira issues for the drafts a named person approved.
+`brain migrate` applies supabase/migrations to DATABASE_URL."""
 
 import argparse
 import asyncio
@@ -8,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 from brain.config import Settings
+from brain.db import migrate
 from brain.jira import ApprovalRequired, JiraPusher, JiraUnavailable, apply_results, jira_config
 from brain.llm import LLM, LLMError, MockLLM, make_llm
 from brain.report import ProcessedMeeting, ReportExtraction, build_report, load_transcript
@@ -43,6 +45,9 @@ def main(argv: list[str] | None = None) -> int:
     which.add_argument("--all", action="store_true", help="every draft still marked include")
     push.add_argument("--approved-by", required=True, metavar="NAME")
     push.set_defaults(run=run_push)
+
+    migrate_cmd = commands.add_parser("migrate", help="apply supabase/migrations to DATABASE_URL")
+    migrate_cmd.set_defaults(run=run_migrate)
 
     args = parser.parse_args(argv)
     return args.run(args)
@@ -110,3 +115,15 @@ def run_push(args: argparse.Namespace) -> int:
         if r.warning:
             print(f"{r.task_id}: {r.warning}")
     return 0 if all(r.key for r in results) else 1
+
+
+def run_migrate(args: argparse.Namespace) -> int:
+    dsn = Settings().database_url
+    if not dsn:
+        sys.exit("brain migrate: DATABASE_URL is not configured")
+    applied = asyncio.run(migrate(dsn))
+    for name in applied:
+        print(f"applied {name}")
+    if not applied:
+        print("Database is up to date.")
+    return 0
