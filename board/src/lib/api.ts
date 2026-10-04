@@ -11,6 +11,7 @@ import type {
   ConnectorStatus,
   CreateAccountRequest,
   CreateAccountResponse,
+  ConnectorsUpdate,
   CreateMeetingRequest,
   Decision,
   InviteRequest,
@@ -177,4 +178,6 @@ export const createAccount = (body: CreateAccountRequest) => request<CreateAccou
 export const getSettings = () => get<TeamSettings>("/settings");
 export const updateSettings = (body: TeamSettings) => request<TeamSettings>("PUT", "/settings", body);
 export const listConnectors = () => get<ConnectorStatus[]>("/settings/connectors");
+/** Admins only: the whole connector choice, replacing the saved one. */
+export const updateConnectors = (body: ConnectorsUpdate) => request<TeamSettings>("PUT", "/settings/connectors", body);
 export const listVoices = () => get<Voice[]>("/voices");

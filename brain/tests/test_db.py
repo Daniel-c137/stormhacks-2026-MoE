@@ -162,3 +162,57 @@ async def test_a_persons_login_goes_with_them_and_emails_are_unique_ignoring_cas
         conn.execute("delete from people where id = 'a'")
 
     assert query(pg_dsn, "select person_id from logins") == []
+
+
+CODE_CONNECTORS = "20261004001000_code_connectors.sql"
+
+
+async def test_the_single_repository_moves_into_the_list_and_gitlab_starts_empty(pg_dsn, tmp_path):
+    """Settings saved before several repositories keep their repository, ref and index state;
+    an unset repository becomes an empty list; the Jira site loses its scheme."""
+    for path in sorted(MIGRATIONS.glob("*.sql")):
+        if path.name < CODE_CONNECTORS:
+            write(tmp_path, path.name, path.read_text())
+    await migrate(pg_dsn, tmp_path)
+    with psycopg.connect(pg_dsn) as conn:
+        for team, github, jira in (
+            (
+                "t1",
+                '{"repo": "acme/checkout", "ref": "main", "connected": true,'
+                ' "indexed_at": "2026-10-01T12:00:00Z", "files": 420}',
+                '{"site": "https://acme.atlassian.net/", "project": "DS", "connected": false}',
+            ),
+            ("t2", '{"repo": null, "ref": null, "connected": false}', '{"site": null}'),
+            ("t3", '{"repo": "  ", "connected": false}', '{"site": "acme.atlassian.net"}'),
+        ):
+            conn.execute("insert into teams (id, name) values (%s, %s)", [team, team])
+            conn.execute(
+                "insert into team_settings (team_id, github, jira, sensitivity,"
+                " interrupt_minutes, who_can_allow) values (%s, %s, %s, 'balanced', 5, 'everyone')",
+                [team, github, jira],
+            )
+
+    write(tmp_path, CODE_CONNECTORS, (MIGRATIONS / CODE_CONNECTORS).read_text())
+    assert await migrate(pg_dsn, tmp_path) == [CODE_CONNECTORS.removesuffix(".sql")]
+
+    rows = dict(
+        (team, (github, gitlab, jira))
+        for team, github, gitlab, jira in query(
+            pg_dsn, "select team_id, github, gitlab, jira from team_settings order by team_id"
+        )
+    )
+    assert rows["t1"][0] == {
+        "repos": [
+            {
+                "path": "acme/checkout",
+                "ref": "main",
+                "connected": True,
+                "indexed_at": "2026-10-01T12:00:00Z",
+                "files": 420,
+            }
+        ]
+    }
+    assert rows["t1"][1] == {"projects": []}
+    assert rows["t1"][2]["site"] == "acme.atlassian.net"
+    assert rows["t2"][0] == {"repos": []} and rows["t2"][2]["site"] is None
+    assert rows["t3"][0] == {"repos": []} and rows["t3"][2]["site"] == "acme.atlassian.net"

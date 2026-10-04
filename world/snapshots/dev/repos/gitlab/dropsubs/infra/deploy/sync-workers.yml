@@ -1,0 +1,8 @@
+# Inbox sync workers: they page through each inbox and send emails to the classifier.
+service: sync-worker
+replicas: 2
+queue: inbox-sync
+concurrency_per_worker: 8
+heartbeat:
+  name: sync-worker
+  every_seconds: 30

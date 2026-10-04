@@ -1,0 +1,135 @@
+[
+  {
+    "id": 170000001,
+    "iid": 1,
+    "project_id": 61840213,
+    "title": "Deploy main to staging on every merge",
+    "description": "Staging should always run main, so a merged change can be tested there before a release. Production deploys only from release tags.",
+    "state": "closed",
+    "author": {
+      "id": 30110002,
+      "username": "mohammadreza-dropsubs",
+      "name": "Mohammad Reza",
+      "web_url": "https://gitlab.com/mohammadreza-dropsubs"
+    },
+    "assignees": [
+      {
+        "id": 30110002,
+        "username": "mohammadreza-dropsubs",
+        "name": "Mohammad Reza",
+        "web_url": "https://gitlab.com/mohammadreza-dropsubs"
+      }
+    ],
+    "labels": [
+      "ci"
+    ],
+    "created_at": "2026-07-28T17:00:00Z",
+    "updated_at": "2026-08-03T22:00:00Z",
+    "closed_at": "2026-08-03T22:00:00Z",
+    "web_url": "https://gitlab.com/dropsubs/infra/-/issues/1",
+    "references": {
+      "short": "#1",
+      "full": "dropsubs/infra#1"
+    }
+  },
+  {
+    "id": 170000003,
+    "iid": 3,
+    "project_id": 61840213,
+    "title": "Status page for the API and the sync workers",
+    "description": "From the Sep 23 standup: if we're five times bigger and something breaks, people will want to know.",
+    "state": "closed",
+    "author": {
+      "id": 30110003,
+      "username": "hossein-dropsubs",
+      "name": "Hossein",
+      "web_url": "https://gitlab.com/hossein-dropsubs"
+    },
+    "assignees": [
+      {
+        "id": 30110002,
+        "username": "mohammadreza-dropsubs",
+        "name": "Mohammad Reza",
+        "web_url": "https://gitlab.com/mohammadreza-dropsubs"
+      }
+    ],
+    "labels": [
+      "monitoring"
+    ],
+    "created_at": "2026-09-23T18:40:00Z",
+    "updated_at": "2026-09-28T23:00:00Z",
+    "closed_at": "2026-09-28T23:00:00Z",
+    "web_url": "https://gitlab.com/dropsubs/infra/-/issues/3",
+    "references": {
+      "short": "#3",
+      "full": "dropsubs/infra#3"
+    }
+  },
+  {
+    "id": 170000005,
+    "iid": 5,
+    "project_id": 61840213,
+    "title": "Load test before the waitlist opens",
+    "description": "First syncs are the heaviest thing we do. Replay up to 2,500 first syncs against staging; the result decides the invite batch size (#6).",
+    "state": "opened",
+    "author": {
+      "id": 30110002,
+      "username": "mohammadreza-dropsubs",
+      "name": "Mohammad Reza",
+      "web_url": "https://gitlab.com/mohammadreza-dropsubs"
+    },
+    "assignees": [
+      {
+        "id": 30110002,
+        "username": "mohammadreza-dropsubs",
+        "name": "Mohammad Reza",
+        "web_url": "https://gitlab.com/mohammadreza-dropsubs"
+      }
+    ],
+    "labels": [
+      "launch",
+      "load-test"
+    ],
+    "created_at": "2026-09-30T18:05:00Z",
+    "updated_at": "2026-10-02T18:10:00Z",
+    "closed_at": null,
+    "web_url": "https://gitlab.com/dropsubs/infra/-/issues/5",
+    "references": {
+      "short": "#5",
+      "full": "dropsubs/infra#5"
+    }
+  },
+  {
+    "id": 170000006,
+    "iid": 6,
+    "project_id": 61840213,
+    "title": "Invite the waitlist in batches",
+    "description": "Batches over one day, a few hours apart, so a problem only reaches one batch. Batch size comes from the load test (#5); about 1,000 to start.",
+    "state": "opened",
+    "author": {
+      "id": 30110002,
+      "username": "mohammadreza-dropsubs",
+      "name": "Mohammad Reza",
+      "web_url": "https://gitlab.com/mohammadreza-dropsubs"
+    },
+    "assignees": [
+      {
+        "id": 30110002,
+        "username": "mohammadreza-dropsubs",
+        "name": "Mohammad Reza",
+        "web_url": "https://gitlab.com/mohammadreza-dropsubs"
+      }
+    ],
+    "labels": [
+      "launch"
+    ],
+    "created_at": "2026-09-30T18:10:00Z",
+    "updated_at": "2026-09-30T18:10:00Z",
+    "closed_at": null,
+    "web_url": "https://gitlab.com/dropsubs/infra/-/issues/6",
+    "references": {
+      "short": "#6",
+      "full": "dropsubs/infra#6"
+    }
+  }
+]

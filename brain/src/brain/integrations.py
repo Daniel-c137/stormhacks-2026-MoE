@@ -1,4 +1,5 @@
-"""GitHub and Jira over MCP: the world mocks or the real servers, with the same tool names."""
+"""GitHub, GitLab and Jira over MCP: the world mocks or the real servers, with the same tool
+names."""
 
 import json
 import re
@@ -9,7 +10,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.types import CallToolResult, ContentBlock, TextContent
 from pydantic import BaseModel
 
-McpServerName = Literal["github", "jira"]
+McpServerName = Literal["github", "gitlab", "jira"]
 
 
 class McpServer(BaseModel):
@@ -34,6 +35,19 @@ READ_TOOLS: dict[McpServerName, frozenset[str]] = {
             "get_file_contents",
         }
     ),
+    # GitLab's official MCP server (GitLab 19.5): docs.gitlab.com/user/model_context_protocol/
+    # mcp_server_tools. Issues are work items there.
+    "gitlab": frozenset(
+        {
+            "search",
+            "get_work_item",
+            "list_work_items",
+            "get_merge_request",
+            "list_merge_requests",
+            "get_repository_file",
+            "list_releases",
+        }
+    ),
     "jira": frozenset(
         {
             "searchJiraIssuesUsingJql",
@@ -47,6 +61,7 @@ READ_TOOLS: dict[McpServerName, frozenset[str]] = {
 # Only the approved task-push flow may call these.
 WRITE_TOOLS: dict[McpServerName, frozenset[str]] = {
     "github": frozenset({"add_issue_comment"}),
+    "gitlab": frozenset(),  # nothing is written to GitLab yet
     "jira": frozenset(
         {
             "createJiraIssue",

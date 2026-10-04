@@ -31,6 +31,7 @@ import {
 import { describeError, pushTasks, retryReport, updateTask } from "@/lib/api";
 import { attendeeNames, fmtClock, fmtDate, fmtLongDate, fmtT, joinNames, meetingStart, shortOf } from "@/lib/format";
 import { hostOrAdmin } from "@/lib/roles";
+import { jiraIssueUrl } from "@/lib/links";
 import { translationNote } from "@/lib/translation";
 import { ListenButton } from "./ListenButton";
 import { TaskReview } from "./TaskReview";
@@ -578,7 +579,7 @@ function Tasks({
   const included = tasks.filter((t) => t.include);
   const jira = settings?.jira;
   const github = settings?.github;
-  const destinationLabel = destination === "jira" ? (jira?.project ?? "Jira") : (github?.repo ?? "GitHub");
+  const destinationLabel = destination === "jira" ? (jira?.project ?? "Jira") : (github?.repos[0]?.path ?? "GitHub");
   const keys = tasks.flatMap((t) => (t.key ? [t.key] : []));
 
   const commit = (task: TaskDraft) => {
@@ -630,7 +631,7 @@ function Tasks({
       pushed={pushed}
       destination={destination}
       destinationLabel={destinationLabel}
-      keyUrl={(task) => urls[task.id] ?? (destination === "jira" && jira?.site && task.key ? `https://${jira.site}/browse/${task.key}` : null)}
+      keyUrl={(task) => urls[task.id] ?? (destination === "jira" ? jiraIssueUrl(jira?.site, task.key) : null)}
       status={status}
       onChange={(task) => setTasks((list) => list.map((t) => (t.id === task.id ? task : t)))}
       onCommit={commit}

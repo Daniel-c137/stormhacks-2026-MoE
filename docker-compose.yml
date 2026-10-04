@@ -1,4 +1,5 @@
-# One server: Postgres, the brain, the realtime worker, the demo-world mock MCP servers, the board
+# One server: Postgres, the brain, the realtime worker, the demo-world mock MCP servers (GitHub,
+# Jira, GitLab), the board
 # and Caddy in front. Run it with the production env file:
 #   docker compose --env-file deploy/.env up -d --build
 # --env-file fills the ${...} below; the services that read settings also load the same file.
@@ -49,6 +50,7 @@ services:
     environment:
       GITHUB_MCP_URL: ${GITHUB_MCP_URL:-http://world-github:8101/mcp}
       JIRA_MCP_URL: ${JIRA_MCP_URL:-http://world-jira:8102/mcp}
+      GITLAB_MCP_URL: ${GITLAB_MCP_URL:-http://world-gitlab:8103/mcp}
     restart: unless-stopped
     depends_on:
       migrate:
@@ -109,6 +111,22 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8102), 3)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  world-gitlab:
+    build:
+      context: .
+      dockerfile: world/Dockerfile
+    image: moe-world
+    command: ["world-gitlab-mcp"]
+    environment:
+      <<: *world-environment
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8103), 3)"]
       interval: 15s
       timeout: 5s
       start_period: 10s

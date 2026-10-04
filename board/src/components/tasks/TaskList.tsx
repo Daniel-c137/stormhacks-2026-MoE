@@ -8,6 +8,7 @@ import { Icon, type IconName } from "@/components/ui/Icon";
 import { Notice } from "@/components/ui/Notice";
 import { useMeetings, useSettings, useTasks } from "@/hooks/useApi";
 import { fmtDate, isoDay } from "@/lib/format";
+import { jiraIssueUrl } from "@/lib/links";
 
 const JIRA_ICON: Record<TaskDraft["jira_status"], IconName> = {
   draft: "circle-dashed",
@@ -85,7 +86,7 @@ export function TaskList() {
               </div>
               {t.key &&
                 (site ? (
-                  <a className="jump" href={`https://${site}/browse/${t.key}`} target="_blank" rel="noopener noreferrer">
+                  <a className="jump" href={jiraIssueUrl(site, t.key) ?? undefined} target="_blank" rel="noopener noreferrer">
                     {t.key}
                   </a>
                 ) : (

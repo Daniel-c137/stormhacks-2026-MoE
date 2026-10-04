@@ -219,13 +219,12 @@ def team_settings(client: TestClient, **changes) -> dict:
 def linked(client_as):
     """The team has a repository and a Jira project, set by the admin."""
     alex = client_as(ALEX)
-    body = team_settings(
-        alex,
-        github={"repo": "acme/checkout", "ref": "main"},
-        jira={"site": "acme.atlassian.net", "project": "DS"},
-        who_can_allow="host",
-    )
-    response = alex.put("/settings", json=body)
+    connectors = {
+        "github": [{"path": "acme/checkout", "ref": "main"}],
+        "jira": {"site": "acme.atlassian.net", "project": "DS"},
+    }
+    assert alex.put("/settings/connectors", json=connectors).status_code == 200
+    response = alex.put("/settings", json=team_settings(alex, who_can_allow="host"))
     assert response.status_code == 200, response.text
     return response.json()
 
@@ -257,14 +256,14 @@ def test_a_member_cannot_change_any_team_setting(client_as, linked, changes):
 def test_the_admin_changes_team_settings(client_as, linked):
     alex = client_as(ALEX)
     body = team_settings(alex, who_can_allow="everyone", voice="voice-2")
-    body["github"] = body["github"] | {"repo": "acme/payments", "ref": None}
+    body["github"] = {"repos": [{"path": "acme/payments"}]}  # connectors change elsewhere
 
     response = alex.put("/settings", json=body)
 
     assert response.status_code == 200, response.text
     saved = client_as(SARAH).get("/settings").json()
     assert (saved["who_can_allow"], saved["voice"]) == ("everyone", "voice-2")
-    assert (saved["github"]["repo"], saved["github"]["ref"]) == ("acme/payments", None)
+    assert [(r["path"], r["ref"]) for r in saved["github"]["repos"]] == [("acme/checkout", "main")]
 
 
 def test_a_member_still_reads_the_team_settings_and_connectors(client_as, linked):

@@ -1,0 +1,137 @@
+[
+  {
+    "number": 1,
+    "title": "Waitlist sign-up form",
+    "body": "Email and first name, a confirmation email, and the count on the page.",
+    "state": "closed",
+    "user": {
+      "login": "danial-dropsubs",
+      "id": 164859128,
+      "type": "User",
+      "html_url": "https://github.com/danial-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "landing"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "reyhaneh-dropsubs",
+        "id": 41731418,
+        "type": "User",
+        "html_url": "https://github.com/reyhaneh-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-07-06T17:00:00Z",
+    "updated_at": "2026-07-10T21:00:00Z",
+    "closed_at": "2026-07-10T21:00:00Z",
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/website/issues/1",
+    "url": "https://api.github.com/repos/dropsubs/website/issues/1",
+    "state_reason": "completed"
+  },
+  {
+    "number": 4,
+    "title": "Switch \"Join the waitlist\" to \"Get started\" when the waitlist opens",
+    "body": "From Wednesday's standup: when the waitlist opens, the hero button says Get started and goes to sign-up instead of the waitlist form. Launch is tracked in dropsubs/dropsubs#52.",
+    "state": "open",
+    "user": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "launch"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "reyhaneh-dropsubs",
+        "id": 41731418,
+        "type": "User",
+        "html_url": "https://github.com/reyhaneh-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-09-30T19:10:00Z",
+    "updated_at": "2026-09-30T19:10:00Z",
+    "closed_at": null,
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/website/issues/4",
+    "url": "https://api.github.com/repos/dropsubs/website/issues/4",
+    "state_reason": null
+  },
+  {
+    "number": 5,
+    "title": "Show the App Store badge once Apple approves the iPhone app",
+    "body": "The badge stays hidden until the app is approved (dropsubs/dropsubs#29).",
+    "state": "open",
+    "user": {
+      "login": "reyhaneh-dropsubs",
+      "id": 41731418,
+      "type": "User",
+      "html_url": "https://github.com/reyhaneh-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "launch"
+      },
+      {
+        "name": "ios"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "reyhaneh-dropsubs",
+        "id": 41731418,
+        "type": "User",
+        "html_url": "https://github.com/reyhaneh-dropsubs"
+      }
+    ],
+    "comments": 1,
+    "created_at": "2026-09-30T19:15:00Z",
+    "updated_at": "2026-10-02T17:40:00Z",
+    "closed_at": null,
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/website/issues/5",
+    "url": "https://api.github.com/repos/dropsubs/website/issues/5",
+    "state_reason": null
+  },
+  {
+    "number": 7,
+    "title": "Landing page says the fee is 30%",
+    "body": "We moved to 20% at today's standup. The pricing section and the FAQ on the landing page still say 30%.",
+    "state": "closed",
+    "user": {
+      "login": "danial-dropsubs",
+      "id": 164859128,
+      "type": "User",
+      "html_url": "https://github.com/danial-dropsubs"
+    },
+    "labels": [
+      {
+        "name": "pricing"
+      }
+    ],
+    "assignees": [
+      {
+        "login": "reyhaneh-dropsubs",
+        "id": 41731418,
+        "type": "User",
+        "html_url": "https://github.com/reyhaneh-dropsubs"
+      }
+    ],
+    "comments": 0,
+    "created_at": "2026-09-30T20:00:00Z",
+    "updated_at": "2026-10-01T17:30:00Z",
+    "closed_at": "2026-10-01T17:30:00Z",
+    "author_association": "MEMBER",
+    "html_url": "https://github.com/dropsubs/website/issues/7",
+    "url": "https://api.github.com/repos/dropsubs/website/issues/7",
+    "state_reason": "completed"
+  }
+]

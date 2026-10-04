@@ -1,0 +1,11 @@
+{
+  "id": 61840213,
+  "name": "infra",
+  "path": "infra",
+  "path_with_namespace": "dropsubs/infra",
+  "name_with_namespace": "DropSubs / infra",
+  "description": "Deploys, CI, the status page and load tests.",
+  "default_branch": "main",
+  "visibility": "private",
+  "web_url": "https://gitlab.com/dropsubs/infra"
+}

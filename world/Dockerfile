@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
-# The demo world: one image for the mock GitHub and Jira MCP servers (`world-github-mcp`,
-# `world-jira-mcp`) and the world CLIs. Build from the repo root:
+# The demo world: one image for the mock GitHub, Jira and GitLab MCP servers (`world-github-mcp`,
+# `world-jira-mcp`, `world-gitlab-mcp`) and the world CLIs. Build from the repo root:
 #   docker build -f world/Dockerfile .
 ARG PYTHON_IMAGE=python:3.12.15-slim-bookworm
 
@@ -34,5 +34,5 @@ WORKDIR /app
 ENV PATH=/app/.venv/bin:$PATH PYTHONUNBUFFERED=1 \
     WORLD_OVERLAY_DIR=/data/overlay WORLD_MCP_HOST=0.0.0.0
 USER app
-EXPOSE 8101 8102
+EXPOSE 8101 8102 8103
 CMD ["world-github-mcp"]

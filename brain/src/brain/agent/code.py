@@ -1,14 +1,31 @@
-"""Code snippets as evidence. A snippet is only ever a slice of a file GitHub returned, by line
-numbers: a model may choose the lines, never the code. Answers (ask.py) and fact-checks use it."""
+"""Code snippets as evidence. A snippet is only ever a slice of a file its code host (GitHub or
+GitLab) returned, by line numbers: a model may choose the lines, never the code. Answers (ask.py)
+and fact-checks use it."""
 
+from collections.abc import Sequence
 from pathlib import PurePosixPath
+from typing import Protocol
 from uuid import uuid4
 
 import anyio
 
-from brain.github import CodeFile, GitHubError, GitHubReader
+from brain.github import CodeFile, CodeHit, CodeHost, CodeReadError
 from brain.integrations import search_words
 from contracts import CodeSnippet
+
+
+class CodeReader(Protocol):
+    """One connected repository's code: a GitHubReader or a GitLabReader."""
+
+    host: CodeHost
+
+    @property
+    def full_name(self) -> str: ...
+
+    async def search_code(self, text: str, limit: int = 5) -> list[CodeHit]: ...
+
+    async def read_file(self, path: str, ref: str | None = None) -> CodeFile: ...
+
 
 MAX_SNIPPET_LINES = 40
 CODE_FILES = 2
@@ -81,6 +98,7 @@ def snippet_from_file(
     end = min(end_line, len(lines), start + max_lines - 1)
     at = f" at {file.ref[:7]}" if file.pinned else f" on {file.ref}"
     return CodeSnippet(
+        repo=file.repo,
         id=str(uuid4()),
         path=file.path,
         start_line=start,
@@ -88,7 +106,7 @@ def snippet_from_file(
         language=language_for(file.path),
         code="\n".join(lines[start - 1 : end]),
         github_url=file.url(start, end),
-        caption=caption or f"{file.path}, lines {start}-{end}{at}",
+        caption=caption or f"{file.repo}: {file.path}, lines {start}-{end}{at}",
         highlight=within(highlight, start, end),
     )
 
@@ -116,23 +134,53 @@ def snippet_around(file: CodeFile, query: str) -> CodeSnippet:
 
 
 async def code_evidence(
-    reader: GitHubReader, query: str, *, max_files: int = CODE_FILES
+    reader: CodeReader, query: str, *, max_files: int = CODE_FILES
 ) -> list[CodeSnippet]:
     """Searches the repository's code and copies a snippet from each of the top max_files
-    files, read at the reader's ref. Raises GitHubError when the search fails, or when every
+    files, read at the reader's ref. Raises CodeReadError when the search fails, or when every
     read does."""
-    hits = await reader.search_code(query, limit=max_files)
-    files: list[CodeFile | GitHubError | None] = [None] * len(hits)
+    return await code_evidence_across([reader], query, max_files=max_files)
 
-    async def read(i: int, path: str) -> None:
+
+async def code_evidence_across(
+    readers: Sequence[CodeReader], query: str, *, max_files: int = CODE_FILES
+) -> list[CodeSnippet]:
+    """code_evidence over several repositories: each is searched at the same time, then the
+    top files are taken in turn from each repository's hits, max_files in all, so one
+    repository cannot crowd out the others. Raises CodeReadError when every search fails, or
+    when every read does."""
+    searched: list[list[CodeHit] | CodeReadError] = [[] for _ in readers]
+
+    async def search(i: int, reader: CodeReader) -> None:
+        try:
+            searched[i] = await reader.search_code(query, limit=max_files)
+        except CodeReadError as e:
+            searched[i] = e
+
+    async with anyio.create_task_group() as group:
+        for i, reader in enumerate(readers):
+            group.start_soon(search, i, reader)
+    failed = [s for s in searched if isinstance(s, CodeReadError)]
+    if readers and len(failed) == len(readers):
+        raise failed[0]
+
+    hits = [s if isinstance(s, list) else [] for s in searched]
+    chosen: list[tuple[CodeReader, str]] = []
+    for depth in range(max_files):
+        for reader, found in zip(readers, hits, strict=True):
+            if depth < len(found) and len(chosen) < max_files:
+                chosen.append((reader, found[depth].path))
+    files: list[CodeFile | CodeReadError | None] = [None] * len(chosen)
+
+    async def read(i: int, reader: CodeReader, path: str) -> None:
         try:
             files[i] = await reader.read_file(path)
-        except GitHubError as e:
+        except CodeReadError as e:
             files[i] = e
 
     async with anyio.create_task_group() as group:
-        for i, hit in enumerate(hits):
-            group.start_soon(read, i, hit.path)
+        for i, (reader, path) in enumerate(chosen):
+            group.start_soon(read, i, reader, path)
 
     snippets = []
     for file in files:
@@ -141,7 +189,7 @@ async def code_evidence(
                 snippets.append(snippet_around(file, query))
             except ValueError:
                 continue  # an empty file
-    errors = [f for f in files if isinstance(f, GitHubError)]
+    errors = [f for f in files if isinstance(f, CodeReadError)]
     if errors and not snippets:
         raise errors[0]
     return snippets

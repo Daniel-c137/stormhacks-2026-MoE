@@ -59,11 +59,24 @@ from .report import (
     TaskPushRequest,
     TaskPushResult,
 )
-from .settings import ConnectorStatus, GitHubSettings, JiraSettings, TeamSettings, Voice
+from .settings import (
+    MAX_CODE_REPOS,
+    CodeRepo,
+    CodeRepoChoice,
+    ConnectorStatus,
+    ConnectorsUpdate,
+    GitHubSettings,
+    GitLabSettings,
+    JiraChoice,
+    JiraSettings,
+    TeamSettings,
+    Voice,
+)
 from .transcript import TranscriptSegment
 
 __all__ = [
     "AGENT_PARTICIPANT_ID",
+    "MAX_CODE_REPOS",
     "TOPIC_PAYLOADS",
     "Agenda",
     "AgendaItem",
@@ -84,8 +97,11 @@ __all__ = [
     "CatchUpRequest",
     "CatchUpResponse",
     "ChatMessage",
+    "CodeRepo",
+    "CodeRepoChoice",
     "CodeSnippet",
     "ConnectorStatus",
+    "ConnectorsUpdate",
     "CreateAccountRequest",
     "CreateAccountResponse",
     "CreateMeetingRequest",
@@ -96,11 +112,13 @@ __all__ = [
     "FactCheckRequest",
     "FactCheckResponse",
     "GitHubSettings",
+    "GitLabSettings",
     "Identity",
     "InviteRequest",
     "Invocation",
     "InvokeRequest",
     "InvokeResponse",
+    "JiraChoice",
     "JiraSettings",
     "JoinMeetingResponse",
     "KeytermsResponse",

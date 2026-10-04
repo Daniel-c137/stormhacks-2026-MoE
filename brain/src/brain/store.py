@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from contracts import (
     Agenda,
     ChatMessage,
+    CodeRepo,
     Decision,
     FactCheck,
     GitHubSettings,
@@ -310,6 +311,16 @@ def photo_path(person_id: str, data: bytes) -> str:
     return f"/people/{person_id}/photo?v={version}"
 
 
+def default_settings(team: Team) -> TeamSettings:
+    """A team's settings before any are saved: its own repository and Jira project, if any."""
+    repos = [CodeRepo(path=team.github_repo)] if team.github_repo else []
+    return TeamSettings(
+        team_id=team.id,
+        github=GitHubSettings(repos=repos),
+        jira=JiraSettings(project=team.jira_project),
+    )
+
+
 def new_join_code() -> str:
     """Unguessable and URL-safe; the link is the only thing a teammate needs to join."""
     return secrets.token_urlsafe(9)
@@ -436,11 +447,7 @@ class InMemoryStore:
         saved = self._settings.get(team_id)
         if saved is not None:
             return _copy(saved)
-        return TeamSettings(
-            team_id=team_id,
-            github=GitHubSettings(repo=team.github_repo),
-            jira=JiraSettings(project=team.jira_project),
-        )
+        return default_settings(team)
 
     async def save_settings(self, settings: TeamSettings) -> TeamSettings:
         self._team(settings.team_id)

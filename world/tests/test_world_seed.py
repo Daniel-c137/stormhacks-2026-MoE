@@ -318,11 +318,14 @@ async def assert_seeded(store: Store, memory: MeetingMemory) -> list[str]:
     assert [p.id for p in await store.members(TEAM)] == PEOPLE
 
     settings = await store.settings(TEAM)
-    assert settings.github.repo == "dropsubs/dropsubs"
-    assert (settings.jira.site, settings.jira.project) == ("https://dropsubs.atlassian.net", "DS")
+    assert [r.path for r in settings.github.repos] == ["dropsubs/dropsubs", "dropsubs/website"]
+    assert [p.path for p in settings.gitlab.projects] == ["dropsubs/infra"]
+    assert all(r.ref is None for r in [*settings.github.repos, *settings.gitlab.projects])
+    # the board links issues as https://<site>/browse/KEY, so the site has no scheme
+    assert (settings.jira.site, settings.jira.project) == ("dropsubs.atlassian.net", "DS")
     assert settings.timezone == "America/Vancouver"
     assert (settings.sensitivity, settings.interrupt_minutes) == ("balanced", 5)
-    assert not settings.github.connected and not settings.jira.connected
+    assert not any(r.connected for r in settings.github.repos) and not settings.jira.connected
 
     meetings = list(reversed(await store.meetings(TEAM)))
     assert [m.title for m in meetings] == TITLES

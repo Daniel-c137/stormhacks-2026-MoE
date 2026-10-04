@@ -636,9 +636,29 @@
   .file-btn { position: relative; cursor: pointer; }
   .file-btn input { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
   .two { display: grid; grid-template-columns: minmax(0,1fr) 200px; gap: 12px; }
-  .connected { display: flex; gap: 8px; align-items: center; font-size: 14px; color: var(--ok); font-weight: 700; margin-top: 12px; }
-  .connected span { color: var(--muted); font-weight: 500; }
-  .connected[data-on="false"] { color: var(--muted); }
+  .conn { display: flex; flex-direction: column; gap: 10px; padding: 0 0 16px; }
+  .conn-list { list-style: none; margin: 0; padding: 0; }
+  .conn-list > li + li { border-top: 1px solid var(--line); }
+  .conn-row { display: flex; align-items: center; gap: 10px; min-height: 46px; padding: 4px 0; min-width: 0; }
+  .conn-icon { font-size: 18px; color: var(--ink); }
+  .conn-icon.is-gitlab { color: #FC6D26; }
+  .conn-icon.is-jira { color: #2684FF; }
+  .conn-name { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .conn-ref-text { color: var(--muted); font-weight: 500; }
+  .conn-state { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--muted); white-space: nowrap; }
+  .conn-state::before { content: ""; width: 8px; height: 8px; border-radius: 999px; background: var(--line-2); }
+  .conn-state[data-state="connected"] { color: var(--ok); }
+  .conn-state[data-state="connected"]::before { background: var(--ok); }
+  .conn-state[data-state="failing"] { color: var(--danger-ink); }
+  .conn-state[data-state="failing"]::before { background: var(--danger); }
+  .conn-more { position: relative; flex: none; }
+  .conn-menu { right: 0; top: calc(100% + 4px); min-width: 160px; }
+  .conn-add { position: relative; align-self: flex-start; }
+  .conn-add .menu { left: 0; top: calc(100% + 6px); }
+  .conn-add .btn > [class^="icon-chevron"] { color: var(--muted); }
+  .conn-edit { gap: 8px; }
+  .conn-edit .field { height: 38px; border-radius: 10px; flex: 1 1 200px; font-size: 14px; }
+  .conn-edit .conn-ref { flex: 0 1 170px; }
   .voices { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
   .voice { border: 1.5px solid var(--line); border-radius: 18px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; transition: border-color .15s; }
   .voice:has(input:checked) { border-color: var(--ink); background: var(--card-hover); }
@@ -712,6 +732,14 @@
     .at-label { display: none; }
     .task-fields, .two, .srow, .sched-grid, .member-add { grid-template-columns: minmax(0,1fr); }
     .rep-wrap, .settings-body { padding-left: 16px; padding-right: 16px; }
+    .conn-row:not(.conn-edit) { display: grid; grid-template-columns: auto minmax(0,1fr) auto; grid-template-areas: "icon name more" "icon state more"; column-gap: 10px; row-gap: 2px; padding: 8px 0; }
+    .conn-row > .conn-icon { grid-area: icon; }
+    .conn-row > .conn-name { grid-area: name; }
+    .conn-row > .conn-state { grid-area: state; }
+    .conn-row > .conn-more { grid-area: more; }
+    .conn-edit { flex-wrap: wrap; }
+    .conn-edit .conn-icon { display: none; }
+    .conn-edit .field, .conn-edit .conn-ref { flex: 1 1 100%; }
     .rcard { padding: 20px; }
     .line { grid-template-columns: 52px minmax(0,1fr); }
     .line .who { grid-column: 2; }

@@ -1,10 +1,11 @@
-"""Connector status: GitHub and Jira reached through their MCP servers, never faked."""
+"""Connector status: GitHub, GitLab and Jira reached through their MCP servers, never faked. One
+check covers every repository of a connector."""
 
 import socket
 from collections.abc import Iterator
 
 import pytest
-from api_support import ALEX, TEAM
+from api_support import ALEX
 from conftest import serve_mcp
 from mcp.server.mcpserver import MCPServer
 
@@ -21,12 +22,19 @@ def read_server(name: str, *tools: str) -> MCPServer:
 
 
 GITHUB_READ = ("issue_read", "search_issues", "list_pull_requests", "pull_request_read")
+GITLAB_READ = ("search", "get_work_item", "get_merge_request")
 JIRA_READ = ("getJiraIssue", "searchJiraIssuesUsingJql")
 
 
 @pytest.fixture
 def github_url() -> Iterator[str]:
     with serve_mcp(read_server("github", *GITHUB_READ, "list_issues")) as url:
+        yield url
+
+
+@pytest.fixture
+def gitlab_url() -> Iterator[str]:
+    with serve_mcp(read_server("gitlab", *GITLAB_READ, "get_repository_file")) as url:
         yield url
 
 
@@ -55,56 +63,79 @@ def closed_url() -> str:
 
 @pytest.fixture
 def linked(client_as):
-    """The team has a repository and a Jira project."""
+    """The team has two repositories, a GitLab project and a Jira project."""
     body = {
-        "team_id": TEAM.id,
-        "github": {"repo": "acme/checkout", "ref": "main"},
+        "github": [{"path": "acme/checkout", "ref": "main"}, {"path": "acme/website"}],
+        "gitlab": [{"path": "acme/infra"}],
         "jira": {"site": "acme.atlassian.net", "project": "DS"},
     }
-    assert client_as(ALEX).put("/settings", json=body).status_code == 200
+    response = client_as(ALEX).put("/settings/connectors", json=body)
+    assert response.status_code == 200, response.text
 
 
 def statuses(client) -> dict[str, dict]:
     response = client.get("/settings/connectors")
     assert response.status_code == 200, response.text
     found = {s["name"]: s for s in response.json()}
-    assert list(found) == ["github", "jira"]
+    assert list(found) == ["github", "gitlab", "jira"]
     return found
 
 
-def test_both_connect_when_their_servers_have_the_read_tools(
-    client_as, settings, linked, github_url, jira_url
+def test_all_connect_when_their_servers_have_the_read_tools(
+    client_as, settings, linked, github_url, gitlab_url, jira_url
 ):
     settings.github_mcp_url, settings.jira_mcp_url = github_url, jira_url
+    settings.gitlab_mcp_url = gitlab_url
 
     found = statuses(client_as(ALEX))
 
     assert found["github"]["state"] == "connected"
+    assert found["gitlab"]["state"] == "connected"
     assert found["jira"]["state"] == "connected"
 
 
 def test_no_mcp_url_means_not_configured(client_as, settings):
-    settings.github_mcp_url = settings.jira_mcp_url = None
+    settings.github_mcp_url = settings.jira_mcp_url = settings.gitlab_mcp_url = None
 
     found = statuses(client_as(ALEX))
 
     assert found["github"]["state"] == "not_configured"
     assert "GITHUB_MCP_URL" in found["github"]["detail"]
+    assert found["gitlab"]["state"] == "not_configured"
+    assert "GITLAB_MCP_URL" in found["gitlab"]["detail"]
     assert found["jira"]["state"] == "not_configured"
     assert "JIRA_MCP_URL" in found["jira"]["detail"]
 
 
 def test_a_team_without_a_repo_or_project_is_not_configured(
-    client_as, settings, github_url, jira_url
+    client_as, settings, github_url, gitlab_url, jira_url
 ):
     settings.github_mcp_url, settings.jira_mcp_url = github_url, jira_url
+    settings.gitlab_mcp_url = gitlab_url
 
     found = statuses(client_as(ALEX))
 
     assert found["github"]["state"] == "not_configured"
     assert "repository" in found["github"]["detail"]
+    assert found["gitlab"]["state"] == "not_configured"
+    assert "GitLab project" in found["gitlab"]["detail"]
     assert found["jira"]["state"] == "not_configured"
     assert "project" in found["jira"]["detail"]
+
+
+def test_a_gitlab_server_without_the_read_tools_is_failing(client_as, settings, linked):
+    with serve_mcp(read_server("gitlab", "search")) as url:
+        settings.gitlab_mcp_url = url
+        gitlab = statuses(client_as(ALEX))["gitlab"]
+
+    assert gitlab["state"] == "failing"
+    assert "get_work_item" in gitlab["detail"] and "get_merge_request" in gitlab["detail"]
+
+
+def test_a_github_server_answering_as_gitlab_is_failing(client_as, settings, linked, github_url):
+    settings.gitlab_mcp_url = github_url  # the wrong server: none of GitLab's tools
+
+    assert statuses(client_as(ALEX))["gitlab"]["state"] == "failing"
 
 
 def test_a_server_without_the_read_tools_is_failing(client_as, settings, linked, jira_over_http):
