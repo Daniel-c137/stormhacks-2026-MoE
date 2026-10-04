@@ -1,0 +1,2078 @@
+[
+  {
+    "id": "10061",
+    "key": "DS-61",
+    "self": "https://dropsubs.atlassian.net/rest/api/3/issue/DS-61",
+    "url": "https://dropsubs.atlassian.net/browse/DS-61",
+    "fields": {
+      "summary": "Outlook login loops back to the sign-in page",
+      "description": "Connecting Outlook loops back to sign-in after consent.\n\nGitHub: https://github.com/dropsubs/dropsubs/issues/10, https://github.com/dropsubs/dropsubs/pull/19",
+      "issuetype": {
+        "name": "Bug"
+      },
+      "project": {
+        "key": "DS",
+        "name": "DropSubs"
+      },
+      "status": {
+        "name": "Done",
+        "id": "51",
+        "statusCategory": {
+          "key": "done",
+          "name": "Done"
+        }
+      },
+      "priority": {
+        "name": "High"
+      },
+      "assignee": {
+        "accountId": "712020:ds-reyhaneh",
+        "displayName": "Reyhaneh",
+        "emailAddress": "reyhaneh@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "reporter": {
+        "accountId": "712020:ds-danial",
+        "displayName": "Danial",
+        "emailAddress": "danial@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "labels": [
+        "frontend"
+      ],
+      "created": "2026-08-17T17:00:00Z",
+      "updated": "2026-08-31T16:30:00Z",
+      "duedate": null,
+      "sprint": {
+        "id": 5,
+        "name": "DS Sprint 5",
+        "state": "closed",
+        "startDate": "2026-08-17T16:00:00Z",
+        "endDate": "2026-08-29T01:00:00Z"
+      },
+      "parent": null,
+      "comment": {
+        "comments": [],
+        "total": 0
+      }
+    },
+    "changelog": {
+      "histories": [
+        {
+          "id": "10000",
+          "created": "2026-08-24T22:00:00Z",
+          "author": {
+            "accountId": "712020:ds-danial",
+            "displayName": "Danial",
+            "emailAddress": "danial@dropsubs.example",
+            "active": true,
+            "accountType": "atlassian"
+          },
+          "items": [
+            {
+              "field": "status",
+              "fromString": "In Progress",
+              "toString": "In Review"
+            }
+          ]
+        },
+        {
+          "id": "10001",
+          "created": "2026-08-31T16:30:00Z",
+          "author": {
+            "accountId": "712020:ds-danial",
+            "displayName": "Danial",
+            "emailAddress": "danial@dropsubs.example",
+            "active": true,
+            "accountType": "atlassian"
+          },
+          "items": [
+            {
+              "field": "status",
+              "fromString": "In Review",
+              "toString": "Done"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "id": "10062",
+    "key": "DS-62",
+    "self": "https://dropsubs.atlassian.net/rest/api/3/issue/DS-62",
+    "url": "https://dropsubs.atlassian.net/browse/DS-62",
+    "fields": {
+      "summary": "PDF savings report",
+      "description": "Export a PDF of what DropSubs saved the user.\n\nGitHub: https://github.com/dropsubs/dropsubs/issues/12, https://github.com/dropsubs/dropsubs/pull/18",
+      "issuetype": {
+        "name": "Story"
+      },
+      "project": {
+        "key": "DS",
+        "name": "DropSubs"
+      },
+      "status": {
+        "name": "Done",
+        "id": "51",
+        "statusCategory": {
+          "key": "done",
+          "name": "Done"
+        }
+      },
+      "priority": {
+        "name": "Medium"
+      },
+      "assignee": {
+        "accountId": "712020:ds-reyhaneh",
+        "displayName": "Reyhaneh",
+        "emailAddress": "reyhaneh@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "reporter": {
+        "accountId": "712020:ds-danial",
+        "displayName": "Danial",
+        "emailAddress": "danial@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "labels": [
+        "feature"
+      ],
+      "created": "2026-08-17T17:05:00Z",
+      "updated": "2026-09-01T17:00:00Z",
+      "duedate": null,
+      "sprint": {
+        "id": 5,
+        "name": "DS Sprint 5",
+        "state": "closed",
+        "startDate": "2026-08-17T16:00:00Z",
+        "endDate": "2026-08-29T01:00:00Z"
+      },
+      "parent": null,
+      "comment": {
+        "comments": [],
+        "total": 0
+      }
+    },
+    "changelog": {
+      "histories": [
+        {
+          "id": "10010",
+          "created": "2026-08-25T23:30:00Z",
+          "author": {
+            "accountId": "712020:ds-danial",
+            "displayName": "Danial",
+            "emailAddress": "danial@dropsubs.example",
+            "active": true,
+            "accountType": "atlassian"
+          },
+          "items": [
+            {
+              "field": "status",
+              "fromString": "To Do",
+              "toString": "Done"
+            }
+          ]
+        },
+        {
+          "id": "10011",
+          "created": "2026-09-01T17:00:00Z",
+          "author": {
+            "accountId": "712020:ds-danial",
+            "displayName": "Danial",
+            "emailAddress": "danial@dropsubs.example",
+            "active": true,
+            "accountType": "atlassian"
+          },
+          "items": [
+            {
+              "field": "assignee",
+              "fromString": "Mohammad Reza",
+              "toString": "Reyhaneh"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "id": "10063",
+    "key": "DS-63",
+    "self": "https://dropsubs.atlassian.net/rest/api/3/issue/DS-63",
+    "url": "https://dropsubs.atlassian.net/browse/DS-63",
+    "fields": {
+      "summary": "Canadian prices shown in US dollars",
+      "description": "Show the receipt's currency. Fix merged after v0.4.0.\n\nGitHub: https://github.com/dropsubs/dropsubs/issues/16, https://github.com/dropsubs/dropsubs/pull/21",
+      "issuetype": {
+        "name": "Bug"
+      },
+      "project": {
+        "key": "DS",
+        "name": "DropSubs"
+      },
+      "status": {
+        "name": "Done",
+        "id": "51",
+        "statusCategory": {
+          "key": "done",
+          "name": "Done"
+        }
+      },
+      "priority": {
+        "name": "Medium"
+      },
+      "assignee": {
+        "accountId": "712020:ds-reyhaneh",
+        "displayName": "Reyhaneh",
+        "emailAddress": "reyhaneh@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "reporter": {
+        "accountId": "712020:ds-danial",
+        "displayName": "Danial",
+        "emailAddress": "danial@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "labels": [
+        "frontend"
+      ],
+      "created": "2026-08-20T16:30:00Z",
+      "updated": "2026-08-27T20:45:00Z",
+      "duedate": null,
+      "sprint": {
+        "id": 5,
+        "name": "DS Sprint 5",
+        "state": "closed",
+        "startDate": "2026-08-17T16:00:00Z",
+        "endDate": "2026-08-29T01:00:00Z"
+      },
+      "parent": null,
+      "comment": {
+        "comments": [],
+        "total": 0
+      }
+    },
+    "changelog": {
+      "histories": [
+        {
+          "id": "10020",
+          "created": "2026-08-27T20:45:00Z",
+          "author": {
+            "accountId": "712020:ds-danial",
+            "displayName": "Danial",
+            "emailAddress": "danial@dropsubs.example",
+            "active": true,
+            "accountType": "atlassian"
+          },
+          "items": [
+            {
+              "field": "status",
+              "fromString": "In Progress",
+              "toString": "Done"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "id": "10064",
+    "key": "DS-64",
+    "self": "https://dropsubs.atlassian.net/rest/api/3/issue/DS-64",
+    "url": "https://dropsubs.atlassian.net/browse/DS-64",
+    "fields": {
+      "summary": "iPhone app crashes on login",
+      "description": "TestFlight build crashes right after Sign in with Apple.\n\nGitHub: https://github.com/dropsubs/dropsubs/issues/14, https://github.com/dropsubs/dropsubs/pull/28",
+      "issuetype": {
+        "name": "Bug"
+      },
+      "project": {
+        "key": "DS",
+        "name": "DropSubs"
+      },
+      "status": {
+        "name": "Done",
+        "id": "51",
+        "statusCategory": {
+          "key": "done",
+          "name": "Done"
+        }
+      },
+      "priority": {
+        "name": "High"
+      },
+      "assignee": {
+        "accountId": "712020:ds-reyhaneh",
+        "displayName": "Reyhaneh",
+        "emailAddress": "reyhaneh@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "reporter": {
+        "accountId": "712020:ds-reyhaneh",
+        "displayName": "Reyhaneh",
+        "emailAddress": "reyhaneh@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "labels": [
+        "ios"
+      ],
+      "created": "2026-08-18T20:10:00Z",
+      "updated": "2026-09-04T18:10:00Z",
+      "duedate": null,
+      "sprint": {
+        "id": 6,
+        "name": "DS Sprint 6",
+        "state": "closed",
+        "startDate": "2026-08-31T16:00:00Z",
+        "endDate": "2026-09-12T01:00:00Z"
+      },
+      "parent": null,
+      "comment": {
+        "comments": [],
+        "total": 0
+      }
+    },
+    "changelog": {
+      "histories": [
+        {
+          "id": "10030",
+          "created": "2026-08-31T16:00:00Z",
+          "author": {
+            "accountId": "712020:ds-reyhaneh",
+            "displayName": "Reyhaneh",
+            "emailAddress": "reyhaneh@dropsubs.example",
+            "active": true,
+            "accountType": "atlassian"
+          },
+          "items": [
+            {
+              "field": "sprint",
+              "fromString": "DS Sprint 5",
+              "toString": "DS Sprint 6"
+            }
+          ]
+        },
+        {
+          "id": "10031",
+          "created": "2026-09-04T18:10:00Z",
+          "author": {
+            "accountId": "712020:ds-reyhaneh",
+            "displayName": "Reyhaneh",
+            "emailAddress": "reyhaneh@dropsubs.example",
+            "active": true,
+            "accountType": "atlassian"
+          },
+          "items": [
+            {
+              "field": "status",
+              "fromString": "In Progress",
+              "toString": "Done"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "id": "10065",
+    "key": "DS-65",
+    "self": "https://dropsubs.atlassian.net/rest/api/3/issue/DS-65",
+    "url": "https://dropsubs.atlassian.net/browse/DS-65",
+    "fields": {
+      "summary": "Open the private beta",
+      "description": "Invite the first 1,000 people from the waitlist. Moved from Aug 17 to Aug 24.\n\nGitHub: https://github.com/dropsubs/dropsubs/issues/9",
+      "issuetype": {
+        "name": "Task"
+      },
+      "project": {
+        "key": "DS",
+        "name": "DropSubs"
+      },
+      "status": {
+        "name": "Done",
+        "id": "51",
+        "statusCategory": {
+          "key": "done",
+          "name": "Done"
+        }
+      },
+      "priority": {
+        "name": "Highest"
+      },
+      "assignee": {
+        "accountId": "712020:ds-danial",
+        "displayName": "Danial",
+        "emailAddress": "danial@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "reporter": {
+        "accountId": "712020:ds-danial",
+        "displayName": "Danial",
+        "emailAddress": "danial@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "labels": [
+        "launch"
+      ],
+      "created": "2026-08-10T17:10:00Z",
+      "updated": "2026-08-24T19:05:00Z",
+      "duedate": "2026-08-24",
+      "sprint": {
+        "id": 5,
+        "name": "DS Sprint 5",
+        "state": "closed",
+        "startDate": "2026-08-17T16:00:00Z",
+        "endDate": "2026-08-29T01:00:00Z"
+      },
+      "parent": null,
+      "comment": {
+        "comments": [],
+        "total": 0
+      }
+    },
+    "changelog": {
+      "histories": [
+        {
+          "id": "10040",
+          "created": "2026-08-15T00:05:00Z",
+          "author": {
+            "accountId": "712020:ds-danial",
+            "displayName": "Danial",
+            "emailAddress": "danial@dropsubs.example",
+            "active": true,
+            "accountType": "atlassian"
+          },
+          "items": [
+            {
+              "field": "duedate",
+              "fromString": "2026-08-17",
+              "toString": "2026-08-24"
+            }
+          ]
+        },
+        {
+          "id": "10041",
+          "created": "2026-08-24T19:05:00Z",
+          "author": {
+            "accountId": "712020:ds-danial",
+            "displayName": "Danial",
+            "emailAddress": "danial@dropsubs.example",
+            "active": true,
+            "accountType": "atlassian"
+          },
+          "items": [
+            {
+              "field": "status",
+              "fromString": "In Progress",
+              "toString": "Done"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "id": "10066",
+    "key": "DS-66",
+    "self": "https://dropsubs.atlassian.net/rest/api/3/issue/DS-66",
+    "url": "https://dropsubs.atlassian.net/browse/DS-66",
+    "fields": {
+      "summary": "Payment provider API v1 shuts down Sep 1: migrate to v2",
+      "description": "Billing calls must move to API v2 before Sep 1 or fee collection breaks.\n\nGitHub: https://github.com/dropsubs/dropsubs/issues/11, https://github.com/dropsubs/dropsubs/pull/26",
+      "issuetype": {
+        "name": "Task"
+      },
+      "project": {
+        "key": "DS",
+        "name": "DropSubs"
+      },
+      "status": {
+        "name": "Done",
+        "id": "51",
+        "statusCategory": {
+          "key": "done",
+          "name": "Done"
+        }
+      },
+      "priority": {
+        "name": "High"
+      },
+      "assignee": {
+        "accountId": "712020:ds-mohammadreza",
+        "displayName": "Mohammad Reza",
+        "emailAddress": "mohammadreza@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "reporter": {
+        "accountId": "712020:ds-mohammadreza",
+        "displayName": "Mohammad Reza",
+        "emailAddress": "mohammadreza@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "labels": [
+        "backend"
+      ],
+      "created": "2026-08-17T17:15:00Z",
+      "updated": "2026-08-31T19:35:00Z",
+      "duedate": "2026-09-01",
+      "sprint": {
+        "id": 5,
+        "name": "DS Sprint 5",
+        "state": "closed",
+        "startDate": "2026-08-17T16:00:00Z",
+        "endDate": "2026-08-29T01:00:00Z"
+      },
+      "parent": null,
+      "comment": {
+        "comments": [],
+        "total": 0
+      }
+    },
+    "changelog": {
+      "histories": [
+        {
+          "id": "10050",
+          "created": "2026-08-30T17:00:00Z",
+          "author": {
+            "accountId": "712020:ds-mohammadreza",
+            "displayName": "Mohammad Reza",
+            "emailAddress": "mohammadreza@dropsubs.example",
+            "active": true,
+            "accountType": "atlassian"
+          },
+          "items": [
+            {
+              "field": "assignee",
+              "fromString": null,
+              "toString": "Mohammad Reza"
+            }
+          ]
+        },
+        {
+          "id": "10051",
+          "created": "2026-08-30T17:00:00Z",
+          "author": {
+            "accountId": "712020:ds-mohammadreza",
+            "displayName": "Mohammad Reza",
+            "emailAddress": "mohammadreza@dropsubs.example",
+            "active": true,
+            "accountType": "atlassian"
+          },
+          "items": [
+            {
+              "field": "status",
+              "fromString": "To Do",
+              "toString": "In Progress"
+            }
+          ]
+        },
+        {
+          "id": "10052",
+          "created": "2026-08-31T19:35:00Z",
+          "author": {
+            "accountId": "712020:ds-mohammadreza",
+            "displayName": "Mohammad Reza",
+            "emailAddress": "mohammadreza@dropsubs.example",
+            "active": true,
+            "accountType": "atlassian"
+          },
+          "items": [
+            {
+              "field": "status",
+              "fromString": "In Progress",
+              "toString": "Done"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "id": "10067",
+    "key": "DS-67",
+    "self": "https://dropsubs.atlassian.net/rest/api/3/issue/DS-67",
+    "url": "https://dropsubs.atlassian.net/browse/DS-67",
+    "fields": {
+      "summary": "Billing: charge 30% of first-year savings",
+      "description": "Fee decided Aug 26: 30% of first-year savings, only after a successful cancellation.\n\nGitHub: https://github.com/dropsubs/dropsubs/issues/20, https://github.com/dropsubs/dropsubs/pull/22",
+      "issuetype": {
+        "name": "Story"
+      },
+      "project": {
+        "key": "DS",
+        "name": "DropSubs"
+      },
+      "status": {
+        "name": "Done",
+        "id": "51",
+        "statusCategory": {
+          "key": "done",
+          "name": "Done"
+        }
+      },
+      "priority": {
+        "name": "High"
+      },
+      "assignee": {
+        "accountId": "712020:ds-mohammadreza",
+        "displayName": "Mohammad Reza",
+        "emailAddress": "mohammadreza@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "reporter": {
+        "accountId": "712020:ds-danial",
+        "displayName": "Danial",
+        "emailAddress": "danial@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "labels": [
+        "billing"
+      ],
+      "created": "2026-08-26T19:10:00Z",
+      "updated": "2026-08-28T22:10:00Z",
+      "duedate": null,
+      "sprint": {
+        "id": 5,
+        "name": "DS Sprint 5",
+        "state": "closed",
+        "startDate": "2026-08-17T16:00:00Z",
+        "endDate": "2026-08-29T01:00:00Z"
+      },
+      "parent": null,
+      "comment": {
+        "comments": [],
+        "total": 0
+      }
+    },
+    "changelog": {
+      "histories": [
+        {
+          "id": "10060",
+          "created": "2026-08-28T22:10:00Z",
+          "author": {
+            "accountId": "712020:ds-danial",
+            "displayName": "Danial",
+            "emailAddress": "danial@dropsubs.example",
+            "active": true,
+            "accountType": "atlassian"
+          },
+          "items": [
+            {
+              "field": "status",
+              "fromString": "In Progress",
+              "toString": "Done"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "id": "10068",
+    "key": "DS-68",
+    "self": "https://dropsubs.atlassian.net/rest/api/3/issue/DS-68",
+    "url": "https://dropsubs.atlassian.net/browse/DS-68",
+    "fields": {
+      "summary": "Spotify receipts not detected",
+      "description": "New Spotify receipt template.\n\nGitHub: https://github.com/dropsubs/dropsubs/issues/13, https://github.com/dropsubs/dropsubs/pull/15",
+      "issuetype": {
+        "name": "Bug"
+      },
+      "project": {
+        "key": "DS",
+        "name": "DropSubs"
+      },
+      "status": {
+        "name": "Done",
+        "id": "51",
+        "statusCategory": {
+          "key": "done",
+          "name": "Done"
+        }
+      },
+      "priority": {
+        "name": "Medium"
+      },
+      "assignee": {
+        "accountId": "712020:ds-hossein",
+        "displayName": "Hossein",
+        "emailAddress": "hossein@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "reporter": {
+        "accountId": "712020:ds-hossein",
+        "displayName": "Hossein",
+        "emailAddress": "hossein@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "labels": [
+        "ai"
+      ],
+      "created": "2026-08-18T16:05:00Z",
+      "updated": "2026-08-19T23:10:00Z",
+      "duedate": null,
+      "sprint": {
+        "id": 5,
+        "name": "DS Sprint 5",
+        "state": "closed",
+        "startDate": "2026-08-17T16:00:00Z",
+        "endDate": "2026-08-29T01:00:00Z"
+      },
+      "parent": null,
+      "comment": {
+        "comments": [],
+        "total": 0
+      }
+    },
+    "changelog": {
+      "histories": [
+        {
+          "id": "10070",
+          "created": "2026-08-19T23:10:00Z",
+          "author": {
+            "accountId": "712020:ds-hossein",
+            "displayName": "Hossein",
+            "emailAddress": "hossein@dropsubs.example",
+            "active": true,
+            "accountType": "atlassian"
+          },
+          "items": [
+            {
+              "field": "status",
+              "fromString": "In Progress",
+              "toString": "Done"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "id": "10069",
+    "key": "DS-69",
+    "self": "https://dropsubs.atlassian.net/rest/api/3/issue/DS-69",
+    "url": "https://dropsubs.atlassian.net/browse/DS-69",
+    "fields": {
+      "summary": "Beta invite flow",
+      "description": "Invite codes and welcome screen.\n\nGitHub: https://github.com/dropsubs/dropsubs/pull/17",
+      "issuetype": {
+        "name": "Story"
+      },
+      "project": {
+        "key": "DS",
+        "name": "DropSubs"
+      },
+      "status": {
+        "name": "Done",
+        "id": "51",
+        "statusCategory": {
+          "key": "done",
+          "name": "Done"
+        }
+      },
+      "priority": {
+        "name": "High"
+      },
+      "assignee": {
+        "accountId": "712020:ds-reyhaneh",
+        "displayName": "Reyhaneh",
+        "emailAddress": "reyhaneh@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "reporter": {
+        "accountId": "712020:ds-danial",
+        "displayName": "Danial",
+        "emailAddress": "danial@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "labels": [
+        "launch"
+      ],
+      "created": "2026-08-17T17:20:00Z",
+      "updated": "2026-08-24T01:10:00Z",
+      "duedate": null,
+      "sprint": {
+        "id": 5,
+        "name": "DS Sprint 5",
+        "state": "closed",
+        "startDate": "2026-08-17T16:00:00Z",
+        "endDate": "2026-08-29T01:00:00Z"
+      },
+      "parent": null,
+      "comment": {
+        "comments": [],
+        "total": 0
+      }
+    },
+    "changelog": {
+      "histories": [
+        {
+          "id": "10080",
+          "created": "2026-08-24T01:10:00Z",
+          "author": {
+            "accountId": "712020:ds-danial",
+            "displayName": "Danial",
+            "emailAddress": "danial@dropsubs.example",
+            "active": true,
+            "accountType": "atlassian"
+          },
+          "items": [
+            {
+              "field": "status",
+              "fromString": "In Progress",
+              "toString": "Done"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "id": "10070",
+    "key": "DS-70",
+    "self": "https://dropsubs.atlassian.net/rest/api/3/issue/DS-70",
+    "url": "https://dropsubs.atlassian.net/browse/DS-70",
+    "fields": {
+      "summary": "Expand eval set to 120 emails",
+      "description": "Grow the anonymized eval set.\n\nGitHub: https://github.com/dropsubs/dropsubs/pull/24",
+      "issuetype": {
+        "name": "Task"
+      },
+      "project": {
+        "key": "DS",
+        "name": "DropSubs"
+      },
+      "status": {
+        "name": "Done",
+        "id": "51",
+        "statusCategory": {
+          "key": "done",
+          "name": "Done"
+        }
+      },
+      "priority": {
+        "name": "Medium"
+      },
+      "assignee": {
+        "accountId": "712020:ds-hossein",
+        "displayName": "Hossein",
+        "emailAddress": "hossein@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "reporter": {
+        "accountId": "712020:ds-hossein",
+        "displayName": "Hossein",
+        "emailAddress": "hossein@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "labels": [
+        "ai"
+      ],
+      "created": "2026-08-17T17:25:00Z",
+      "updated": "2026-08-29T00:40:00Z",
+      "duedate": null,
+      "sprint": {
+        "id": 5,
+        "name": "DS Sprint 5",
+        "state": "closed",
+        "startDate": "2026-08-17T16:00:00Z",
+        "endDate": "2026-08-29T01:00:00Z"
+      },
+      "parent": null,
+      "comment": {
+        "comments": [],
+        "total": 0
+      }
+    },
+    "changelog": {
+      "histories": [
+        {
+          "id": "10090",
+          "created": "2026-08-29T00:40:00Z",
+          "author": {
+            "accountId": "712020:ds-hossein",
+            "displayName": "Hossein",
+            "emailAddress": "hossein@dropsubs.example",
+            "active": true,
+            "accountType": "atlassian"
+          },
+          "items": [
+            {
+              "field": "status",
+              "fromString": "In Progress",
+              "toString": "Done"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "id": "10101",
+    "key": "DS-101",
+    "self": "https://dropsubs.atlassian.net/rest/api/3/issue/DS-101",
+    "url": "https://dropsubs.atlassian.net/browse/DS-101",
+    "fields": {
+      "summary": "Ship the iPhone app to the App Store",
+      "description": "Submit the iPhone app to App Review.\n\nGitHub: https://github.com/dropsubs/dropsubs/issues/29",
+      "issuetype": {
+        "name": "Epic"
+      },
+      "project": {
+        "key": "DS",
+        "name": "DropSubs"
+      },
+      "status": {
+        "name": "In Progress",
+        "id": "31",
+        "statusCategory": {
+          "key": "indeterminate",
+          "name": "In Progress"
+        }
+      },
+      "priority": {
+        "name": "Highest"
+      },
+      "assignee": {
+        "accountId": "712020:ds-reyhaneh",
+        "displayName": "Reyhaneh",
+        "emailAddress": "reyhaneh@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "reporter": {
+        "accountId": "712020:ds-danial",
+        "displayName": "Danial",
+        "emailAddress": "danial@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "labels": [
+        "ios",
+        "launch"
+      ],
+      "created": "2026-09-08T17:30:00Z",
+      "updated": "2026-09-28T17:33:00Z",
+      "duedate": "2026-10-02",
+      "sprint": {
+        "id": 8,
+        "name": "DS Sprint 8",
+        "state": "active",
+        "startDate": "2026-09-28T16:00:00Z",
+        "endDate": "2026-10-10T01:00:00Z"
+      },
+      "parent": null,
+      "comment": {
+        "comments": [],
+        "total": 0
+      }
+    },
+    "changelog": {
+      "histories": [
+        {
+          "id": "10100",
+          "created": "2026-09-28T17:33:00Z",
+          "author": {
+            "accountId": "712020:ds-danial",
+            "displayName": "Danial",
+            "emailAddress": "danial@dropsubs.example",
+            "active": true,
+            "accountType": "atlassian"
+          },
+          "items": [
+            {
+              "field": "duedate",
+              "fromString": "2026-09-25",
+              "toString": "2026-10-02"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "id": "10102",
+    "key": "DS-102",
+    "self": "https://dropsubs.atlassian.net/rest/api/3/issue/DS-102",
+    "url": "https://dropsubs.atlassian.net/browse/DS-102",
+    "fields": {
+      "summary": "In-app account deletion (Apple requirement)",
+      "description": "App Review Guideline 5.1.1(v). Blocks submission.\n\nGitHub: https://github.com/dropsubs/dropsubs/issues/51, https://github.com/dropsubs/dropsubs/pull/54",
+      "issuetype": {
+        "name": "Story"
+      },
+      "project": {
+        "key": "DS",
+        "name": "DropSubs"
+      },
+      "status": {
+        "name": "In Progress",
+        "id": "31",
+        "statusCategory": {
+          "key": "indeterminate",
+          "name": "In Progress"
+        }
+      },
+      "priority": {
+        "name": "Highest"
+      },
+      "assignee": {
+        "accountId": "712020:ds-reyhaneh",
+        "displayName": "Reyhaneh",
+        "emailAddress": "reyhaneh@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "reporter": {
+        "accountId": "712020:ds-reyhaneh",
+        "displayName": "Reyhaneh",
+        "emailAddress": "reyhaneh@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "labels": [
+        "ios"
+      ],
+      "created": "2026-10-02T17:35:00Z",
+      "updated": "2026-10-02T17:35:00Z",
+      "duedate": null,
+      "sprint": {
+        "id": 8,
+        "name": "DS Sprint 8",
+        "state": "active",
+        "startDate": "2026-09-28T16:00:00Z",
+        "endDate": "2026-10-10T01:00:00Z"
+      },
+      "parent": {
+        "key": "DS-101"
+      },
+      "comment": {
+        "comments": [],
+        "total": 0
+      }
+    },
+    "changelog": {
+      "histories": []
+    }
+  },
+  {
+    "id": "10103",
+    "key": "DS-103",
+    "self": "https://dropsubs.atlassian.net/rest/api/3/issue/DS-103",
+    "url": "https://dropsubs.atlassian.net/browse/DS-103",
+    "fields": {
+      "summary": "App Store listing and screenshots",
+      "description": "Copy, screenshots, privacy labels.\n\nGitHub: https://github.com/dropsubs/dropsubs/issues/39",
+      "issuetype": {
+        "name": "Task"
+      },
+      "project": {
+        "key": "DS",
+        "name": "DropSubs"
+      },
+      "status": {
+        "name": "Done",
+        "id": "51",
+        "statusCategory": {
+          "key": "done",
+          "name": "Done"
+        }
+      },
+      "priority": {
+        "name": "Medium"
+      },
+      "assignee": {
+        "accountId": "712020:ds-reyhaneh",
+        "displayName": "Reyhaneh",
+        "emailAddress": "reyhaneh@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "reporter": {
+        "accountId": "712020:ds-reyhaneh",
+        "displayName": "Reyhaneh",
+        "emailAddress": "reyhaneh@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "labels": [
+        "ios"
+      ],
+      "created": "2026-09-24T17:10:00Z",
+      "updated": "2026-09-26T22:10:00Z",
+      "duedate": null,
+      "sprint": {
+        "id": 8,
+        "name": "DS Sprint 8",
+        "state": "active",
+        "startDate": "2026-09-28T16:00:00Z",
+        "endDate": "2026-10-10T01:00:00Z"
+      },
+      "parent": {
+        "key": "DS-101"
+      },
+      "comment": {
+        "comments": [],
+        "total": 0
+      }
+    },
+    "changelog": {
+      "histories": [
+        {
+          "id": "10120",
+          "created": "2026-09-26T22:10:00Z",
+          "author": {
+            "accountId": "712020:ds-reyhaneh",
+            "displayName": "Reyhaneh",
+            "emailAddress": "reyhaneh@dropsubs.example",
+            "active": true,
+            "accountType": "atlassian"
+          },
+          "items": [
+            {
+              "field": "status",
+              "fromString": "In Progress",
+              "toString": "Done"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "id": "10104",
+    "key": "DS-104",
+    "self": "https://dropsubs.atlassian.net/rest/api/3/issue/DS-104",
+    "url": "https://dropsubs.atlassian.net/browse/DS-104",
+    "fields": {
+      "summary": "Subscriptions show up twice; fee charged twice",
+      "description": "Repeated last page in inbox sync is appended twice.\n\nGitHub: https://github.com/dropsubs/dropsubs/issues/43, https://github.com/dropsubs/dropsubs/pull/46",
+      "issuetype": {
+        "name": "Bug"
+      },
+      "project": {
+        "key": "DS",
+        "name": "DropSubs"
+      },
+      "status": {
+        "name": "In Progress",
+        "id": "31",
+        "statusCategory": {
+          "key": "indeterminate",
+          "name": "In Progress"
+        }
+      },
+      "priority": {
+        "name": "Highest"
+      },
+      "assignee": {
+        "accountId": "712020:ds-mohammadreza",
+        "displayName": "Mohammad Reza",
+        "emailAddress": "mohammadreza@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "reporter": {
+        "accountId": "712020:ds-danial",
+        "displayName": "Danial",
+        "emailAddress": "danial@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "labels": [
+        "billing",
+        "backend"
+      ],
+      "created": "2026-09-28T16:10:00Z",
+      "updated": "2026-09-28T18:30:00Z",
+      "duedate": null,
+      "sprint": {
+        "id": 8,
+        "name": "DS Sprint 8",
+        "state": "active",
+        "startDate": "2026-09-28T16:00:00Z",
+        "endDate": "2026-10-10T01:00:00Z"
+      },
+      "parent": null,
+      "comment": {
+        "comments": [],
+        "total": 0
+      }
+    },
+    "changelog": {
+      "histories": [
+        {
+          "id": "10130",
+          "created": "2026-09-28T18:30:00Z",
+          "author": {
+            "accountId": "712020:ds-danial",
+            "displayName": "Danial",
+            "emailAddress": "danial@dropsubs.example",
+            "active": true,
+            "accountType": "atlassian"
+          },
+          "items": [
+            {
+              "field": "status",
+              "fromString": "To Do",
+              "toString": "In Progress"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "id": "10105",
+    "key": "DS-105",
+    "self": "https://dropsubs.atlassian.net/rest/api/3/issue/DS-105",
+    "url": "https://dropsubs.atlassian.net/browse/DS-105",
+    "fields": {
+      "summary": "Refund the 14 double-charged users",
+      "description": "14 beta users were charged our fee twice.\n\nGitHub: https://github.com/dropsubs/dropsubs/issues/43",
+      "issuetype": {
+        "name": "Task"
+      },
+      "project": {
+        "key": "DS",
+        "name": "DropSubs"
+      },
+      "status": {
+        "name": "To Do",
+        "id": "21",
+        "statusCategory": {
+          "key": "new",
+          "name": "To Do"
+        }
+      },
+      "priority": {
+        "name": "High"
+      },
+      "assignee": {
+        "accountId": "712020:ds-mohammadreza",
+        "displayName": "Mohammad Reza",
+        "emailAddress": "mohammadreza@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "reporter": {
+        "accountId": "712020:ds-mohammadreza",
+        "displayName": "Mohammad Reza",
+        "emailAddress": "mohammadreza@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "labels": [
+        "billing"
+      ],
+      "created": "2026-10-02T16:40:00Z",
+      "updated": "2026-10-02T16:40:00Z",
+      "duedate": null,
+      "sprint": {
+        "id": 8,
+        "name": "DS Sprint 8",
+        "state": "active",
+        "startDate": "2026-09-28T16:00:00Z",
+        "endDate": "2026-10-10T01:00:00Z"
+      },
+      "parent": null,
+      "comment": {
+        "comments": [],
+        "total": 0
+      }
+    },
+    "changelog": {
+      "histories": []
+    }
+  },
+  {
+    "id": "10106",
+    "key": "DS-106",
+    "self": "https://dropsubs.atlassian.net/rest/api/3/issue/DS-106",
+    "url": "https://dropsubs.atlassian.net/browse/DS-106",
+    "fields": {
+      "summary": "Renewal warnings arrive after the charge",
+      "description": "Daily job means late warnings.\n\nGitHub: https://github.com/dropsubs/dropsubs/issues/36, https://github.com/dropsubs/dropsubs/pull/40",
+      "issuetype": {
+        "name": "Bug"
+      },
+      "project": {
+        "key": "DS",
+        "name": "DropSubs"
+      },
+      "status": {
+        "name": "In Progress",
+        "id": "31",
+        "statusCategory": {
+          "key": "indeterminate",
+          "name": "In Progress"
+        }
+      },
+      "priority": {
+        "name": "High"
+      },
+      "assignee": {
+        "accountId": "712020:ds-mohammadreza",
+        "displayName": "Mohammad Reza",
+        "emailAddress": "mohammadreza@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "reporter": {
+        "accountId": "712020:ds-danial",
+        "displayName": "Danial",
+        "emailAddress": "danial@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "labels": [
+        "backend"
+      ],
+      "created": "2026-09-22T16:40:00Z",
+      "updated": "2026-09-22T16:40:00Z",
+      "duedate": null,
+      "sprint": {
+        "id": 8,
+        "name": "DS Sprint 8",
+        "state": "active",
+        "startDate": "2026-09-28T16:00:00Z",
+        "endDate": "2026-10-10T01:00:00Z"
+      },
+      "parent": null,
+      "comment": {
+        "comments": [],
+        "total": 0
+      }
+    },
+    "changelog": {
+      "histories": []
+    }
+  },
+  {
+    "id": "10107",
+    "key": "DS-107",
+    "self": "https://dropsubs.atlassian.net/rest/api/3/issue/DS-107",
+    "url": "https://dropsubs.atlassian.net/browse/DS-107",
+    "fields": {
+      "summary": "Connect a bank account directly",
+      "description": "Top beta request.\n\nGitHub: https://github.com/dropsubs/dropsubs/issues/31, https://github.com/dropsubs/dropsubs/issues/37",
+      "issuetype": {
+        "name": "Story"
+      },
+      "project": {
+        "key": "DS",
+        "name": "DropSubs"
+      },
+      "status": {
+        "name": "Backlog",
+        "id": "11",
+        "statusCategory": {
+          "key": "new",
+          "name": "To Do"
+        }
+      },
+      "priority": {
+        "name": "Medium"
+      },
+      "assignee": null,
+      "reporter": {
+        "accountId": "712020:ds-danial",
+        "displayName": "Danial",
+        "emailAddress": "danial@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "labels": [
+        "feature"
+      ],
+      "created": "2026-09-10T19:10:00Z",
+      "updated": "2026-09-10T19:10:00Z",
+      "duedate": null,
+      "sprint": null,
+      "parent": null,
+      "comment": {
+        "comments": [],
+        "total": 0
+      }
+    },
+    "changelog": {
+      "histories": []
+    }
+  },
+  {
+    "id": "10108",
+    "key": "DS-108",
+    "self": "https://dropsubs.atlassian.net/rest/api/3/issue/DS-108",
+    "url": "https://dropsubs.atlassian.net/browse/DS-108",
+    "fields": {
+      "summary": "Weekly savings email shows last week's numbers",
+      "description": "Totals cached from previous run.\n\nGitHub: https://github.com/dropsubs/dropsubs/issues/32, https://github.com/dropsubs/dropsubs/pull/33",
+      "issuetype": {
+        "name": "Bug"
+      },
+      "project": {
+        "key": "DS",
+        "name": "DropSubs"
+      },
+      "status": {
+        "name": "Done",
+        "id": "51",
+        "statusCategory": {
+          "key": "done",
+          "name": "Done"
+        }
+      },
+      "priority": {
+        "name": "Medium"
+      },
+      "assignee": {
+        "accountId": "712020:ds-mohammadreza",
+        "displayName": "Mohammad Reza",
+        "emailAddress": "mohammadreza@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "reporter": {
+        "accountId": "712020:ds-danial",
+        "displayName": "Danial",
+        "emailAddress": "danial@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "labels": [
+        "backend"
+      ],
+      "created": "2026-09-14T16:10:00Z",
+      "updated": "2026-09-17T19:10:00Z",
+      "duedate": null,
+      "sprint": {
+        "id": 8,
+        "name": "DS Sprint 8",
+        "state": "active",
+        "startDate": "2026-09-28T16:00:00Z",
+        "endDate": "2026-10-10T01:00:00Z"
+      },
+      "parent": null,
+      "comment": {
+        "comments": [],
+        "total": 0
+      }
+    },
+    "changelog": {
+      "histories": [
+        {
+          "id": "10170",
+          "created": "2026-09-17T19:10:00Z",
+          "author": {
+            "accountId": "712020:ds-danial",
+            "displayName": "Danial",
+            "emailAddress": "danial@dropsubs.example",
+            "active": true,
+            "accountType": "atlassian"
+          },
+          "items": [
+            {
+              "field": "status",
+              "fromString": "In Progress",
+              "toString": "Done"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "id": "10109",
+    "key": "DS-109",
+    "self": "https://dropsubs.atlassian.net/rest/api/3/issue/DS-109",
+    "url": "https://dropsubs.atlassian.net/browse/DS-109",
+    "fields": {
+      "summary": "AI made up a gym's cancellation terms",
+      "description": "AI answered from general knowledge: 'cancels free, anytime'. Real terms: 30 days, $50.\n\nGitHub: https://github.com/dropsubs/dropsubs/issues/42, https://github.com/dropsubs/dropsubs/pull/48",
+      "issuetype": {
+        "name": "Bug"
+      },
+      "project": {
+        "key": "DS",
+        "name": "DropSubs"
+      },
+      "status": {
+        "name": "In Progress",
+        "id": "31",
+        "statusCategory": {
+          "key": "indeterminate",
+          "name": "In Progress"
+        }
+      },
+      "priority": {
+        "name": "High"
+      },
+      "assignee": {
+        "accountId": "712020:ds-reyhaneh",
+        "displayName": "Reyhaneh",
+        "emailAddress": "reyhaneh@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "reporter": {
+        "accountId": "712020:ds-danial",
+        "displayName": "Danial",
+        "emailAddress": "danial@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "labels": [
+        "ai"
+      ],
+      "created": "2026-09-27T17:10:00Z",
+      "updated": "2026-09-28T18:05:00Z",
+      "duedate": null,
+      "sprint": {
+        "id": 8,
+        "name": "DS Sprint 8",
+        "state": "active",
+        "startDate": "2026-09-28T16:00:00Z",
+        "endDate": "2026-10-10T01:00:00Z"
+      },
+      "parent": null,
+      "comment": {
+        "comments": [],
+        "total": 0
+      }
+    },
+    "changelog": {
+      "histories": [
+        {
+          "id": "10180",
+          "created": "2026-09-28T18:05:00Z",
+          "author": {
+            "accountId": "712020:ds-danial",
+            "displayName": "Danial",
+            "emailAddress": "danial@dropsubs.example",
+            "active": true,
+            "accountType": "atlassian"
+          },
+          "items": [
+            {
+              "field": "assignee",
+              "fromString": null,
+              "toString": "Reyhaneh"
+            }
+          ]
+        },
+        {
+          "id": "10181",
+          "created": "2026-09-28T18:05:00Z",
+          "author": {
+            "accountId": "712020:ds-danial",
+            "displayName": "Danial",
+            "emailAddress": "danial@dropsubs.example",
+            "active": true,
+            "accountType": "atlassian"
+          },
+          "items": [
+            {
+              "field": "status",
+              "fromString": "To Do",
+              "toString": "In Progress"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "id": "10110",
+    "key": "DS-110",
+    "self": "https://dropsubs.atlassian.net/rest/api/3/issue/DS-110",
+    "url": "https://dropsubs.atlassian.net/browse/DS-110",
+    "fields": {
+      "summary": "AI reads full email bodies",
+      "description": "Shipped in v0.9.3.\n\nGitHub: https://github.com/dropsubs/dropsubs/issues/35, https://github.com/dropsubs/dropsubs/pull/44",
+      "issuetype": {
+        "name": "Story"
+      },
+      "project": {
+        "key": "DS",
+        "name": "DropSubs"
+      },
+      "status": {
+        "name": "Done",
+        "id": "51",
+        "statusCategory": {
+          "key": "done",
+          "name": "Done"
+        }
+      },
+      "priority": {
+        "name": "High"
+      },
+      "assignee": {
+        "accountId": "712020:ds-hossein",
+        "displayName": "Hossein",
+        "emailAddress": "hossein@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "reporter": {
+        "accountId": "712020:ds-hossein",
+        "displayName": "Hossein",
+        "emailAddress": "hossein@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "labels": [
+        "ai"
+      ],
+      "created": "2026-09-21T17:10:00Z",
+      "updated": "2026-09-29T23:10:00Z",
+      "duedate": null,
+      "sprint": {
+        "id": 8,
+        "name": "DS Sprint 8",
+        "state": "active",
+        "startDate": "2026-09-28T16:00:00Z",
+        "endDate": "2026-10-10T01:00:00Z"
+      },
+      "parent": null,
+      "comment": {
+        "comments": [],
+        "total": 0
+      }
+    },
+    "changelog": {
+      "histories": [
+        {
+          "id": "10190",
+          "created": "2026-09-29T23:10:00Z",
+          "author": {
+            "accountId": "712020:ds-hossein",
+            "displayName": "Hossein",
+            "emailAddress": "hossein@dropsubs.example",
+            "active": true,
+            "accountType": "atlassian"
+          },
+          "items": [
+            {
+              "field": "status",
+              "fromString": "In Progress",
+              "toString": "Done"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "id": "10111",
+    "key": "DS-111",
+    "self": "https://dropsubs.atlassian.net/rest/api/3/issue/DS-111",
+    "url": "https://dropsubs.atlassian.net/browse/DS-111",
+    "fields": {
+      "summary": "Recognize subscriptions billed through Apple",
+      "description": "Top miss on the 200-email test set (91%).\n\nGitHub: https://github.com/dropsubs/dropsubs/issues/38",
+      "issuetype": {
+        "name": "Story"
+      },
+      "project": {
+        "key": "DS",
+        "name": "DropSubs"
+      },
+      "status": {
+        "name": "In Progress",
+        "id": "31",
+        "statusCategory": {
+          "key": "indeterminate",
+          "name": "In Progress"
+        }
+      },
+      "priority": {
+        "name": "Medium"
+      },
+      "assignee": {
+        "accountId": "712020:ds-hossein",
+        "displayName": "Hossein",
+        "emailAddress": "hossein@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "reporter": {
+        "accountId": "712020:ds-hossein",
+        "displayName": "Hossein",
+        "emailAddress": "hossein@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "labels": [
+        "ai"
+      ],
+      "created": "2026-09-23T18:10:00Z",
+      "updated": "2026-09-23T18:10:00Z",
+      "duedate": null,
+      "sprint": {
+        "id": 8,
+        "name": "DS Sprint 8",
+        "state": "active",
+        "startDate": "2026-09-28T16:00:00Z",
+        "endDate": "2026-10-10T01:00:00Z"
+      },
+      "parent": null,
+      "comment": {
+        "comments": [],
+        "total": 0
+      }
+    },
+    "changelog": {
+      "histories": []
+    }
+  },
+  {
+    "id": "10112",
+    "key": "DS-112",
+    "self": "https://dropsubs.atlassian.net/rest/api/3/issue/DS-112",
+    "url": "https://dropsubs.atlassian.net/browse/DS-112",
+    "fields": {
+      "summary": "Scam email made the AI cancel a phone plan",
+      "description": "Indirect prompt injection via hidden text in an email.\n\nGitHub: https://github.com/dropsubs/dropsubs/issues/49, https://github.com/dropsubs/dropsubs/pull/50",
+      "issuetype": {
+        "name": "Bug"
+      },
+      "project": {
+        "key": "DS",
+        "name": "DropSubs"
+      },
+      "status": {
+        "name": "Done",
+        "id": "51",
+        "statusCategory": {
+          "key": "done",
+          "name": "Done"
+        }
+      },
+      "priority": {
+        "name": "Highest"
+      },
+      "assignee": {
+        "accountId": "712020:ds-hossein",
+        "displayName": "Hossein",
+        "emailAddress": "hossein@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "reporter": {
+        "accountId": "712020:ds-hossein",
+        "displayName": "Hossein",
+        "emailAddress": "hossein@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "labels": [
+        "security",
+        "ai"
+      ],
+      "created": "2026-10-02T04:40:00Z",
+      "updated": "2026-10-02T23:45:00Z",
+      "duedate": null,
+      "sprint": {
+        "id": 8,
+        "name": "DS Sprint 8",
+        "state": "active",
+        "startDate": "2026-09-28T16:00:00Z",
+        "endDate": "2026-10-10T01:00:00Z"
+      },
+      "parent": null,
+      "comment": {
+        "comments": [],
+        "total": 0
+      }
+    },
+    "changelog": {
+      "histories": [
+        {
+          "id": "10210",
+          "created": "2026-10-02T23:45:00Z",
+          "author": {
+            "accountId": "712020:ds-hossein",
+            "displayName": "Hossein",
+            "emailAddress": "hossein@dropsubs.example",
+            "active": true,
+            "accountType": "atlassian"
+          },
+          "items": [
+            {
+              "field": "status",
+              "fromString": "In Progress",
+              "toString": "Done"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "id": "10113",
+    "key": "DS-113",
+    "self": "https://dropsubs.atlassian.net/rest/api/3/issue/DS-113",
+    "url": "https://dropsubs.atlassian.net/browse/DS-113",
+    "fields": {
+      "summary": "Charge 20% instead of 30%",
+      "description": "Fee lowered to 20% on Sep 30. Billing still charges 30%.\n\nGitHub: https://github.com/dropsubs/dropsubs/issues/47",
+      "issuetype": {
+        "name": "Story"
+      },
+      "project": {
+        "key": "DS",
+        "name": "DropSubs"
+      },
+      "status": {
+        "name": "To Do",
+        "id": "21",
+        "statusCategory": {
+          "key": "new",
+          "name": "To Do"
+        }
+      },
+      "priority": {
+        "name": "High"
+      },
+      "assignee": {
+        "accountId": "712020:ds-mohammadreza",
+        "displayName": "Mohammad Reza",
+        "emailAddress": "mohammadreza@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "reporter": {
+        "accountId": "712020:ds-danial",
+        "displayName": "Danial",
+        "emailAddress": "danial@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "labels": [
+        "billing"
+      ],
+      "created": "2026-09-30T18:10:00Z",
+      "updated": "2026-09-30T18:10:00Z",
+      "duedate": null,
+      "sprint": {
+        "id": 8,
+        "name": "DS Sprint 8",
+        "state": "active",
+        "startDate": "2026-09-28T16:00:00Z",
+        "endDate": "2026-10-10T01:00:00Z"
+      },
+      "parent": null,
+      "comment": {
+        "comments": [],
+        "total": 0
+      }
+    },
+    "changelog": {
+      "histories": []
+    }
+  },
+  {
+    "id": "10114",
+    "key": "DS-114",
+    "self": "https://dropsubs.atlassian.net/rest/api/3/issue/DS-114",
+    "url": "https://dropsubs.atlassian.net/browse/DS-114",
+    "fields": {
+      "summary": "Flaky inbox-sync test",
+      "description": "test_inbox_sync_pagination fails ~1 in 10 runs.\n\nGitHub: https://github.com/dropsubs/dropsubs/issues/41",
+      "issuetype": {
+        "name": "Bug"
+      },
+      "project": {
+        "key": "DS",
+        "name": "DropSubs"
+      },
+      "status": {
+        "name": "To Do",
+        "id": "21",
+        "statusCategory": {
+          "key": "new",
+          "name": "To Do"
+        }
+      },
+      "priority": {
+        "name": "Low"
+      },
+      "assignee": {
+        "accountId": "712020:ds-mohammadreza",
+        "displayName": "Mohammad Reza",
+        "emailAddress": "mohammadreza@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "reporter": {
+        "accountId": "712020:ds-mohammadreza",
+        "displayName": "Mohammad Reza",
+        "emailAddress": "mohammadreza@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "labels": [
+        "test"
+      ],
+      "created": "2026-09-25T18:10:00Z",
+      "updated": "2026-09-25T18:10:00Z",
+      "duedate": null,
+      "sprint": {
+        "id": 8,
+        "name": "DS Sprint 8",
+        "state": "active",
+        "startDate": "2026-09-28T16:00:00Z",
+        "endDate": "2026-10-10T01:00:00Z"
+      },
+      "parent": null,
+      "comment": {
+        "comments": [],
+        "total": 0
+      }
+    },
+    "changelog": {
+      "histories": []
+    }
+  },
+  {
+    "id": "10115",
+    "key": "DS-115",
+    "self": "https://dropsubs.atlassian.net/rest/api/3/issue/DS-115",
+    "url": "https://dropsubs.atlassian.net/browse/DS-115",
+    "fields": {
+      "summary": "Model retired Nov 15: migrate and re-run evals",
+      "description": "Switch models and re-run the 200-email test set before Nov 15.\n\nGitHub: https://github.com/dropsubs/dropsubs/issues/45",
+      "issuetype": {
+        "name": "Task"
+      },
+      "project": {
+        "key": "DS",
+        "name": "DropSubs"
+      },
+      "status": {
+        "name": "To Do",
+        "id": "21",
+        "statusCategory": {
+          "key": "new",
+          "name": "To Do"
+        }
+      },
+      "priority": {
+        "name": "High"
+      },
+      "assignee": null,
+      "reporter": {
+        "accountId": "712020:ds-mohammadreza",
+        "displayName": "Mohammad Reza",
+        "emailAddress": "mohammadreza@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "labels": [
+        "ai"
+      ],
+      "created": "2026-09-29T17:40:00Z",
+      "updated": "2026-09-29T17:40:00Z",
+      "duedate": "2026-11-15",
+      "sprint": {
+        "id": 8,
+        "name": "DS Sprint 8",
+        "state": "active",
+        "startDate": "2026-09-28T16:00:00Z",
+        "endDate": "2026-10-10T01:00:00Z"
+      },
+      "parent": null,
+      "comment": {
+        "comments": [],
+        "total": 0
+      }
+    },
+    "changelog": {
+      "histories": []
+    }
+  },
+  {
+    "id": "10116",
+    "key": "DS-116",
+    "self": "https://dropsubs.atlassian.net/rest/api/3/issue/DS-116",
+    "url": "https://dropsubs.atlassian.net/browse/DS-116",
+    "fields": {
+      "summary": "Open the beta to the 5,000-person waitlist",
+      "description": "Open once the email exploit is fixed.\n\nGitHub: https://github.com/dropsubs/dropsubs/issues/52, https://github.com/dropsubs/dropsubs/pull/53",
+      "issuetype": {
+        "name": "Task"
+      },
+      "project": {
+        "key": "DS",
+        "name": "DropSubs"
+      },
+      "status": {
+        "name": "To Do",
+        "id": "21",
+        "statusCategory": {
+          "key": "new",
+          "name": "To Do"
+        }
+      },
+      "priority": {
+        "name": "High"
+      },
+      "assignee": {
+        "accountId": "712020:ds-danial",
+        "displayName": "Danial",
+        "emailAddress": "danial@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "reporter": {
+        "accountId": "712020:ds-danial",
+        "displayName": "Danial",
+        "emailAddress": "danial@dropsubs.example",
+        "active": true,
+        "accountType": "atlassian"
+      },
+      "labels": [
+        "launch"
+      ],
+      "created": "2026-10-02T18:10:00Z",
+      "updated": "2026-10-02T18:10:00Z",
+      "duedate": null,
+      "sprint": {
+        "id": 8,
+        "name": "DS Sprint 8",
+        "state": "active",
+        "startDate": "2026-09-28T16:00:00Z",
+        "endDate": "2026-10-10T01:00:00Z"
+      },
+      "parent": null,
+      "comment": {
+        "comments": [],
+        "total": 0
+      }
+    },
+    "changelog": {
+      "histories": []
+    }
+  }
+]
