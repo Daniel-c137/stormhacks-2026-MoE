@@ -36,6 +36,14 @@ COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
 PINNED_FILE = re.compile(r"repo://([^/]+)/([^/]+)/sha/([0-9a-f]{40})/contents/(.+)")
 
 
+def split_words(word: str) -> list[str]:
+    """A hyphenated word as its words ("Approve-check" as speech-to-text writes it); a key or
+    version with a digit (DS-104, v0.9-rc) stays whole."""
+    if "-" not in word or any(c.isdigit() for c in word):
+        return [word]
+    return [part for part in word.split("-") if part]
+
+
 def plain_forms(word: str) -> list[str]:
     """The word and the forms it may be written in without its ending: approved, approve, fixes,
     fix. Rough on purpose; a form that is no word matches nothing."""
@@ -197,7 +205,7 @@ class GitHubReader:
         tool = "search_pull_requests" if kind == "pr" else "search_issues"
         data = await self._call(tool, {"query": words, "owner": self.owner, "repo": self.repo})
         found = self.found(data, kind, limit)
-        terms = [w for w in words.split() if w.upper() not in OPERATORS]
+        terms = [t for w in words.split() if w.upper() not in OPERATORS for t in split_words(w)]
         if found or len(terms) < 2:
             return found
         # No item has every word, which a search phrased as speech often asks ("approved check

@@ -70,6 +70,13 @@ async def test_a_search_no_item_has_every_word_of_finds_the_closest_first(reader
     assert issues[0].number == 41
 
 
+async def test_a_hyphenated_word_is_searched_as_its_words(reader):
+    # speech-to-text writes "Approve-check"; PR 50 says "Approve check". DS-104 stays one word
+    prs = await reader.search("Approve-check fix", "pr")
+
+    assert prs[0].number == 50
+
+
 async def test_a_search_that_matches_nothing_by_any_word_finds_nothing(reader):
     assert await reader.search("nonexistentword", "issue") == []
     assert await reader.search("nonexistentword anotherone", "pr") == []
