@@ -767,9 +767,10 @@ async def test_github_search_qualifiers_cannot_leave_the_team_repo(store, fake_j
 
     answer = await connected(llm, store, fake_jira, fake_github).ask(question())
 
-    ((_, args),) = fake_github.calls
-    assert ":" not in args["query"]
-    assert (args["owner"], args["repo"]) == ("dropsubs", "app")
+    assert fake_github.calls  # the words, then any of them when no item has all
+    for _, args in fake_github.calls:
+        assert ":" not in args["query"]
+        assert (args["owner"], args["repo"]) == ("dropsubs", "app")
     assert all("otherorg" not in (s.url or "") for s in answer.sources)
     assert not any("Secret roadmap" in c.prompt for c in llm.calls[1:])
 

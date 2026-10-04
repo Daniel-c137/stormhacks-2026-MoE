@@ -60,6 +60,21 @@ async def test_search_finds_the_worlds_issues_and_pull_requests(reader):
     assert prs[0].url == f"{WEB}/pull/50"
 
 
+async def test_a_search_no_item_has_every_word_of_finds_the_closest_first(reader):
+    # PR 50 says "Approve check" but neither "approved" nor "fix"; the issue's test name is one
+    # word (test_inbox_sync_pagination), so "inbox" and "sync" are not whole words in it
+    prs = await reader.search("approved check fix", "pr")
+    issues = await reader.search("flaky inbox sync test", "issue")
+
+    assert prs[0].number == 50
+    assert issues[0].number == 41
+
+
+async def test_a_search_that_matches_nothing_by_any_word_finds_nothing(reader):
+    assert await reader.search("nonexistentword", "issue") == []
+    assert await reader.search("nonexistentword anotherone", "pr") == []
+
+
 async def test_the_latest_issues_and_pull_requests_come_most_recently_updated_first(reader):
     issues = await reader.latest("issue", 3)
     prs = await reader.latest("pr", 3)
@@ -89,7 +104,8 @@ async def test_an_empty_search_lists_the_latest_with_when_each_was_updated(reade
     assert [f.source.label for f in latest.content][:2] == [f"{REPO}#49", f"{REPO}#52"]
     assert "updated 2026-10-02" in latest.content[0].text
     assert [f.source.label for f in latest_prs.content][:2] == [f"{REPO}#50", f"{REPO}#54"]
-    assert [f.source.label for f in topic.content] == []  # a topic is searched for, not listed
+    # a topic is searched for, not listed: no issue says "latest", so the closest comes first
+    assert topic.content[0].source.label == f"{REPO}#36"
 
 
 async def test_read_returns_merge_state_and_time(reader):

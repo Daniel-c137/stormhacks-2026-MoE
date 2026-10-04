@@ -18,6 +18,7 @@ from brain.agent.ask import (
     ToolOrchestrator,
     answer_system,
     backed_by,
+    plan_system,
 )
 from brain.config import Settings
 from brain.llm import MockEmbedder
@@ -479,3 +480,16 @@ def test_answers_keep_figures_and_identifiers_as_written(visibility):
     assert "exactly as the evidence writes them" in system
     assert "v0.9.4" in system and "DS-104" in system
     assert "no markdown" in system and "two to four short sentences" in system
+
+
+def test_the_answer_states_what_follows_directly_from_the_evidence():
+    system = answer_system("public")
+
+    assert "follows directly from the evidence" in system
+    assert "merged after the latest release" in system
+    assert "value the code sets" in system
+
+
+def test_the_plan_reads_releases_for_whether_a_change_is_released():
+    assert "github_releases" in plan_system(4)
+    assert "released" in plan_system(4)
