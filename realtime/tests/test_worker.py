@@ -14,6 +14,7 @@ from realtime_worker.worker import (
     MeetingSession,
     RoomChat,
     meeting_clock,
+    scribe_language,
     speech_translator,
 )
 
@@ -126,24 +127,39 @@ class TranslatingBrain:
         return TranslateResponse(language="es", text="Hello")
 
 
-async def test_speech_is_translated_through_the_brain_for_this_meeting():
-    brain = TranslatingBrain()
+def a_meeting(translate: bool) -> Meeting:
+    return Meeting(
+        id="m-1",
+        team_id="t-1",
+        title="Standup",
+        status="live",
+        code="abc",
+        host_id="u-alex",
+        participant_ids=[],
+        translate=translate,
+    )
 
-    translate = speech_translator(Settings(_env_file=None), brain, "m-1")
+
+async def test_a_meeting_with_translation_on_translates_through_the_brain():
+    brain = TranslatingBrain()
+    meeting = a_meeting(translate=True)
+
+    translate = speech_translator(brain, meeting)
     answer = await translate("Hola", "es")
 
     assert answer == TranslateResponse(language="es", text="Hello")
     assert brain.calls == [("m-1", "Hola", "es")]
+    assert scribe_language(Settings(_env_file=None), meeting) is None  # Scribe detects it
 
 
-def test_translation_can_be_switched_off():
-    settings = Settings(_env_file=None, translate_speech=False)
+def test_a_meeting_with_translation_off_never_translates_and_stays_on_english():
+    meeting = a_meeting(translate=False)
 
-    assert speech_translator(settings, TranslatingBrain(), "m-1") is None
+    assert speech_translator(TranslatingBrain(), meeting) is None
+    assert scribe_language(Settings(_env_file=None), meeting) == "en"
+    pinned = Settings(_env_file=None, elevenlabs_stt_language="fr")
+    assert scribe_language(pinned, meeting) == "fr"
 
 
-def test_translation_is_on_by_default_and_waits_one_and_a_half_seconds():
-    settings = Settings(_env_file=None)
-
-    assert settings.translate_speech is True
-    assert settings.translation_provisional_seconds == 1.5
+def test_a_sentence_still_going_waits_one_and_a_half_seconds_by_default():
+    assert Settings(_env_file=None).translation_provisional_seconds == 1.5
