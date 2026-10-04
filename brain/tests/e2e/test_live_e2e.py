@@ -1,5 +1,6 @@
 """Live: the standup fixture through real Gemini, then approved drafts to a Jira MCP server over
-HTTP. Needs GEMINI_API_KEY and GEMINI_MODEL; Jira is the local FakeJira."""
+HTTP. Needs GEMINI_API_KEY and GEMINI_MODEL (optionally GEMINI_FALLBACK_MODELS); Jira is the
+local FakeJira. Deselected unless pytest runs with `-m live`."""
 
 from pathlib import Path
 
@@ -12,7 +13,7 @@ from brain.report import ProcessedMeeting, TranscriptInput, build_report
 from contracts import AGENT_PARTICIPANT_ID
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
-settings = Settings()
+settings = Settings(openrouter_models=None)  # Gemini alone, never the fallback
 
 pytestmark = [
     pytest.mark.live,
@@ -30,6 +31,8 @@ async def test_gemini_turns_the_standup_into_a_grounded_report():
     assert isinstance(llm, GeminiLLM)
 
     report = await build_report(llm, meeting)
+    print(f"answered by {llm.last_model} (chain: {', '.join(llm.models)})")
+    assert llm.last_model in llm.models
 
     transcript = {s.text for s in meeting.segments}
     members = {p.id for p in meeting.members}

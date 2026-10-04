@@ -44,6 +44,7 @@ class ProcessedMeeting(BaseModel):
     meeting_id: str
     title: str
     started_at: datetime | None = None
+    timezone: str = "UTC"  # the team's IANA time zone; the meeting is dated in it
     members: list[Person]
     report: Report
 

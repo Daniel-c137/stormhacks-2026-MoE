@@ -1,4 +1,4 @@
-from typing import Protocol
+from typing import Literal, Protocol
 
 from pydantic import BaseModel
 
@@ -11,7 +11,15 @@ class LLMUnavailable(LLMError):
     """The LLM is not configured. Never silently replaced by the mock."""
 
 
+class LLMOutOfCapacity(LLMError):
+    """Every model of a provider was overloaded, failing on the server, or missing, so another
+    provider may still answer. A bad request, auth error or unusable answer is never this."""
+
+
 class LLM(Protocol):
+    last_model: str | None
+    """The model that answered the latest call, for logs and the CLI."""
+
     async def generate(self, prompt: str, *, system: str | None = None) -> str: ...
 
     async def generate_structured[T: BaseModel](
@@ -19,9 +27,20 @@ class LLM(Protocol):
     ) -> T: ...
 
 
+EmbedTask = Literal["document", "query"]
+
+
+class Embeddings(BaseModel):
+    """One vector per text, all from `model`. Vectors from different models are not comparable."""
+
+    model: str
+    vectors: list[list[float]]
+
+
 class Embedder(Protocol):
-    """Same model and dimensions for indexing and querying."""
+    """Same model and dimensions for indexing and querying. `task` lets a provider embed stored
+    documents and search queries differently."""
 
     dim: int
 
-    async def embed(self, texts: list[str]) -> list[list[float]]: ...
+    async def embed(self, texts: list[str], *, task: EmbedTask = "document") -> Embeddings: ...
