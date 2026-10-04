@@ -166,13 +166,16 @@ def test_the_page_is_told_sign_up_is_open_and_google_is_not_set_up(client):
     assert client.get("/auth/options").json() == {"signup": True, "google": False}
 
 
-def test_google_is_offered_once_its_client_is_configured(app, client, settings):
-    app.dependency_overrides[get_settings] = lambda: settings.model_copy(
-        update={
-            "signup_team_id": None,
-            "google_client_id": "id.apps.googleusercontent.com",
-            "google_client_secret": "secret",
-        }
-    )
+def test_google_is_offered_once_its_client_and_public_callback_are_configured(
+    app, client, settings
+):
+    google = {
+        "google_client_id": "id.apps.googleusercontent.com",
+        "google_client_secret": "secret",
+    }
+    app.dependency_overrides[get_settings] = lambda: settings.model_copy(update=google)
+    assert client.get("/auth/options").json()["google"] is False
 
-    assert client.get("/auth/options").json() == {"signup": False, "google": True}
+    callback = {"google_redirect_url": "https://skyroom.example/api/auth/google/callback"}
+    app.dependency_overrides[get_settings] = lambda: settings.model_copy(update=google | callback)
+    assert client.get("/auth/options").json()["google"] is True

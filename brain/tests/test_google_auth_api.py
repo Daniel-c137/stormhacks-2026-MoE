@@ -32,6 +32,9 @@ from contracts import LoginResponse, Person
 CLIENT_ID = "client-123.apps.googleusercontent.com"
 CLIENT_SECRET = "google-client-secret"
 BOARD = "https://board.test"
+# Registered with Google; the brain is served at /api behind the board's origin (Caddy, or the
+# board's own /api rewrite locally) and sees only its internal http://127.0.0.1:8000.
+REDIRECT_URL = f"{BOARD}/api/auth/google/callback"
 PRIYA = Person(
     id="u-priya", name="Priya Shah", short="Priya", initials="PS", email="priya@example.com"
 )
@@ -88,6 +91,7 @@ def settings():
         signup_team_id=TEAM.id,
         google_client_id=CLIENT_ID,
         google_client_secret=CLIENT_SECRET,
+        google_redirect_url=REDIRECT_URL,
         board_url=BOARD,
     )
 
@@ -106,7 +110,12 @@ def client(app, store, google) -> TestClient:
         await store.upsert_person(PRIYA, TEAM.id)  # invited, no login yet
 
     asyncio.run(seed())
-    return TestClient(app, follow_redirects=False)
+    return browser(app)
+
+
+def browser(app, base_url: str = "https://testserver") -> TestClient:
+    """A browser on HTTPS, so it returns the Secure flow cookie as a real one would."""
+    return TestClient(app, base_url=base_url, follow_redirects=False)
 
 
 def start(client: TestClient, google: FakeGoogle, next_path: str = "/meetings") -> dict:
@@ -234,9 +243,9 @@ def test_a_callback_without_the_matching_state_is_refused(client, google):
 
 def test_a_callback_from_another_browser_is_refused(app, google):
     """Login CSRF: the state only works in the browser that started the sign-in."""
-    starter = TestClient(app, follow_redirects=False)
+    starter = browser(app)
     sent = start(starter, google)
-    victim = TestClient(app, follow_redirects=False)
+    victim = browser(app)
 
     back = landed(back_from_google(victim, code="attacker-code", state=sent["state"]))
 
@@ -344,23 +353,66 @@ def test_a_failed_google_sign_in_leaves_no_login_behind(client, google, store):
 
 
 def test_behind_a_proxy_google_uses_the_public_callback_url_and_the_cookie_still_returns(
-    app, client, google, settings
+    client, google
 ):
     """In production the brain sits under the board's origin at /api: Google must send the
     browser to the public URL, and the flow cookie must come back on that path too."""
-    public = f"{BOARD}/api/auth/google/callback"
-    app.dependency_overrides[get_settings] = lambda: settings.model_copy(
-        update={"google_redirect_url": public}
-    )
-
     sent = start(client, google)
     cookie = client.cookies.jar
     back = landed(back_from_google(client, code="google-code", state=sent["state"]))
 
-    assert sent["redirect_uri"] == public
-    assert google.token_requests[0]["redirect_uri"] == public
+    assert sent["redirect_uri"] == REDIRECT_URL
+    assert google.token_requests[0]["redirect_uri"] == REDIRECT_URL
     assert all(c.path == "/" for c in cookie if c.name == "google_signin")
     assert "google" in back
+
+
+def test_google_is_off_without_its_public_callback_url(app, client, google, settings):
+    """The brain can't build the public URL itself behind the proxy (it sees its internal
+    address), so without GOOGLE_REDIRECT_URL Google isn't offered at all."""
+    app.dependency_overrides[get_settings] = lambda: settings.model_copy(
+        update={"google_redirect_url": None}
+    )
+
+    assert client.get("/auth/options").json()["google"] is False
+    assert client.get("/auth/google").status_code == 503
+    assert landed(back_from_google(client, code="google-code", state="s")) == {
+        "google_error": "failed"
+    }
+    assert google.token_requests == []
+
+
+@pytest.mark.parametrize("url", ["not a url", "/api/auth/google/callback", "ftp://x/cb"])
+def test_a_callback_url_that_isnt_an_http_url_leaves_google_off(app, client, settings, url):
+    app.dependency_overrides[get_settings] = lambda: settings.model_copy(
+        update={"google_redirect_url": url}
+    )
+
+    assert client.get("/auth/options").json()["google"] is False
+    assert client.get("/auth/google").status_code == 503
+
+
+def test_the_flow_cookie_is_secure_when_the_callback_is_https(app):
+    """Behind the proxy the brain is reached over plain http; the public URL decides."""
+    response = browser(app, base_url="http://127.0.0.1:8000").get("/auth/google")
+
+    assert response.status_code == 302, response.text
+    assert "secure" in response.headers["set-cookie"].lower()
+
+
+def test_locally_over_http_the_cookie_isnt_secure_and_sign_in_works(app, client, google, settings):
+    local = "http://localhost:3000/api/auth/google/callback"
+    app.dependency_overrides[get_settings] = lambda: settings.model_copy(
+        update={"google_redirect_url": local, "board_url": None}
+    )
+    client = browser(app, base_url="http://localhost:3000")  # seeded by the client fixture
+
+    sent = start(client, google)
+    response = back_from_google(client, code="google-code", state=sent["state"])
+
+    assert sent["redirect_uri"] == local
+    assert "secure" not in client.get("/auth/google").headers["set-cookie"].lower()
+    assert response.headers["location"].startswith("/login?google=")
 
 
 def test_without_board_url_google_returns_to_the_same_sites_sign_in_page(
