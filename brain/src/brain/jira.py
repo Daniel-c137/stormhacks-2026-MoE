@@ -13,7 +13,7 @@ from mcp.types import CallToolResult, TextContent
 from pydantic import BaseModel
 
 from brain.config import Settings
-from brain.integrations import McpReader, McpToolError, ToolRefused
+from brain.integrations import McpReader, McpToolError, ToolRefused, search_words
 from brain.report import ProcessedMeeting
 from brain.report.extraction import clock
 from contracts import TaskDraft, TaskPushRequest, TaskPushResult
@@ -187,7 +187,7 @@ class JiraReader:
     async def search(self, text: str, limit: int = 8) -> list[JiraIssue]:
         """The project's issues whose text matches, done or not, most recently updated first.
         Only words reach the JQL, so the text cannot widen the search beyond the project."""
-        words = " ".join(re.findall(r"[\w.]+", text))
+        words = search_words(text)
         if not words:
             return []
         jql = f'project = "{self.project}" AND text ~ "{words}" ORDER BY updated DESC'

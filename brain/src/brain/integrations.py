@@ -1,6 +1,7 @@
 """GitHub and Jira over MCP: the world mocks or the real servers, with the same tool names."""
 
 import json
+import re
 from typing import Any, Literal
 
 from mcp import Client
@@ -53,6 +54,16 @@ WRITE_TOOLS: dict[McpServerName, frozenset[str]] = {
         }
     ),
 }
+
+
+WORD = re.compile(r"[\w.]+(?:-[\w.]+)*")
+
+
+def search_words(text: str) -> str:
+    """Model-written search text as plain words: no quotes, operators or qualifiers such as
+    repo: or project =, so it cannot widen a search beyond the scope the code sets. Hyphenated
+    words like DS-104 stay whole."""
+    return " ".join(WORD.findall(text))
 
 
 class ToolRefused(PermissionError):

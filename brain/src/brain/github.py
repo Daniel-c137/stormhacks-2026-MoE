@@ -5,11 +5,12 @@ answers. Every call goes through the read allowlist.
 """
 
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 from mcp.server.mcpserver import MCPServer
 from pydantic import BaseModel
 
-from brain.integrations import McpReader, McpToolError, ToolRefused
+from brain.integrations import McpReader, McpToolError, ToolRefused, search_words
 from brain.jira import root_cause
 
 GitHubKind = Literal["issue", "pr"]
@@ -43,15 +44,26 @@ class GitHubReader:
         return f"{self.owner}/{self.repo}"
 
     async def search(self, text: str, kind: GitHubKind, limit: int = 6) -> list[GitHubItem]:
-        """Issues or pull requests of the repository matching the text."""
+        """Issues or pull requests of the repository matching the text.
+
+        The server lets a repo:, org: or user: qualifier in the query replace the owner/repo
+        scope, so only plain words are sent, and anything returned from elsewhere is dropped."""
+        words = search_words(text)
+        if not words:
+            return []
         tool = "search_pull_requests" if kind == "pr" else "search_issues"
-        data = await self._call(tool, {"query": text, "owner": self.owner, "repo": self.repo})
+        data = await self._call(tool, {"query": words, "owner": self.owner, "repo": self.repo})
         if isinstance(data, dict):
             data = data.get("items", data.get("result"))
         if isinstance(data, dict):
             data = data.get("items")
         items = (self.item(raw, kind) for raw in data if isinstance(raw, dict)) if data else ()
-        return [item for item in items if item is not None][:limit]
+        return [item for item in items if item is not None and self.ours(item.url)][:limit]
+
+    def ours(self, url: str | None) -> bool:
+        """Whether a result's link is in this repository: /owner/repo/... on any GitHub host."""
+        path = urlparse(url or "").path.casefold()
+        return path.startswith(f"/{self.owner}/{self.repo}/".casefold())
 
     async def read(self, number: int, kind: GitHubKind) -> GitHubItem:
         """One issue or pull request of the repository."""

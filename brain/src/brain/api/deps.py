@@ -1,3 +1,4 @@
+import logging
 import secrets
 from collections.abc import Callable
 from functools import cache
@@ -8,13 +9,21 @@ from fastapi import Depends, Header, HTTPException, Request
 
 from contracts import Answer, Meeting, Person, Team
 
-from ..agent.ask import Question, ToolOrchestrator
+from ..agent.ask import (
+    MAX_HISTORY_TURNS,
+    MAX_QUESTION_CHARS,
+    MAX_TURN_CHARS,
+    Question,
+    ToolOrchestrator,
+)
 from ..auth import AuthNotConfigured, InvalidToken, KeysUnavailable, TokenVerifier
 from ..config import Settings
 from ..jira import JiraPusher, jira_config
 from ..llm import LLM, LLMError, LLMUnavailable, make_embedder, make_llm
 from ..memory import MeetingMemory, PgMemoryStore
 from ..store import NotFound, Store
+
+logger = logging.getLogger(__name__)
 
 
 def not_implemented() -> NoReturn:
@@ -51,16 +60,18 @@ async def get_llm(settings: Settings = Depends(get_settings)) -> LLM:
 def get_memory(
     request: Request, settings: Settings = Depends(get_settings)
 ) -> MeetingMemory | None:
-    """Meeting memory in the app's Postgres pool with Gemini embeddings. None without a database
-    or embeddings; the agent then reports memory as unavailable instead of failing."""
+    """Meeting memory in Postgres (the store's pool on app.state.db_pool) with Gemini embeddings,
+    or None when either is missing. Tests override it with an in-memory store."""
     pool = getattr(request.app.state, "db_pool", None)
     if pool is None:
         return None
     try:
-        embedder = make_embedder(settings)
+        return MeetingMemory(make_embedder(settings), PgMemoryStore(pool))
     except LLMUnavailable:
         return None
-    return MeetingMemory(embedder, PgMemoryStore(pool))
+    except ValueError as e:  # embedding dimensions the table cannot hold
+        logger.warning("meeting memory is unavailable: %s", e)
+        return None
 
 
 def get_orchestrator(
@@ -160,7 +171,18 @@ async def team_meeting(store: Store, user: Person, meeting_id: str) -> Meeting:
 
 
 async def ask_agent(orchestrator: ToolOrchestrator, question: Question) -> Answer:
-    """The agent's answer; 502 when the model fails. Nothing about the question is kept."""
+    """The agent's answer; 422 for an oversized question or history, 502 when the model fails.
+    Nothing about the question is kept."""
+    if len(question.text) > MAX_QUESTION_CHARS:
+        raise HTTPException(
+            status_code=422, detail=f"Questions are at most {MAX_QUESTION_CHARS} characters"
+        )
+    if len(question.history) > MAX_HISTORY_TURNS:
+        raise HTTPException(status_code=422, detail=f"History is at most {MAX_HISTORY_TURNS} turns")
+    if any(len(turn.text) > MAX_TURN_CHARS for turn in question.history):
+        raise HTTPException(
+            status_code=422, detail=f"History turns are at most {MAX_TURN_CHARS} characters"
+        )
     try:
         return await orchestrator.ask(question)
     except LLMError as e:

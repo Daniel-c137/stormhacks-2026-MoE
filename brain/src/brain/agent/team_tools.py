@@ -135,7 +135,9 @@ SOURCE_NAMES = {spec.name: name for spec, name in SPECS}
 
 
 def jira_reader(settings: Settings, team: TeamSettings, target: Any = None) -> JiraReader | str:
-    """A reader for the team's Jira project, or why there is none."""
+    """A reader for the team's Jira project, or why there is none. A team without its own
+    project uses the deployment's JIRA_PROJECT_KEY, as the push flow does (one team per
+    deployment)."""
     cloud_id = settings.jira_cloud_id or settings.jira_base_url
     project = team.jira.project or settings.jira_project_key
     missing = [
@@ -160,13 +162,15 @@ def jira_reader(settings: Settings, team: TeamSettings, target: Any = None) -> J
 
 
 def github_reader(settings: Settings, team: TeamSettings, target: Any = None) -> GitHubReader | str:
-    """A reader for the team's repository, or why there is none."""
+    """A reader for the team's repository, or why there is none. Like Jira's project, a team
+    without its own repository uses the deployment's GITHUB_REPO (one team per deployment)."""
+    repo = team.github.repo or settings.github_repo
     if not settings.github_mcp_url:
         return "GitHub is not configured: set GITHUB_MCP_URL"
-    if not team.github.repo:
-        return "GitHub is not configured: no repository is set in workspace settings"
+    if not repo:
+        return "GitHub is not configured: no repository is set in workspace settings or GITHUB_REPO"
     try:
-        return GitHubReader(team.github.repo, target or settings.github_mcp_url)
+        return GitHubReader(repo, target or settings.github_mcp_url)
     except ValueError as e:
         return f"GitHub is not configured: {e}"
 
