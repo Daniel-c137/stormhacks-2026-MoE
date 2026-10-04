@@ -65,6 +65,8 @@ class Transcription(Protocol):
 
     def cancel_ask(self, participant_id: str) -> bool: ...
 
+    def cancel_listening(self, participant_id: str) -> bool: ...
+
     def recent_finals(self) -> list[TranscriptSegment]: ...
 
 
@@ -126,6 +128,7 @@ class MeetingAgent:
 
         self._cards: dict[str, ResponseCard] = {}
         self._asking: dict[str, asyncio.Task[None]] = {}  # participant -> their Ask's expiry
+        self._listening: dict[str, str] = {}  # who is calling the agent by voice: id -> name
         self._working = 0
         self._speaking = asyncio.Lock()
         self._last_agenda: str | None = None
@@ -164,6 +167,7 @@ class MeetingAgent:
             return
         if signal.cancel:
             self.transcription.cancel_ask(sender)
+            self.transcription.cancel_listening(sender)
             self._stop_asking(sender)
             if not self._asking and self.state.current.state == "capturing":
                 await self._rest()
@@ -183,6 +187,15 @@ class MeetingAgent:
         if task := self._asking.pop(participant_id, None):
             task.cancel()
 
+    # hearing its name
+
+    async def on_listening(self, listening: dict[str, str]) -> None:
+        """Who is calling the agent by voice (id -> name), from the transcription each time it
+        changes: someone still saying "Polaris, ...", or waiting after the name alone or a
+        question that trailed off. The agent shows it is listening to them."""
+        self._listening = listening
+        await self._rest()
+
     # answering
 
     async def on_invocation(self, invocation: Invocation) -> None:
@@ -192,6 +205,7 @@ class MeetingAgent:
             log.warning("Ignored a %s invocation in the room", invocation.visibility)
             return
         self._stop_asking(invocation.asked_by_id)
+        self._listening = {k: v for k, v in self._listening.items() if k != invocation.asked_by_id}
         self._working += 1
         try:
             await self._move("working", clip(f"Looking into: {invocation.question}"))
@@ -468,13 +482,17 @@ class MeetingAgent:
 
     async def _rest(self, detail: str = "") -> None:
         """Where the agent settles when nothing is in progress: working on another question,
-        listening for an Ask, an answer waiting (hand raised), or idle."""
+        listening for an Ask or to someone calling it, an answer waiting (hand raised), or
+        idle."""
         if self._speaking.locked():
             return  # the answer being spoken settles the state when it ends
         if self._working:
             await self._move("working", self.state.current.detail)
         elif self._asking:
             await self._move("capturing", detail or "Listening for a question")
+        elif self._listening:
+            names = " and ".join(self._listening.values())
+            await self._move("capturing", detail or clip(f"Listening to {names}"))
         elif any(c.status == "pending" for c in self._cards.values()):
             await self._move("hand_raised", detail or "Answer ready")
         else:

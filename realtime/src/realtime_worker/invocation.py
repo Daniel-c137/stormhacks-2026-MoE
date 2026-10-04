@@ -2,6 +2,10 @@
 button, or a public @mention. Plain text matching, never an LLM.
 
 Everything else is transcribed and saved but never sent to the brain for reasoning.
+
+It also says who the assistant is listening to by voice, so the room sees it listening as soon as
+someone calls it: a partial caption that opens with the name, the wait after the name alone, and
+a question that trails off. Only a final segment ever invokes.
 """
 
 import math
@@ -17,6 +21,9 @@ from contracts.agent import InvocationVia
 NAME_ONLY_SECONDS = 8.0
 # After the Ask button, the presser's next final segment is the question, this long.
 ASK_SECONDS = 30.0
+# A partial caption that called the assistant is listened to this long after its last words if
+# its final never comes (the stream dropped). Scribe commits after a short silence, well within.
+HEARD_SECONDS = 10.0
 
 ARABIC_COMMA = chr(0x060C)
 # with en and em dashes, the ellipsis character and the Arabic comma
@@ -76,6 +83,17 @@ def alias_pattern(aliases: list[str]) -> str:
 class Pending:
     via: InvocationVia
     until: float
+    name: str = ""  # the speaker's, for a name said alone
+
+
+@dataclass
+class Hearing:
+    """An utterance still being said whose words so far call the assistant, or that follows the
+    name alone or a question that trailed off. Its final decides."""
+
+    seg_id: str
+    name: str
+    until: float
 
 
 @dataclass
@@ -127,7 +145,13 @@ def joined(start: str, rest: str) -> str:
 
 
 class WakeDetector:
-    def __init__(self, aliases: list[str], *, trailing_seconds: float = TRAILING_SECONDS):
+    def __init__(
+        self,
+        aliases: list[str],
+        *,
+        trailing_seconds: float = TRAILING_SECONDS,
+        name_only_seconds: float = NAME_ONLY_SECONDS,
+    ):
         if not aliases:
             raise ValueError("WakeDetector needs at least one alias")
         name = alias_pattern(aliases)
@@ -147,8 +171,11 @@ class WakeDetector:
         self._mention = re.compile(rf"(?<!\w)@{name}(?!\w)", re.IGNORECASE)
         self._pending: dict[str, Pending] = {}
         self._trailing_seconds = trailing_seconds
+        self._name_only_seconds = name_only_seconds
         self._held: dict[str, Held] = {}
         self._overdue: list[Held] = []
+        self._hearing: dict[str, Hearing] = {}
+        self._cancelled: set[str] = set()  # utterances whose speaker cancelled listening
 
     def arm_ask(self, speaker_id: str, at: float) -> None:
         """The Ask button: this speaker's next final segment is the question.
@@ -164,6 +191,71 @@ class WakeDetector:
             return False
         del self._pending[speaker_id]
         return True
+
+    def cancel_listening(self, speaker_id: str) -> bool:
+        """The speaker cancelled while the assistant listened to their voice: their wait after the
+        name alone, their trailing question and the rest of the utterance being said are
+        dropped. True if any was. Their Ask press is cancel_ask's."""
+        stopped = False
+        if hearing := self._hearing.pop(speaker_id, None):
+            self._cancelled.add(hearing.seg_id)
+            stopped = True
+        pending = self._pending.get(speaker_id)
+        if pending and pending.via == "voice":
+            del self._pending[speaker_id]
+            stopped = True
+        if self._held.pop(speaker_id, None):
+            stopped = True
+        return stopped
+
+    def listening(self, now: float) -> dict[str, str]:
+        """Who the assistant is listening to by voice at `now` (the segments' clock), by id with
+        their name: someone whose words so far call it, who said its name alone and is within its
+        wait, or whose question trailed off and is waiting for the rest."""
+        heard = {
+            **{s: h.name for s, h in self._hearing.items() if h.until > now},
+            **{s: p.name for s, p in self._pending.items() if p.via == "voice" and p.until > now},
+            **{s: h.segment.speaker_name for s, h in self._held.items() if h.until > now},
+        }
+        return dict(sorted(heard.items()))
+
+    def listening_ends(self, now: float) -> float | None:
+        """The next time after `now` that someone's listening may run out; None if nobody's will.
+        Whoever owns the clock looks at listening() again then."""
+        ends = [
+            *(h.until for h in self._hearing.values()),
+            *(p.until for p in self._pending.values() if p.via == "voice"),
+            *(h.until for h in self._held.values()),
+        ]
+        return min((t for t in ends if t > now), default=None)
+
+    def on_partial(self, segment: TranscriptSegment) -> None:
+        """A partial caption: listened to if its words so far call the assistant at the start of
+        the utterance or of a later sentence in it, or if its speaker said the name alone or
+        trailed off and is now going on. Looser than a final, which decides: a partial often
+        lacks the comma after the name, and "Polaris is" may yet become "Polaris is down"."""
+        speaker = segment.speaker_id
+        if segment.is_final or speaker == AGENT_PARTICIPANT_ID:
+            return
+        if segment.seg_id in self._cancelled:
+            return
+        if self._calls(segment.text) or self._waiting(speaker, segment.t_start):
+            until = segment.t_end + HEARD_SECONDS
+            self._hearing[speaker] = Hearing(segment.seg_id, segment.speaker_name, until)
+        else:
+            self._hearing.pop(speaker, None)
+
+    def _calls(self, text: str) -> bool:
+        return any(self._opening.search(text[start:]) for start in self._starts(text))
+
+    def _waiting(self, speaker_id: str, t: float) -> bool:
+        """Whether something this speaker says at `t` may still complete their question."""
+        pending = self._pending.get(speaker_id)
+        held = self._held.get(speaker_id)
+        return bool(
+            (pending and pending.via == "voice" and t <= pending.until)
+            or (held and t <= held.until)
+        )
 
     def next_due(self) -> float | None:
         """When the earliest held question stops waiting, on the segments' clock; None if none
@@ -186,6 +278,10 @@ class WakeDetector:
             return None
         speaker = segment.speaker_id
         self._others_spoke(speaker)
+        self._hearing.pop(speaker, None)  # the final decides
+        if segment.seg_id in self._cancelled:
+            self._cancelled.discard(segment.seg_id)
+            return None
         addressed, question = self._addressed(segment.text)
         # Saying the name without addressing it is talking about the assistant, not to it.
         about = not addressed and bool(self._name.search(segment.text))
@@ -229,7 +325,8 @@ class WakeDetector:
         if not addressed:
             return None
         if not question:
-            self._pending[speaker] = Pending("voice", segment.t_end + NAME_ONLY_SECONDS)
+            until = segment.t_end + self._name_only_seconds
+            self._pending[speaker] = Pending("voice", until, segment.speaker_name)
             return None
         return self._spoken(segment, "voice", question, heard_until=segment.t_end)
 
