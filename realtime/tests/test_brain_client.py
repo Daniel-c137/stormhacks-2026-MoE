@@ -1,5 +1,6 @@
 """The worker's HTTP client for the brain's /internal routes."""
 
+import json
 from datetime import UTC, datetime
 
 import httpx
@@ -398,3 +399,27 @@ async def test_a_failed_fact_check_tick_is_a_rejection_or_unavailable():
         await client(Recorder(409)).fact_check("m-1")
     with pytest.raises(BrainUnavailable):
         await client(Recorder(503)).fact_check("m-1")
+
+
+async def test_a_catch_up_posts_the_participant_and_span_and_returns_what_to_send():
+    from contracts import CatchUpResponse
+
+    response = CatchUpResponse(text="Catching you up (00:00 to 07:00):", source_times=[90.0])
+    recorder = Recorder(json_response(response))
+
+    got = await client(recorder).catch_up("m-1", "u-sarah", 0, 420)
+
+    assert got == response
+    [request] = recorder.requests
+    assert str(request.url) == "http://brain.test/internal/meetings/m-1/catch-up"
+    assert request.headers["X-Internal-Token"] == TOKEN
+    assert json.loads(request.content) == {"participant_id": "u-sarah", "since": 0, "until": 420}
+
+
+async def test_a_catch_up_is_not_retried_and_a_refusal_is_a_rejection():
+    recorder = Recorder(503)
+    with pytest.raises(BrainUnavailable):
+        await client(recorder).catch_up("m-1", "u-sarah", 0, 420)
+    assert len(recorder.requests) == 1
+    with pytest.raises(BrainRejected):
+        await client(Recorder(409)).catch_up("m-1", "u-sarah", 0, 420)
