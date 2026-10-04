@@ -30,12 +30,13 @@ from ..agent.agenda import (
 from ..config import Settings
 from ..jira import JiraError, JiraReader, JiraUnavailable, jira_config
 from ..llm import LLM, LLMError
-from ..store import Store
+from ..store import Conflict, Store
 from .deps import current_user, get_llm, get_settings, get_store, team_meeting
 
 router = APIRouter(tags=["agenda"])
 
 EDITABLE = {"scheduled", "live"}
+EDIT_ATTEMPTS = 3
 GITHUB_NOT_READ = "GitHub: open issues and pull requests are not read for suggestions yet"
 
 
@@ -78,23 +79,37 @@ async def update_agenda(
                 detail=f"A timebox is {MINUTES_MIN} to {MINUTES_MAX} minutes, or none",
             )
 
-    now = datetime.now(UTC)
-    saved = await store.agenda(meeting.id)
-    existing = {item.id: item for item in saved.items} if saved else {}
-    items: list[AgendaItem] = []
-    for edit in body.items:
-        changes = {"title": edit.title.strip(), "minutes": edit.minutes}
-        if edit.id and edit.id in existing:
-            items.append(existing[edit.id].model_copy(update=changes))
-        else:
-            items.append(AgendaItem(id=uuid4().hex, added_by=user.id, **changes))
-    agenda = Agenda(
-        meeting_id=meeting.id,
-        items=items,
-        generated_at=saved.generated_at if saved else now,
-        updated_at=now,
-    )
-    return await store.save_agenda(agenda)
+    new_ids: dict[int, str] = {}
+    for _ in range(EDIT_ATTEMPTS):
+        now = datetime.now(UTC)
+        saved = await store.agenda(meeting.id)
+        existing = {item.id: item for item in saved.items} if saved else {}
+        items: list[AgendaItem] = []
+        for n, edit in enumerate(body.items):
+            changes = {"title": edit.title.strip(), "minutes": edit.minutes}
+            if edit.id and edit.id in existing:
+                items.append(existing[edit.id].model_copy(update=changes))
+            else:
+                item_id = new_ids.setdefault(n, uuid4().hex)
+                items.append(AgendaItem(id=item_id, added_by=user.id, **changes))
+        if saved is None:
+            agenda = Agenda(meeting_id=meeting.id, items=items, generated_at=now, updated_at=now)
+            return await store.save_agenda(agenda)
+        # Timekeeping state stays: discussed time and nudges on the items, and the tracked
+        # point and current item (unless it was removed) on the agenda.
+        current = saved.current_item_id
+        agenda = saved.model_copy(
+            update={
+                "items": items,
+                "updated_at": now,
+                "current_item_id": current if current in {i.id for i in items} else None,
+            }
+        )
+        try:
+            return await store.save_agenda_if(agenda, tracked_until=saved.tracked_until)
+        except Conflict:  # a timekeeping tick saved meanwhile; apply the edit to its result
+            continue
+    raise HTTPException(status_code=409, detail="The agenda kept changing; try again")
 
 
 @router.post("/agenda/rewrite")

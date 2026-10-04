@@ -1,12 +1,31 @@
 """Realtime -> brain. Not exposed to browsers."""
 
-from fastapi import APIRouter, Depends, HTTPException
+import asyncio
+from weakref import WeakValueDictionary
 
-from contracts import ChatMessage, InvokeRequest, InvokeResponse, SegmentsIngest
+from fastapi import APIRouter, Depends, HTTPException, Request
+
+from contracts import (
+    AgendaTrackRequest,
+    AgendaTrackResponse,
+    ChatMessage,
+    InvokeRequest,
+    InvokeResponse,
+    SegmentsIngest,
+)
 
 from ..agent.ask import Question, ToolOrchestrator
+from ..agent.timekeeping import seconds_since_start, track_agenda
+from ..llm import LLM, LLMError
 from ..store import NotFound, Store
-from .deps import ask_agent, get_orchestrator, get_store, not_implemented, require_internal
+from .deps import (
+    ask_agent,
+    get_llm,
+    get_orchestrator,
+    get_store,
+    not_implemented,
+    require_internal,
+)
 
 router = APIRouter(prefix="/internal", tags=["internal"], dependencies=[Depends(require_internal)])
 
@@ -69,3 +88,42 @@ async def invoke(
         recent=body.recent_segments,
     )
     return InvokeResponse(answer=await ask_agent(orchestrator, question))
+
+
+def agenda_lock(request: Request, meeting_id: str) -> asyncio.Lock:
+    """One lock per meeting in this process, so overlapping ticks never classify a stretch twice.
+    Kept only while someone holds or waits for it."""
+    state = request.app.state
+    if not hasattr(state, "agenda_locks"):
+        state.agenda_locks = WeakValueDictionary()
+    locks: WeakValueDictionary[str, asyncio.Lock] = state.agenda_locks
+    lock = locks.get(meeting_id)
+    if lock is None:
+        lock = locks[meeting_id] = asyncio.Lock()
+    return lock
+
+
+@router.post("/meetings/{meeting_id}/agenda/track")
+async def track_agenda_tick(
+    meeting_id: str,
+    request: Request,
+    body: AgendaTrackRequest | None = None,
+    store: Store = Depends(get_store),
+    llm: LLM = Depends(get_llm),
+) -> AgendaTrackResponse:
+    """The worker's timer tick (every 30-60 s, never per utterance) for a live meeting. Reads the
+    final segments since the last tick from the store, so the worker sends none. The worker
+    publishes the agenda on Topic.AGENDA and each nudge on Topic.AGENDA_NUDGE; nothing is spoken.
+    """
+    try:
+        meeting = await store.meeting(meeting_id)
+    except NotFound:
+        raise HTTPException(status_code=404, detail="Meeting not found") from None
+    if meeting.status != "live":
+        raise HTTPException(status_code=409, detail="Only a live meeting keeps time")
+    now = body.now if body and body.now is not None else seconds_since_start(meeting)
+    async with agenda_lock(request, meeting_id):
+        try:
+            return await track_agenda(store, llm, meeting, now)
+        except LLMError as e:
+            raise HTTPException(status_code=502, detail=f"Could not track the agenda: {e}") from e

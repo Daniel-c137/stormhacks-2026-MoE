@@ -3,8 +3,9 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from .agenda import Agenda, AgendaNudge
 from .agent import Answer, Invocation, Visibility
 from .meeting import Meeting
 from .transcript import TranscriptSegment
@@ -66,6 +67,20 @@ class AgendaRewriteRequest(BaseModel):
 
 class AgendaRewriteResponse(BaseModel):
     text: str
+
+
+class AgendaTrackRequest(BaseModel):
+    """realtime -> brain on a timer. `now` is seconds from the meeting start; omitted, the
+    brain takes it from started_at."""
+
+    now: float | None = Field(default=None, ge=0)
+
+
+class AgendaTrackResponse(BaseModel):
+    """The worker publishes `agenda` on Topic.AGENDA and each nudge on Topic.AGENDA_NUDGE."""
+
+    agenda: Agenda
+    nudges: list[AgendaNudge] = []
 
 
 class ProfileUpdate(BaseModel):

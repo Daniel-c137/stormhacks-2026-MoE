@@ -164,6 +164,12 @@ class Store(Protocol):
         """Replaces the meeting's agenda."""
         ...
 
+    async def save_agenda_if(self, agenda: Agenda, *, tracked_until: float | None) -> Agenda:
+        """Replaces the agenda only if the saved one is still tracked up to `tracked_until`:
+        an atomic compare-and-set, so of overlapping timekeeping ticks or edits only one gets
+        through and the others get Conflict. NotFound when no agenda is saved."""
+        ...
+
     # reports, tasks and decisions
 
     async def save_report(self, report: Report) -> None:
@@ -444,6 +450,16 @@ class InMemoryStore:
 
     async def save_agenda(self, agenda: Agenda) -> Agenda:
         self._meeting(agenda.meeting_id)
+        self._agendas[agenda.meeting_id] = _copy(agenda)
+        return _copy(agenda)
+
+    async def save_agenda_if(self, agenda: Agenda, *, tracked_until: float | None) -> Agenda:
+        # No await between the check and the write, so this is atomic on the event loop.
+        saved = self._agendas.get(agenda.meeting_id)
+        if saved is None:
+            raise NotFound(f"agenda for meeting {agenda.meeting_id}")
+        if saved.tracked_until != tracked_until:
+            raise Conflict(f"agenda for meeting {agenda.meeting_id} was tracked meanwhile")
         self._agendas[agenda.meeting_id] = _copy(agenda)
         return _copy(agenda)
 
