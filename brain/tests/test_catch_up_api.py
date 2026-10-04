@@ -383,3 +383,21 @@ def test_a_draft_with_nothing_grounded_has_nothing_to_send(worker, store, use_ll
     assert response.status_code == 200
     assert response.json() == {"text": None, "source_times": []}
 
+
+def test_a_main_point_that_only_repeats_a_decision_is_left_out(worker, store, use_llm):
+    meeting = meeting_with(store)
+    use_llm(
+        catching_up(
+            points=(
+                ("The team decided to ship the refund fix on Friday.", ("ship the refund fix",)),
+                ("The fix in PR 41 charges refunds once.", ("PR 41 charges",)),
+            ),
+        )
+    )
+
+    lines = catch_up(worker, meeting.id).json()["text"].splitlines()
+
+    assert [line for line in lines if line.startswith("- ")] == [
+        "- The fix in PR 41 charges refunds once. (01:00)"
+    ]
+    assert "Decided: Ship the refund fix on Friday. (01:30)" in lines
