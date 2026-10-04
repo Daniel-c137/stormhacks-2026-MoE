@@ -18,11 +18,9 @@ from brain.text import one_line
 from contracts import (
     Agenda,
     AgendaItem,
-    AgendaNudge,
     Meeting,
     Report,
     Source,
-    TranscriptSegment,
     get_identity,
 )
 
@@ -37,12 +35,6 @@ MAX_TASKS = 15
 class AgendaPlanner(Protocol):
     async def build(self, meeting: Meeting) -> Agenda:
         """From previous summaries, open tasks and unfinished GitHub/Jira work."""
-        ...
-
-    async def track(
-        self, agenda: Agenda, segments: list[TranscriptSegment], minutes_left: float
-    ) -> tuple[Agenda, list[AgendaNudge]]:
-        """Mark covered items; nudge about items that have not come up near the end."""
         ...
 
 

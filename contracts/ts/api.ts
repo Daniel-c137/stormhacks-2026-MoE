@@ -1,4 +1,5 @@
 // HTTP request and response bodies. Board -> brain, and realtime -> brain (internal).
+import type { Agenda, AgendaNudge } from "./agenda";
 import type { Answer, Invocation, Visibility } from "./agent";
 import type { Meeting } from "./meeting";
 import type { TranscriptSegment } from "./transcript";
@@ -54,6 +55,18 @@ export interface AgendaRewriteRequest {
 
 export interface AgendaRewriteResponse {
   text: string;
+}
+
+/** realtime -> brain on a timer. `now` is seconds from the meeting start; omitted, the brain
+ * takes it from started_at. */
+export interface AgendaTrackRequest {
+  now?: number | null;
+}
+
+/** The worker publishes `agenda` on Topic.AGENDA and each nudge on Topic.AGENDA_NUDGE. */
+export interface AgendaTrackResponse {
+  agenda: Agenda;
+  nudges?: AgendaNudge[];
 }
 
 /** Only the fields that are set change. */

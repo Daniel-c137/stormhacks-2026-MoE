@@ -3,6 +3,7 @@
 import logging
 from collections.abc import Iterable
 from datetime import UTC, datetime
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -16,17 +17,19 @@ from contracts import (
     Person,
 )
 
+from ..agent.ask import MAX_RECENT_SEGMENTS, Question, ToolOrchestrator
 from ..agent.pipeline import PipelineRunner, PostMeetingPipeline
 from ..config import Settings
 from ..livekit_tokens import participant_token
 from ..store import Conflict, NotFound, Store
 from .deps import (
+    ask_agent,
     current_user,
+    get_orchestrator,
     get_pipeline,
     get_runner,
     get_settings,
     get_store,
-    not_implemented,
     team_meeting,
     user_team,
 )
@@ -206,7 +209,26 @@ async def uninvite(
 
 @router.post("/{meeting_id}/ask")
 async def ask_in_meeting(
-    meeting_id: str, body: AskRequest, user: Person = Depends(current_user)
+    meeting_id: str,
+    body: AskRequest,
+    user: Person = Depends(current_user),
+    store: Store = Depends(get_store),
+    orchestrator: ToolOrchestrator = Depends(get_orchestrator),
 ) -> Answer:
-    """Typed question. Private answers return only to the asker; public ones also reach the room."""
-    not_implemented()
+    """Typed question, asked as the signed-in user, with the meeting's latest final segments as
+    context. The answer returns only to the asker; the board posts a public one to the room.
+    A private question and its answer are never stored, indexed or logged."""
+    meeting = await team_meeting(store, user, meeting_id)
+    recent = (await store.transcript(meeting.id))[-MAX_RECENT_SEGMENTS:]
+    question = Question(
+        id=str(uuid4()),
+        team_id=meeting.team_id,
+        text=body.question,
+        asker_id=user.id,
+        asker_name=user.name,
+        visibility=body.visibility,
+        meeting_id=meeting.id,
+        history=body.history,
+        recent=recent,
+    )
+    return await ask_agent(orchestrator, question)

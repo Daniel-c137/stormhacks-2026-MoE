@@ -5,6 +5,7 @@ The same tool names work against the world's mock and the real server; JIRA_MCP_
 """
 
 import json
+import re
 
 from mcp import Client
 from mcp.server.mcpserver import MCPServer
@@ -12,6 +13,7 @@ from mcp.types import CallToolResult, TextContent
 from pydantic import BaseModel
 
 from brain.config import Settings
+from brain.integrations import McpReader, McpToolError, ToolRefused, search_words
 from brain.report import ProcessedMeeting
 from brain.report.extraction import clock
 from contracts import TaskDraft, TaskPushRequest, TaskPushResult
@@ -153,37 +155,77 @@ class JiraIssue(BaseModel):
     summary: str
     status: str | None = None
     assignee: str | None = None
+    priority: str | None = None
+    description: str | None = None
+    done: bool = False
     url: str | None = None
 
 
+ISSUE_FIELDS = ["summary", "status", "assignee", "priority", "description"]
+MAX_DESCRIPTION = 400
+
+
 class JiraReader:
-    """Read-only searches. Never calls a write tool."""
+    """Read-only searches and reads of the configured project. Every call goes through the read
+    allowlist, so a write tool is refused before Jira is reached."""
 
     def __init__(self, config: JiraConfig, *, target: str | MCPServer | None = None):
         self.config = config
         self.target = target or config.mcp_url
+        self.reader = McpReader("jira", self.target)
+
+    @property
+    def project(self) -> str:
+        return re.sub(r'["\\]', "", self.config.project_key)
 
     async def unfinished(self, limit: int = 10) -> list[JiraIssue]:
         """The project's issues not done yet, most recently updated first."""
-        project = self.config.project_key.replace('"', "")
-        jql = f'project = "{project}" AND statusCategory != Done ORDER BY updated DESC'
+        jql = f'project = "{self.project}" AND statusCategory != Done ORDER BY updated DESC'
+        issues = await self._search(jql, limit, ["summary", "status", "assignee"])
+        return [issue for issue in issues if not issue.done][:limit]
+
+    async def search(self, text: str, limit: int = 8) -> list[JiraIssue]:
+        """The project's issues whose text matches, done or not, most recently updated first.
+        Only words reach the JQL, so the text cannot widen the search beyond the project."""
+        words = search_words(text)
+        if not words:
+            return []
+        jql = f'project = "{self.project}" AND text ~ "{words}" ORDER BY updated DESC'
+        return (await self._search(jql, limit, ISSUE_FIELDS))[:limit]
+
+    async def get(self, key: str) -> JiraIssue:
+        """One issue of the project. A key from another project is refused."""
+        key = key.strip().upper()
+        if not re.fullmatch(rf"{re.escape(self.project.upper())}-\d+", key):
+            raise JiraError(f"{key} is not an issue of the {self.project} project")
+        data = await self._call(
+            "getJiraIssue",
+            {"cloudId": self.config.cloud_id, "issueIdOrKey": key, "fields": ISSUE_FIELDS},
+        )
+        if isinstance(data, dict) and "key" not in data and isinstance(data.get("result"), dict):
+            data = data["result"]
+        issue = self.issue(data)
+        if issue is None:
+            raise JiraError(f"Jira returned no issue for {key}")
+        return issue
+
+    async def _search(self, jql: str, limit: int, fields: list[str]) -> list[JiraIssue]:
+        data = await self._call(
+            "searchJiraIssuesUsingJql",
+            {"cloudId": self.config.cloud_id, "jql": jql, "fields": fields, "maxResults": limit},
+        )
+        issues = (self.issue(raw) for raw in raw_issues(data))
+        return [issue for issue in issues if issue is not None]
+
+    async def _call(self, tool: str, arguments: dict) -> object:
         try:
-            async with Client(self.target) as client:
-                result = await client.call_tool(
-                    "searchJiraIssuesUsingJql",
-                    {
-                        "cloudId": self.config.cloud_id,
-                        "jql": jql,
-                        "fields": ["summary", "status", "assignee"],
-                        "maxResults": limit,
-                    },
-                )
+            return await self.reader.call(tool, arguments)
+        except ToolRefused:
+            raise
+        except McpToolError as e:
+            raise JiraError(str(e)) from e
         except Exception as e:
             raise JiraError(f"Jira MCP call failed: {root_cause(e)}") from e
-        if result.is_error:
-            raise JiraError(text_of(result) or "Jira refused the search")
-        issues = [self.issue(raw) for raw in raw_issues(result)]
-        return [issue for issue in issues if issue is not None][:limit]
 
     def issue(self, raw: object) -> JiraIssue | None:
         if not isinstance(raw, dict) or not isinstance(key := raw.get("key"), str):
@@ -191,26 +233,27 @@ class JiraReader:
         fields = raw.get("fields") if isinstance(raw.get("fields"), dict) else {}
         status = fields.get("status") if isinstance(fields.get("status"), dict) else {}
         category = status.get("statusCategory")
-        if isinstance(category, dict) and category.get("key") == "done":
-            return None
         assignee = fields.get("assignee") if isinstance(fields.get("assignee"), dict) else {}
+        priority = fields.get("priority") if isinstance(fields.get("priority"), dict) else {}
+        description = fields.get("description")
+        if isinstance(description, str) and description.strip():
+            description = description.strip()[:MAX_DESCRIPTION]
+        else:
+            description = None  # Atlassian also sends rich-text documents; only text is kept
         url = f"{self.config.base_url.rstrip('/')}/browse/{key}" if self.config.base_url else None
         return JiraIssue(
             key=key,
             summary=str(fields.get("summary") or "").strip(),
             status=status.get("name"),
             assignee=assignee.get("displayName"),
+            priority=priority.get("name"),
+            description=description,
+            done=isinstance(category, dict) and category.get("key") == "done",
             url=url,
         )
 
 
-def raw_issues(result: CallToolResult) -> list:
-    data = result.structured_content
-    if not isinstance(data, dict):
-        try:
-            data = json.loads(text_of(result))
-        except ValueError:
-            return []
+def raw_issues(data: object) -> list:
     if not isinstance(data, dict):
         return []
     for candidate in (data, data.get("result")):
