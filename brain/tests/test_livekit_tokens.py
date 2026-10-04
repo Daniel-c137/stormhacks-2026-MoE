@@ -57,3 +57,10 @@ def test_token_lives_only_as_long_as_asked():
 
     claims = jwt.decode(token, SECRET, algorithms=["HS256"], options={"verify_aud": False})
     assert claims["exp"] - claims["nbf"] == 600
+
+
+def test_participants_may_set_their_own_attributes_for_a_raised_hand():
+    # The board raises a hand by setting the participant's own LiveKit attributes.
+    c = claims(participant_token(MEETING, ALEX, is_host=False, api_key=KEY, api_secret=SECRET))
+
+    assert c.video.can_update_own_metadata is True

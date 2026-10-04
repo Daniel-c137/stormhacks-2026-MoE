@@ -1,12 +1,15 @@
 import type { ReactNode } from "react";
 import { AppHeader } from "@/components/AppHeader";
+import { AuthGate } from "@/components/AuthProvider";
 
-// Pages with the app header. The meeting room renders full-screen without it.
+// Signed-in pages with the app header. The lobby and meeting room render full-screen without it.
 export default function AppLayout({ children }: { children: ReactNode }) {
   return (
-    <>
-      <AppHeader />
-      <main>{children}</main>
-    </>
+    <AuthGate>
+      <div className="app">
+        <AppHeader />
+        {children}
+      </div>
+    </AuthGate>
   );
 }

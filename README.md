@@ -8,7 +8,7 @@ The product and agent names live in [`contracts/identity.json`](contracts/identi
 
 | Folder | What it is |
 | --- | --- |
-| `board/` | The web app (Next.js). Calls the brain over HTTP at `NEXT_PUBLIC_API_URL` (`/api` in production) and joins LiveKit rooms with tokens the brain issues. Its screens, the login form included, are still being wired to the brain. |
+| `board/` | The web app (Next.js). Calls the brain over HTTP at `NEXT_PUBLIC_API_URL` (`/api` in production) and joins LiveKit rooms with tokens the brain issues. Every screen calls the brain's real routes with the session from `POST /auth/login`. |
 | `brain/` | The API (FastAPI): meetings, asking Polaris, the after-meeting write-up, meeting memory. Stores everything in Postgres with pgvector; reasons with Gemini (OpenRouter as a fallback); reads GitHub and Jira through MCP servers; uses ElevenLabs for voices and the report read aloud. CLI: `brain`. |
 | `realtime/` | The LiveKit agent worker: transcribes each speaker with ElevenLabs, sends final transcript segments and invocations to the brain's `/internal` routes (authenticated with `BRAIN_INTERNAL_TOKEN`), and speaks an answer when a participant chooses Speak. |
 | `world/` | The demo world: mock GitHub and Jira MCP servers over `mock-data/`, with a write journal (overlay) that `world-reset` clears. |
@@ -57,6 +57,8 @@ uv run world-github-mcp                              # mock GitHub MCP, http://l
 uv run world-jira-mcp                                # mock Jira MCP, http://localhost:8102/mcp
 pnpm --filter board dev                              # the board, http://localhost:3000
 ```
+
+With `NEXT_PUBLIC_API_URL=/api` (as in `.env.example`), `next dev` forwards `/api/*` to `BRAIN_URL`, so the board and the brain share an origin locally just as behind Caddy; the brain sends no CORS headers. Meetings need LiveKit: for a local server, `docker run --rm -p 7880:7880 -p 7881:7881 -p 7882:7882/udp livekit/livekit-server --dev --bind 0.0.0.0 --node-ip 127.0.0.1` with `LIVEKIT_URL=ws://localhost:7880`, `LIVEKIT_API_KEY=devkey` and `LIVEKIT_API_SECRET=secret` (`--node-ip` makes it advertise an address the browser can reach from outside the container).
 
 `uv run world-reset` clears the mocks' write journal. The realtime worker needs LiveKit and ElevenLabs credentials: `uv run realtime start` (its room entrypoint is still being built, so it does not join meetings yet).
 

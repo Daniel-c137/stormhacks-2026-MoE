@@ -1,5 +1,9 @@
+"use client";
+
+import { useRouter } from "next/navigation";
 import { TeamSettingsForm } from "@/components/settings/TeamSettingsForm";
 
 export default function SettingsPage() {
-  return <TeamSettingsForm />;
+  const router = useRouter();
+  return <TeamSettingsForm onClose={() => router.push("/")} />;
 }

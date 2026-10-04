@@ -36,7 +36,7 @@ from .api import (
     SegmentsIngest,
 )
 from .chat import ChatMessage
-from .events import TOPIC_PAYLOADS, StagePayload, Topic
+from .events import TOPIC_PAYLOADS, AskSignal, StagePayload, Topic
 from .identity import AGENT_PARTICIPANT_ID, Identity, get_identity
 from .meeting import Meeting, Participant, Person, Team
 from .report import (
@@ -68,6 +68,7 @@ __all__ = [
     "AgentState",
     "Answer",
     "AskRequest",
+    "AskSignal",
     "AskTurn",
     "ChatMessage",
     "CodeSnippet",

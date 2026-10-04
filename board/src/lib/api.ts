@@ -1,13 +1,22 @@
-// Brain HTTP client (NEXT_PUBLIC_API_URL). One function per brain route.
+// Brain HTTP client (NEXT_PUBLIC_API_URL). One function per brain route; every call sends the
+// session from lib/auth.ts. A 401 signs out (the app then goes to the sign-in page).
 import type {
   Agenda,
+  AgendaRewriteRequest,
+  AgendaRewriteResponse,
+  AgendaSuggestions,
+  AgendaUpdate,
   Answer,
   AskRequest,
+  ConnectorStatus,
   CreateMeetingRequest,
   Decision,
+  InviteRequest,
   JoinMeetingResponse,
   Meeting,
+  PasswordChange,
   Person,
+  ProfileUpdate,
   Report,
   ReportProgress,
   TaskDraft,
@@ -18,33 +27,147 @@ import type {
   TranscriptSegment,
   Voice,
 } from "@moe/contracts";
-import { notImplemented } from "./stub";
+import { apiBase, apiUrl } from "./apiUrl";
+import { authHeaders, signOut } from "./auth";
+
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    detail: string,
+    /** Seconds to wait, from Retry-After on a 429. */
+    readonly retryAfter: number | null = null,
+  ) {
+    super(detail);
+    this.name = "ApiError";
+  }
+}
+
+/** "a minute", "3 minutes", "40 seconds". */
+export function waitText(seconds: number): string {
+  if (seconds < 60) return `${seconds} second${seconds === 1 ? "" : "s"}`;
+  const minutes = Math.ceil(seconds / 60);
+  return minutes === 1 ? "a minute" : `${minutes} minutes`;
+}
+
+/** One sentence a person can act on. Says what is missing instead of hiding it. */
+export function describeError(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 401) return "Your session has expired. Sign in again.";
+    if (error.status === 403) return error.message || "You're not a member of this team.";
+    if (error.status === 404) return "Not found.";
+    if (error.status === 429) return error.retryAfter ? `Too many attempts. Try again in ${waitText(error.retryAfter)}.` : error.message;
+    if (error.status === 501) return "This isn't available yet: the server hasn't implemented it.";
+    if (error.status === 503) return `This isn't available right now. ${error.message}`;
+    return error.message;
+  }
+  if (error instanceof TypeError) return `Can't reach the server${apiBase() ? ` at ${apiBase()}` : ""}.`;
+  return error instanceof Error ? error.message : "Something went wrong.";
+}
+
+/** True for a 401 about the session itself (the brain sends WWW-Authenticate: Bearer with it),
+ * as opposed to a wrong current password on POST /auth/password. */
+const sessionRejected = (res: Response) => res.status === 401 && (res.headers.get("WWW-Authenticate") ?? "").startsWith("Bearer");
+
+async function send(method: string, path: string, body?: unknown, accept401 = false): Promise<Response> {
+  const headers: Record<string, string> = { ...authHeaders() };
+  let payload: BodyInit | undefined;
+  if (body instanceof FormData) {
+    payload = body; // the browser sets the multipart boundary
+  } else if (body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    payload = JSON.stringify(body);
+  }
+  const res = await fetch(apiUrl(path), { method, headers, body: payload });
+  if (res.ok) return res;
+  if (res.status === 401 && (!accept401 || sessionRejected(res))) signOut();
+  let detail = res.statusText || `Request failed (${res.status})`;
+  try {
+    const json = await res.json();
+    if (typeof json?.detail === "string") detail = json.detail;
+  } catch {
+    // not JSON; keep the status text
+  }
+  throw new ApiError(res.status, detail, Number(res.headers.get("Retry-After")) || null);
+}
+
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const res = await send(method, path, body);
+  return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
+}
+
+const get = <T>(path: string) => request<T>("GET", path);
+const id = encodeURIComponent;
+const query = (params: Record<string, string | boolean | undefined>) => {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== "") search.set(key, String(value));
+  const text = search.toString();
+  return text ? `?${text}` : "";
+};
+
+// auth (sign-in itself is lib/auth.ts)
+/** 401 here means the current password is wrong and does not sign out; 204 on success. */
+export const changePassword = async (body: PasswordChange): Promise<void> => {
+  await send("POST", "/auth/password", body, true);
+};
 
 // meetings
-export const createMeeting = async (body: CreateMeetingRequest): Promise<Meeting> => notImplemented("createMeeting");
-export const listMeetings = async (): Promise<Meeting[]> => notImplemented("listMeetings");
-export const getMeeting = async (meetingId: string): Promise<Meeting> => notImplemented("getMeeting");
-export const joinMeeting = async (code: string): Promise<JoinMeetingResponse> => notImplemented("joinMeeting");
-export const endMeeting = async (meetingId: string): Promise<Meeting> => notImplemented("endMeeting");
-export const askInMeeting = async (meetingId: string, body: AskRequest): Promise<Answer> => notImplemented("askInMeeting");
-export const getAgenda = async (meetingId: string): Promise<Agenda> => notImplemented("getAgenda");
-export const generateAgenda = async (meetingId: string): Promise<Agenda> => notImplemented("generateAgenda");
+export const createMeeting = (body: CreateMeetingRequest) => request<Meeting>("POST", "/meetings", body);
+export const listMeetings = () => get<Meeting[]>("/meetings");
+export const getMeeting = (meetingId: string) => get<Meeting>(`/meetings/${id(meetingId)}`);
+export const joinMeeting = (code: string) => request<JoinMeetingResponse>("POST", `/meetings/join/${id(code)}`);
+export const endMeeting = (meetingId: string) => request<Meeting>("POST", `/meetings/${id(meetingId)}/end`);
+export const invite = (meetingId: string, body: InviteRequest) =>
+  request<Meeting>("POST", `/meetings/${id(meetingId)}/invitees`, body);
+export const uninvite = (meetingId: string, personId: string) =>
+  request<Meeting>("DELETE", `/meetings/${id(meetingId)}/invitees/${id(personId)}`);
+export const askInMeeting = (meetingId: string, body: AskRequest) =>
+  request<Answer>("POST", `/meetings/${id(meetingId)}/ask`, body);
+
+// agenda
+export const getAgenda = (meetingId: string) => get<Agenda>(`/meetings/${id(meetingId)}/agenda`);
+export const updateAgenda = (meetingId: string, body: AgendaUpdate) =>
+  request<Agenda>("PUT", `/meetings/${id(meetingId)}/agenda`, body);
+export const rewriteAgendaItem = (body: AgendaRewriteRequest) => request<AgendaRewriteResponse>("POST", "/agenda/rewrite", body);
+export const suggestAgenda = (meetingId: string) =>
+  request<AgendaSuggestions>("POST", `/meetings/${id(meetingId)}/agenda/suggest`);
 
 // history
-export const getTranscript = async (meetingId: string): Promise<TranscriptSegment[]> => notImplemented("getTranscript");
-export const getReport = async (meetingId: string): Promise<Report> => notImplemented("getReport");
-export const getReportProgress = async (meetingId: string): Promise<ReportProgress> => notImplemented("getReportProgress");
-/** The summary read aloud as MP3 (GET /meetings/{id}/report/audio); 503 when ElevenLabs is not configured. */
-export const getReportAudio = async (meetingId: string): Promise<Blob> => notImplemented("getReportAudio");
-export const updateTask = async (meetingId: string, task: TaskDraft): Promise<TaskDraft> => notImplemented("updateTask");
-export const pushTasks = async (meetingId: string, body: TaskPushRequest): Promise<TaskPushResult[]> => notImplemented("pushTasks");
-export const listDecisions = async (q?: string): Promise<Decision[]> => notImplemented("listDecisions");
-export const listTasks = async (ownerId?: string): Promise<TaskDraft[]> => notImplemented("listTasks");
-export const askHistory = async (body: AskRequest): Promise<Answer> => notImplemented("askHistory");
+export const getTranscript = (meetingId: string) => get<TranscriptSegment[]>(`/meetings/${id(meetingId)}/transcript`);
+export const getReport = (meetingId: string) => get<Report>(`/meetings/${id(meetingId)}/report`);
+export const getReportProgress = (meetingId: string) =>
+  get<ReportProgress>(`/meetings/${id(meetingId)}/report/progress`);
+/** Host only, when the write-up stopped or stalled; starts it over. */
+export const retryReport = (meetingId: string) =>
+  request<ReportProgress>("POST", `/meetings/${id(meetingId)}/report/retry`);
+/** The summary read aloud as MP3; 503 when ElevenLabs is not configured. */
+export const getReportAudio = async (meetingId: string): Promise<Blob> =>
+  (await send("GET", `/meetings/${id(meetingId)}/report/audio`)).blob();
+export const updateTask = (meetingId: string, task: TaskDraft) =>
+  request<TaskDraft>("PATCH", `/meetings/${id(meetingId)}/tasks/${id(task.id)}`, task);
+export const pushTasks = (meetingId: string, body: TaskPushRequest) =>
+  request<TaskPushResult[]>("POST", `/meetings/${id(meetingId)}/tasks/push`, body);
+export const listDecisions = (q?: string) => get<Decision[]>(`/decisions${query({ q })}`);
+export const listTasks = (ownerId?: string, open?: boolean) =>
+  get<TaskDraft[]>(`/tasks${query({ owner_id: ownerId, open: open || undefined })}`);
+export const askHistory = (body: AskRequest) => request<Answer>("POST", "/ask", body);
+
+// profile
+export const getMe = () => get<Person>("/me");
+export const updateMe = (body: ProfileUpdate) => request<Person>("PATCH", "/me", body);
+/** JPG or PNG, at most 2 MB. */
+export const uploadPhoto = (photo: Blob, filename = "photo.jpg") => {
+  const form = new FormData();
+  form.append("file", photo, filename);
+  return request<Person>("POST", "/me/photo", form);
+};
+export const deletePhoto = () => request<Person>("DELETE", "/me/photo");
+/** A teammate's photo; `photoUrl` is Person.photo_url, a path on the brain. */
+export const getPhoto = async (photoUrl: string): Promise<Blob> => (await send("GET", photoUrl)).blob();
 
 // team
-export const getTeam = async (): Promise<Team> => notImplemented("getTeam");
-export const listMembers = async (): Promise<Person[]> => notImplemented("listMembers");
-export const getSettings = async (): Promise<TeamSettings> => notImplemented("getSettings");
-export const updateSettings = async (body: TeamSettings): Promise<TeamSettings> => notImplemented("updateSettings");
-export const listVoices = async (): Promise<Voice[]> => notImplemented("listVoices");
+export const getTeam = () => get<Team>("/team");
+export const listMembers = () => get<Person[]>("/team/members");
+export const getSettings = () => get<TeamSettings>("/settings");
+export const updateSettings = (body: TeamSettings) => request<TeamSettings>("PUT", "/settings", body);
+export const listConnectors = () => get<ConnectorStatus[]>("/settings/connectors");
+export const listVoices = () => get<Voice[]>("/voices");
