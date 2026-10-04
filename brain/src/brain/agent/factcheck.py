@@ -34,10 +34,9 @@ from brain.github import GitHubReader
 from brain.jira import root_cause
 from brain.llm import LLM
 from brain.memory import MeetingMemory
-from brain.report.extraction import clock
+from brain.report.extraction import by_agent, clock
 from brain.store import Conflict, FactCheckState, Store
 from contracts import (
-    AGENT_PARTICIPANT_ID,
     AgentState,
     CodeSnippet,
     FactCheck,
@@ -131,11 +130,7 @@ def claim_candidates(
     segments: Iterable[TranscriptSegment], sensitivity: Sensitivity
 ) -> list[TranscriptSegment]:
     """People's final segments that pass the filter, in order. The agent's own words never do."""
-    return [
-        s
-        for s in segments
-        if s.is_final and s.speaker_id != AGENT_PARTICIPANT_ID and is_claim(s.text, sensitivity)
-    ]
+    return [s for s in segments if s.is_final and not by_agent(s) and is_claim(s.text, sensitivity)]
 
 
 # what the model is asked for

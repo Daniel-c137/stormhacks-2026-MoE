@@ -127,8 +127,13 @@ def agenda_lines(agenda: Sequence[AgendaItem]) -> list[str]:
     ]
 
 
+def by_agent(segment: TranscriptSegment) -> bool:
+    """Whether the agent spoke this segment. Its own words are never a claim or a source."""
+    return segment.speaker_id == AGENT_PARTICIPANT_ID
+
+
 def speaker(segment: TranscriptSegment, agent: str) -> str:
-    return agent if segment.speaker_id == AGENT_PARTICIPANT_ID else segment.speaker_name
+    return agent if by_agent(segment) else segment.speaker_name
 
 
 def clock(t: float) -> str:

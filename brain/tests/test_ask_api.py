@@ -7,10 +7,10 @@ from types import SimpleNamespace
 
 import pytest
 from api_support import ALEX, OUTSIDER, SARAH, TEAM, WORKER_TOKEN, create, speakers_join
-from ask_support import citing, scripted
+from ask_support import citing, evidence, scripted
 from fastapi.testclient import TestClient
 
-from brain.agent.ask import PlannedCall
+from brain.agent.ask import FROM_CONVERSATION, UNVERIFIED, DraftAnswer, PlannedCall
 from brain.agent.team_tools import TeamToolbox
 from brain.api.deps import get_llm, get_memory, get_settings
 from brain.config import Settings
@@ -18,7 +18,7 @@ from brain.llm import MockEmbedder
 from brain.memory import InMemoryMemoryStore, MeetingMemory, UnusableMemory
 from brain.report import TranscriptInput
 from brain.store import InMemoryStore
-from contracts import Answer, InvokeResponse, Source
+from contracts import AGENT_PARTICIPANT_ID, Answer, InvokeResponse, Source, get_identity
 
 FIXTURES = Path(__file__).parent / "fixtures"
 STANDUP = TranscriptInput.model_validate_json((FIXTURES / "standup.json").read_text())
@@ -195,6 +195,55 @@ def test_ask_in_a_meeting_sees_its_recent_transcript(client_as, worker, store, m
     assert "Marketing wants the waitlist email out on Friday." in llm.calls[0].prompt
 
 
+def test_an_answer_citing_only_the_agents_own_words_is_unverified(app, client_as, worker, store):
+    meeting = create(client_as(ALEX), "Friday standup")
+    asked, stale = (
+        {
+            "seg_id": seg_id,
+            "meeting_id": meeting["id"],
+            "speaker_id": speaker_id,
+            "speaker_name": name,
+            "text": text,
+            "is_final": True,
+            "t_start": t,
+            "t_end": t + 3,
+        }
+        for seg_id, speaker_id, name, text, t in (
+            ("live-20", SARAH.id, SARAH.name, "Is DS-104 done yet?", 20),
+            (
+                "live-32",
+                AGENT_PARTICIPANT_ID,
+                get_identity().agent_name,
+                "DS-104 is still In Progress in Jira, though the fix is merged.",
+                32,
+            ),
+        )
+    )
+    asyncio.run(speakers_join(worker.app, meeting["id"], [asked, stale]))
+    assert (
+        worker.post(
+            f"/internal/meetings/{meeting['id']}/segments", json={"segments": [asked, stale]}
+        )
+    ).status_code == 204
+
+    def citing_the_agents_line(prompt: str) -> DraftAnswer:
+        ids = [i for i, line in evidence(prompt).items() if "In Progress" in line]
+        return DraftAnswer(text="DS-104 is still In Progress in Jira.", evidence_ids=ids)
+
+    llm = scripted(answer=citing_the_agents_line)
+    app.dependency_overrides[get_llm] = lambda: llm
+
+    response = client_as(SARAH).post(
+        f"/meetings/{meeting['id']}/ask",
+        json={"question": "Is DS-104 done in Jira yet?", "visibility": "private"},
+    )
+
+    assert response.status_code == 200, response.text
+    answer = Answer.model_validate(response.json())
+    assert answer.text == UNVERIFIED
+    assert answer.sources == []
+
+
 def test_ask_in_another_teams_meeting_is_not_found(client_as, memory, llm):
     meeting = create(client_as(ALEX))
 
@@ -258,6 +307,37 @@ def test_home_ask_answers_across_the_team_with_follow_up_history(client_as, stor
     for call in llm.calls:
         assert "Who found the email exploit?" in call.prompt
         assert "Carol, at the Friday standup." in call.prompt
+
+
+def test_a_home_follow_up_answered_from_the_conversation_is_labelled(app, client_as, store):
+    draft = (
+        "Alice Moreau proposed that decision during the Friday standup. This was stated in the "
+        "earlier conversation."
+    )
+    llm = scripted(answer=DraftAnswer(text=draft, evidence_ids=[], from_conversation=True))
+    app.dependency_overrides[get_llm] = lambda: llm
+
+    response = client_as(ALEX).post(
+        "/ask",
+        json={
+            "question": "Who said that?",
+            "visibility": "private",
+            "history": [
+                {"role": "user", "text": "What did we decide about the waitlist email, and when?"},
+                {
+                    "role": "agent",
+                    "text": "During the Friday standup on 2026-10-04, the team decided to hold "
+                    "the waitlist email until v0.9.4 is out. Alice Moreau proposed this decision "
+                    "during the meeting.",
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    answer = Answer.model_validate(response.json())
+    assert answer.text == f"{draft}\n\n{FROM_CONVERSATION}"
+    assert answer.sources == []
 
 
 def test_home_ask_never_reaches_another_teams_memory(client_as, store, memory, llm):
