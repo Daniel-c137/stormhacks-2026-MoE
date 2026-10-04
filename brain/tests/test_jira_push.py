@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 from conftest import FakeJira
@@ -275,3 +275,17 @@ def test_account_ids_accepts_the_shapes_jira_might_answer_with():
     assert account_ids(tool_result(text='[{"accountId": "a1"}, {"accountId": "a1"}]')) == ["a1"]
     assert account_ids(tool_result(text="No users found")) == []
     assert account_ids(tool_result({"users": [{"displayName": "no id"}]})) == []
+
+
+@pytest.mark.parametrize(
+    ("zone", "day"), [("America/Vancouver", "2026-10-03"), ("UTC", "2026-10-04")]
+)
+async def test_the_issue_dates_the_meeting_by_the_teams_day(fake_jira, zone, day):
+    # 01:30 UTC on 4 October is the evening of 3 October in Vancouver.
+    started = datetime(2026, 10, 4, 1, 30, tzinfo=UTC)
+    meeting = review(draft(1)).model_copy(update={"started_at": started, "timezone": zone})
+
+    await push(fake_jira, meeting, approve(draft(1).id))
+
+    [created] = fake_jira.created
+    assert f'"Friday standup" ({day}) at 00:06' in created["description"]

@@ -595,3 +595,25 @@ def test_a_failing_model_while_suggesting_is_reported(app, client_as, store):
     use_llm(app, MockLLM())
 
     assert suggest(alex, meeting["id"]).status_code == 502
+
+
+@pytest.mark.parametrize(
+    ("zone", "today"), [("America/Vancouver", "2026-10-03"), ("UTC", "2026-10-04")]
+)
+def test_suggestions_are_asked_for_on_the_teams_today(
+    app, client_as, store, monkeypatch, zone, today
+):
+    # 02:00 UTC on 4 October is the evening of 3 October in Vancouver.
+    monkeypatch.setattr("brain.zones.now", lambda: datetime(2026, 10, 4, 2, tzinfo=UTC))
+    alex = client_as(ALEX)
+    team_settings = alex.get("/settings").json() | {"timezone": zone}
+    assert alex.put("/settings", json=team_settings).status_code == 200
+    earlier_meeting(alex, store)
+    meeting = create(alex, "Next sync")
+    llm = MockLLM(structured={AgendaSuggestionDraft: AgendaSuggestionDraft(items=[])})
+    use_llm(app, llm)
+
+    assert suggest(alex, meeting["id"]).status_code == 200
+
+    [call] = llm.calls
+    assert f"Today: {today}" in call.prompt
